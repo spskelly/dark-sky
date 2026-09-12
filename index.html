@@ -1238,8 +1238,8 @@ function focusSpot(name) {
 // hotlink: lightpollutionmap.info's own tiles need an api key. if the layer
 // stops drawing, this url is the line to change — he publishes a new atlas
 // every few years under a new folder (lp2020, lp2022, …).
-const LP_TILES = 'https://djlorenz.github.io/astronomy/lp2022/overlay/tiles/tile_{z}_{x}_{y}.png';
-const LP_ATTR = 'sky glow &copy; <a href="https://djlorenz.github.io/astronomy/lp2022/" target="_blank" rel="noopener">D. Lorenz</a>, world atlas / VIIRS';
+const LP_TILES = 'https://djlorenz.github.io/astronomy/image_tiles/tiles2025/tile_{z}_{x}_{y}.png';
+const LP_ATTR = 'sky glow &copy; <a href="https://djlorenz.github.io/astronomy/image_tiles/" target="_blank" rel="noopener">D. Lorenz</a>, world atlas / VIIRS';
 const LP_KEY = 'darksky.lightpollution';
 
 function initLightPollution(map) {
@@ -1252,7 +1252,7 @@ function initLightPollution(map) {
     opacity: 0.5,
     // the data is coarse, so past its own zoom the tiles are stretched rather
     // than requested and 404ing
-    maxNativeZoom: 8, maxZoom: 17,
+    maxNativeZoom: 6, maxZoom: 17,
     // the layer control auto-numbers the base layers from 1; this has to sit
     // above them
     zIndex: 10,
