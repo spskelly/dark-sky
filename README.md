@@ -23,10 +23,17 @@ will be clear, and where to drive.
   tonight, sunset to sunrise, from [Open-Meteo](https://open-meteo.com/)
   (no API key). Each night in the calendar also carries its mean 9pm–3am
   cloud cover.
-- **20 dark-sky spots.** Overlooks, balds and campgrounds within a few hours
-  of Waynesville, on a topo map, ranked by drive time or straight-line
-  distance from a home point you can set. Each links to its Clear Outside
+- **40 dark-sky spots.** Overlooks, balds and campgrounds across western
+  North Carolina, from the Cherohala Skyway to Doughton Park, on a topo map.
+  Set a home point — a town from the list, a click on the map, or your own
+  location — and everything reorders around it, ranked by estimated drive
+  time or straight-line distance. Each spot links to its Clear Outside
   forecast, light-pollution map and driving directions.
+
+  Drive time is estimated rather than routed: each spot carries the minutes
+  of slow going once you are off the highway (gravel, the parkway detour,
+  the walk in from the lot), and the rest scales with distance from wherever
+  home is. That makes it a property of the spot rather than of any one town.
 
 ## Running it
 
