@@ -103,7 +103,10 @@ const block = `${START}\nconst PARKWAY = [\n${body}\n];\n${END}`;
 const html = fs.readFileSync(FILE, 'utf8');
 const from = html.indexOf(START), to = html.indexOf(END);
 if (from < 0 || to < 0) throw new Error('markers missing from index.html');
-const next = html.slice(0, from) + block + html.slice(to + END.length);
+// a windows checkout with core.autocrlf on holds the file as crlf; writing an
+// lf-only block into it would leave the page mixed and the diff noisy
+const eol = html.includes('\r\n') ? '\r\n' : '\n';
+const next = html.slice(0, from) + block.split('\n').join(eol) + html.slice(to + END.length);
 
 console.log(`${ways.length} ways, ${rawPoints} points → ${segments.length} segments, ${kept} points`);
 console.log(`${(Buffer.byteLength(block) / 1024).toFixed(1)} kB of index.html`);
