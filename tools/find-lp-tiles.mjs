@@ -11,6 +11,7 @@
 //   node tools/find-lp-tiles.mjs                     # look, report, change nothing
 //   node tools/find-lp-tiles.mjs --fix               # ... and write the winner in
 //   node tools/find-lp-tiles.mjs --url '<tpl>' --fix # skip the search, use this one
+//   node tools/find-lp-tiles.mjs --year 2022        # pin an atlas year, newest wins by default
 //
 // three passes, cheapest and most certain first.
 //
@@ -64,6 +65,7 @@ const NAMES = [
 const argv = process.argv.slice(2);
 const flag = n => argv.includes(n);
 const opt = n => { const i = argv.indexOf(n); return i < 0 ? null : argv[i + 1]; };
+const WANT_YEAR = +(opt('--year') || 0);
 
 // --- tiles ------------------------------------------------------------------
 function tile(lat, lon, z) {
@@ -119,6 +121,33 @@ async function ls(p) {
   return Array.isArray(j) ? j : null;
 }
 
+// which folder to open first. the site keeps several atlases side by side and
+// the same tiles twice — once as images, once as packed binary for its own
+// viewer — so walking in alphabetical order lands on nine-year-old sky glow
+// inside a folder that is not even images. newest first, images before
+// binaries, anything named for tiles before anything not.
+const yearOf = n => +((n.match(/(?:19|20)\d{2}/) || [0])[0]);
+function rank(name) {
+  return [
+    /tile/i.test(name) ? 0 : 1,
+    /binary/i.test(name) ? 1 : 0,
+    -yearOf(name),
+    name,
+  ];
+}
+const byPreference = (a, b) => {
+  const x = rank(a.name), y = rank(b.name);
+  for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1;
+  return 0;
+};
+
+// a numbered folder is a zoom level — start low, there are fewer tiles — but
+// the same site numbers folders by year, and there the newest is the one worth
+// having. the range tells them apart.
+const isYear = n => +n >= 1900 && +n <= 2100;
+const byNumber = (a, b) =>
+  isYear(a.name) && isYear(b.name) ? +b.name - +a.name : +a.name - +b.name;
+
 const TILEISH = /\d+\D+\d+\D+\d+\.(?:png|jpe?g|webp)$/i;
 const NUMERIC = /^\d+$/;
 
@@ -138,7 +167,7 @@ async function findSample(dir, depth = 0) {
   if (hit) return { dir, name: hit.name };
 
   // a numbered folder is a zoom level; a lone image under one is the tile
-  const numeric = dirs.filter(d => NUMERIC.test(d.name));
+  const numeric = dirs.filter(d => NUMERIC.test(d.name)).sort(byNumber);
   for (const d of numeric.slice(0, 2)) {
     const deeper = await findSample(`${dir}/${d.name}`, depth + 1);
     if (deeper) return deeper;
@@ -147,7 +176,10 @@ async function findSample(dir, depth = 0) {
     const img = inner && inner.find(e => e.type === 'file' && /\.(png|jpe?g|webp)$/i.test(e.name));
     if (img) return { dir: `${dir}/${d.name}`, name: img.name };
   }
-  for (const d of dirs.filter(d => !NUMERIC.test(d.name)).slice(0, 4)) {
+  const named = dirs.filter(d => !NUMERIC.test(d.name)).sort(byPreference);
+  const years = [...new Set(named.map(d => yearOf(d.name)).filter(Boolean))].sort((a, b) => b - a);
+  if (years.length > 1) console.log(`    years here: ${years.join(', ')} — taking ${years[0]}`);
+  for (const d of (WANT_YEAR ? named.filter(d => yearOf(d.name) === WANT_YEAR || !yearOf(d.name)) : named).slice(0, 4)) {
     const deeper = await findSample(`${dir}/${d.name}`, depth + 1);
     if (deeper) return deeper;
   }
