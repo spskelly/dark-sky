@@ -107,12 +107,21 @@ node tools/find-lp-tiles.mjs           # search, report, change nothing
 node tools/find-lp-tiles.mjs --fix     # ... and write the winner into index.html
 ```
 
-It reads the overlay's own page and scripts first and prints the code that
-builds their tile URLs, which is the answer rather than a guess at it; only if
-that finds nothing does it try the shapes such tile sets usually take, against a
-tile over Asheville that is certain to have data in it. It then sweeps the zooms
-to find how deep the set goes, so `maxNativeZoom` matches — get that wrong and
-the layer looks broken at exactly the zoom you'd use to pick a spot.
+It works from most certain to least. A GitHub Pages site is served straight
+out of a public repo, so the first pass *reads* the file layout through the
+contents API rather than guessing at it — one real tile filename is enough.
+Failing that it reads the site's own pages, printing the small ones whole,
+because a 300-byte page is a signpost rather than content; it follows meta
+refreshes, frames and links, and turns any `getTileUrl` it finds into a
+template. Only then does it try the shapes such tile sets usually take.
+
+A filename says which numbers are in it, not which is z, which is x and which
+is y, so the last step is always the same: put them in every way round and let
+the network decide. Nothing is believed until it returns real images at three
+zooms over two places far apart, which is what rules out x and y being right
+the wrong way round. It also reports how deep the set goes, so `maxNativeZoom`
+matches — get that wrong and the layer looks broken at exactly the zoom you'd
+use to pick a spot.
 
 If both passes come up empty, open the overlay in a browser, take one working
 tile URL out of the network tab, and hand it over with the numbers replaced:
