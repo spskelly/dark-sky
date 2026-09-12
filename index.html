@@ -3,22 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>dark sky calendar</title>
-<meta name="description" content="Moon-phase calendar and hourly sky forecast for planning stargazing nights in the North Carolina mountains, with a map of 20 dark-sky spots near the Blue Ridge Parkway.">
+<title>dark sky calendar — plan a stargazing night in western NC</title>
+<meta name="description" content="Plan a stargazing night in the North Carolina mountains: when the moon is out of the way, whether the sky will be clear, and 40 dark-sky spots across western NC ranked by drive time from home.">
 <link rel="canonical" href="https://spskelly.github.io/dark-sky/">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#0f1a34">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://spskelly.github.io/dark-sky/">
-<meta property="og:title" content="dark sky calendar">
-<meta property="og:description" content="Every new-moon window for the next twelve months, tonight's cloud cover hour by hour, and 20 dark places to point a lens from.">
+<meta property="og:title" content="dark sky calendar — stargazing nights in western North Carolina">
+<meta property="og:description" content="Plan a stargazing night in the North Carolina mountains — when the moon is out of the way, whether the sky will be clear, and forty dark places to drive to.">
 <meta property="og:image" content="https://spskelly.github.io/dark-sky/og.png?v=20260912">
-<meta property="og:image:alt" content="A crescent moon beside the words dark sky calendar.">
+<meta property="og:image:alt" content="A crescent moon beside the words dark sky calendar, stargazing nights in the carolina mountains, and tonight's moon phase.">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="dark sky calendar">
-<meta name="twitter:description" content="Every new-moon window for the next twelve months, tonight's cloud cover hour by hour, and 20 dark places to point a lens from.">
+<meta name="twitter:title" content="dark sky calendar — stargazing nights in western North Carolina">
+<meta name="twitter:description" content="Plan a stargazing night in the North Carolina mountains — when the moon is out of the way, whether the sky will be clear, and forty dark places to drive to.">
 <meta name="twitter:image" content="https://spskelly.github.io/dark-sky/og.png?v=20260912">
 <link rel="icon" id="favicon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='13' fill='%230f1a34'/%3E%3Ccircle cx='34' cy='32' r='20' fill='%23ece7d4'/%3E%3Ccircle cx='22' cy='27' r='18' fill='%230f1a34'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -55,14 +55,56 @@
   button:disabled { opacity: 0.45; cursor: not-allowed; }
   button[aria-pressed="true"] { background: var(--night-3); border-color: var(--ink-dim); }
 
-  /* top: hero moon + current status, then controls */
-  .hero { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 28px; align-items: center; max-width: 1100px; margin: 0 auto 36px; }
+  /* masthead: the page used to open straight onto a moon drawing and an
+     adjective, so a first-time visitor never learnt its name or that all of
+     this is western north carolina. say both before anything else. */
+  .masthead { max-width: 1100px; margin: 0 auto 24px; display: flex; align-items: baseline; gap: 4px 14px; flex-wrap: wrap; }
+  .masthead .mark { align-self: center; display: inline-flex; }
+  .masthead .mark svg { width: 21px; height: 21px; display: block; }
+  .masthead .wordmark { font-family: var(--serif); font-weight: 400; font-size: 19px; color: var(--moon); }
+  .masthead .scope { font-size: 13px; color: var(--ink-dim); border-left: 1px solid var(--line); padding-left: 14px; }
+
+  /* top: hero moon + what the page is for, then tonight's state, then controls */
+  .hero { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 28px; align-items: center; max-width: 1100px; margin: 0 auto 30px; }
   .hero > * { min-width: 0; }
-  .hero svg { width: clamp(120px, 18vw, 180px); height: auto; filter: drop-shadow(0 0 28px rgba(236,231,212,0.18)); }
-  .hero h1 { font-family: var(--serif); font-weight: 300; font-size: clamp(30px, 4.5vw, 50px); line-height: 1.05; margin: 0 0 10px; letter-spacing: -0.01em; }
+  /* reserve the moon's square: the svg is injected on render, and without this
+     the headline jumps sideways once it lands */
+  #hero-moon { width: clamp(110px, 17vw, 172px); aspect-ratio: 1 / 1; margin-inline: auto; }
+  .hero svg { width: 100%; height: auto; filter: drop-shadow(0 0 28px rgba(236,231,212,0.18)); }
+  /* the headline is static markup now, so the purpose paints before the
+     script runs rather than after it */
+  .hero h1 { font-family: var(--serif); font-weight: 300; font-size: clamp(28px, 4.2vw, 46px); line-height: 1.06; margin: 0 0 12px; letter-spacing: -0.01em; }
   .hero h1 em { font-style: italic; color: var(--moon); }
   .hero p { margin: 0; max-width: 62ch; color: var(--ink-dim); line-height: 1.5; }
-  .hero .next-window { margin-top: 12px; color: var(--dark-sky); }
+  .hero .hero-lede { color: var(--ink); font-size: clamp(15px, 1.4vw, 17px); max-width: 58ch; }
+  /* tonight's phase belongs next to the drawing it describes, not in the
+     headline, so it reads as a caption rather than as the point of the page */
+  .hero .tonight-now { margin-top: 16px; font-size: 14px; line-height: 1.5; color: var(--ink-dim); }
+  .hero .tonight-now .eyebrow { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--moon-dim); margin-right: 9px; }
+  .hero .tonight-now #hero-sub { display: block; }
+  .hero .tonight-now .phase { color: var(--moon); }
+  .hero .tonight-now .phase em { font-style: italic; }
+  /* the next dark-sky window is the answer the whole page exists to give:
+     a badge, not one more line of grey prose */
+  .hero .next-window { display: inline-block; margin-top: 12px; color: var(--dark-sky); background: var(--dark-sky-wash); border: 1px solid rgba(95, 194, 173, 0.38); border-radius: 999px; padding: 7px 16px; font-size: 15px; }
+
+  /* the phase caption and the window badge are script-filled: hidden until they
+     have something to say, so the first paint and the no-script case don't show
+     a bare "tonight" label and an empty teal pill */
+  .hero .tonight-now[hidden], .hero .next-window[hidden] { display: none; }
+
+  /* the three questions the page answers, as jump links. the calendar filled
+     the fold on its own, so the forecast and the map were invisible until you
+     scrolled blind past it. */
+  .guide { max-width: 1100px; margin: 0 auto 34px; display: grid; grid-template-columns: repeat(auto-fit, minmax(232px, 1fr)); gap: 10px; }
+  .guide a { display: block; text-decoration: none; background: var(--night-2); border: 1px solid transparent; border-radius: 12px; padding: 13px 16px; }
+  .guide a:hover { border-color: var(--line); }
+  .guide b { display: block; font-family: var(--serif); font-weight: 400; font-size: 18px; color: var(--moon); margin-bottom: 4px; }
+  .guide b::after { content: " \2192"; color: var(--ink-dim); }
+  .guide span { display: block; font-size: 13px; color: var(--ink-dim); line-height: 1.45; }
+
+  /* jump links land a heading just under the top edge, not flush against it */
+  .windows, .spots, #tonight { scroll-margin-top: 22px; }
   /* hourly sky row: one icon per hour, weather-app style */
   .tonight { margin-top: 18px; max-width: 640px; width: 100%; }
   /* stacked, not space-between: both labels are long enough to wrap into
@@ -235,6 +277,14 @@
 
   @media (max-width: 720px) {
     .hero { grid-template-columns: minmax(0, 1fr); text-align: center; justify-items: stretch; }
+    .hero .hero-lede, .hero p { margin-inline: auto; }
+    .hero .tonight-now { text-align: center; }
+    .masthead { justify-content: center; }
+    .masthead .scope { border-left: 0; padding-left: 0; }
+    .guide { gap: 8px; margin-bottom: 28px; }
+    .guide a { padding: 10px 14px; }
+    .guide b { font-size: 17px; margin-bottom: 2px; }
+    .guide span { font-size: 12.5px; line-height: 1.4; }
     .day { min-height: 70px; padding: 5px 4px; }
     .day .icon svg { width: 24px; height: 24px; }
     .day .label { font-size: 10px; }
@@ -248,15 +298,34 @@
 </head>
 <body>
 
-<section class="hero" aria-label="tonight">
+<header class="masthead">
+  <span class="mark" aria-hidden="true">
+    <svg viewBox="0 0 64 64"><circle cx="34" cy="32" r="20" fill="#ece7d4"/><circle cx="22" cy="27" r="18" fill="#0f1a34"/></svg>
+  </span>
+  <span class="wordmark">dark sky calendar</span>
+  <span class="scope">western north carolina</span>
+</header>
+
+<section class="hero" aria-labelledby="hero-title">
   <div id="hero-moon"></div>
   <div>
-    <h1 id="hero-title"></h1>
-    <p id="hero-sub"></p>
-    <p class="next-window" id="hero-next"></p>
+    <h1 id="hero-title">plan a stargazing night in the <em>carolina mountains</em></h1>
+    <p class="hero-lede">when the moon is out of the way, whether the sky will be clear, and where to drive &mdash; forty dark overlooks, balds and campgrounds across western north carolina.</p>
+    <p class="tonight-now" hidden>
+      <span class="eyebrow">tonight</span>
+      <span class="phase" id="hero-phase"></span>
+      <span id="hero-sub"></span>
+    </p>
+    <p class="next-window" id="hero-next" hidden></p>
     <div class="tonight" id="tonight" aria-live="polite"></div>
   </div>
 </section>
+
+<nav class="guide" aria-label="what this page answers">
+  <a href="#when"><b>when is it dark?</b><span>every new-moon window for the next twelve months, with the weekend nights called out</span></a>
+  <a href="#tonight"><b>will it be clear?</b><span>tonight's cloud cover, temperature and dew point hour by hour, sunset to sunrise</span></a>
+  <a href="#where"><b>where do i go?</b><span>forty dark-sky spots on a map, ranked by drive time from wherever home is</span></a>
+</nav>
 
 <div class="controls">
   <div class="month-nav">
@@ -282,13 +351,13 @@
 
 <div class="cal" id="cal" role="grid"></div>
 
-<section class="windows">
+<section class="windows" id="when">
   <h3>upcoming dark-sky windows</h3>
   <p class="lede">every new moon for the next twelve months, with the days on either side that make up the window. click one to jump the calendar there.</p>
   <ol id="windows"></ol>
 </section>
 
-<section class="spots">
+<section class="spots" id="where">
   <h3>where to look up</h3>
   <p class="lede">forty high, open, dark places across western north carolina, from the cherohala skyway to doughton park. teal pins allow overnight camping, ivory pins are drive-up or short-hike viewing only, gold pins have a catch, and <a href="#check-before-you-go">all of it needs checking before you drive</a>. set your home town and everything below reorders around it. drive times are estimates from that point, not routing, and assume the parkway is open.</p>
   <div class="spot-controls">
@@ -660,21 +729,27 @@ function renderHero() {
   const p = lunationFraction(now);
   const illum = Math.round((1 - Math.cos(2 * Math.PI * p)) / 2 * 100);
   document.getElementById('hero-moon').innerHTML = moonSvg(p, 180, state.hemi);
-  document.getElementById('hero-title').innerHTML = `tonight the moon is <em>${phaseWord(p)}</em>`;
   const upcoming = phasesBetween(now, addDays(now, 40));
   const nextNew = upcoming.find(e => e.phase === 0);
   const nextFull = upcoming.find(e => e.phase === 0.5);
+  // the headline is static copy about what the page is for, so tonight's phase
+  // is a caption on the drawing instead. new moon leads: it is the one a
+  // stargazer is counting down to.
+  document.getElementById('hero-phase').innerHTML = `<em>${phaseWord(p)}</em>, ${illum}% lit`;
   document.getElementById('hero-sub').textContent =
-    `${illum}% lit. next full moon ${fmtDay(nextFull.date)}, next new moon ${fmtDay(nextNew.date)}.`;
+    `next new moon ${fmtDay(nextNew.date)} \u00b7 full ${fmtDay(nextFull.date)}`;
+  document.querySelector('.hero .tonight-now').hidden = false;
   const half = Math.floor(state.win / 2);
   // the relevant new moon is the most recent one if we're still inside its window, else the next
   const recent = phasesBetween(addDays(now, -(half + 1)), now).filter(e => e.phase === 0).pop();
   const anchor = recent && now < addDays(addDays(recent.date, half), 1) ? recent : nextNew;
   const ws = addDays(anchor.date, -half), we = addDays(anchor.date, half);
   const inWindow = now >= new Date(ws.getFullYear(), ws.getMonth(), ws.getDate()) && now < addDays(we, 1);
-  document.getElementById('hero-next').textContent = inWindow
-    ? `you are inside a dark-sky window right now, through ${fmtDay(we)}.`
-    : `next dark-sky window: ${fmtDay(ws)} through ${fmtDay(we)}.`;
+  const nextEl = document.getElementById('hero-next');
+  nextEl.textContent = inWindow
+    ? `dark-sky window open now, through ${fmtDay(we)}`
+    : `next dark-sky window ${fmtDay(ws)} \u2013 ${fmtDay(we)}`;
+  nextEl.hidden = false;
 }
 
 // rough guide to when the galactic core is above the horizon at ~35N, by month
