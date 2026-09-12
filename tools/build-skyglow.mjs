@@ -6,11 +6,10 @@
 //   node tools/build-skyglow.mjs --json sky.json
 //
 // the atlas ships as png tiles coloured by sky brightness, so reading it means
-// reading pixels. chromium is already a dev dependency for the social card, so
-// the tiles are decoded in a canvas rather than by hand-rolling a png reader:
-// far fewer lines that can be quietly wrong about filters and bit depths. the
-// tiles are fetched in node and handed over as data urls, so nothing depends
-// on the tile host's cors headers.
+// reading pixels. that is what tools/png.mjs is for: node ships zlib, a png is
+// a zlib stream plus five row filters, and decoding one here keeps this script
+// runnable on a bare node install like every other tool in this repo. needing
+// a headless browser to read three tiles would not be worth it.
 //
 // this writes nothing into index.html. what a colour *means* is the atlas
 // author's business and not something to invent, so the run also dumps
@@ -20,7 +19,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import pw from 'playwright';
+import { decodePng } from './png.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FILE = path.join(ROOT, 'index.html');
@@ -89,49 +88,24 @@ for (const w of want) tiles[w.key] = TILES
 console.log(`${spots.length} spots, ${want.length} samples, ${Object.keys(tiles).length} tile(s) at zoom ${ZOOM}`);
 console.log(`one pixel is about ${KM_PER_PX.toFixed(2)} km, so the ${RINGS[0]} km ring is ${(RINGS[0] / KM_PER_PX).toFixed(1)} px out\n`);
 
-// --- fetch the tiles --------------------------------------------------------
+// --- fetch and read the tiles ----------------------------------------------
 const UA = { 'user-agent': 'dark-sky-calendar tools (+https://github.com/spskelly/dark-sky)' };
-const asDataUrl = async url => {
-  const r = await fetch(url, { headers: UA });
-  if (!r.ok) return null;
-  const type = r.headers.get('content-type') || 'image/png';
-  const buf = Buffer.from(await r.arrayBuffer());
-  return `data:${type};base64,${buf.toString('base64')}`;
-};
-const urls = {};
+const planes = {};
 for (const [k, url] of Object.entries(tiles)) {
-  urls[k] = await asDataUrl(url);
-  console.log(`  ${urls[k] ? 'got ' : 'MISS'} ${url}`);
+  let img = null, why = '';
+  try {
+    const r = await fetch(url, { headers: UA });
+    if (r.ok) img = decodePng(Buffer.from(await r.arrayBuffer()));
+    else why = `${r.status} ${r.statusText}`;
+  } catch (e) { why = e.message; }
+  planes[k] = img;
+  console.log(`  ${img ? `got  ${img.width}x${img.height}, colour type ${img.color}, depth ${img.depth}` : `MISS ${why}`}  ${url}`);
 }
 
-// --- read the pixels --------------------------------------------------------
-// same escape hatch as the social card build, for a checkout whose browsers
-// live somewhere playwright does not look
-const browser = await pw.chromium.launch(
-  process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
-const page = await browser.newPage();
-const read = await page.evaluate(async ({ urls, want }) => {
-  const cv = document.createElement('canvas');
-  cv.width = cv.height = 256;
-  const ctx = cv.getContext('2d', { willReadFrequently: true });
-  const planes = {};
-  for (const [k, src] of Object.entries(urls)) {
-    if (!src) { planes[k] = null; continue; }
-    const img = new Image();
-    const ok = await new Promise(done => { img.onload = () => done(true); img.onerror = () => done(false); img.src = src; });
-    if (!ok) { planes[k] = null; continue; }
-    ctx.clearRect(0, 0, 256, 256);
-    ctx.drawImage(img, 0, 0);
-    planes[k] = ctx.getImageData(0, 0, 256, 256).data;
-  }
-  return want.map(w => {
-    const d = planes[w.key];
-    if (!d) return null;
-    const i = (w.py * 256 + w.px) * 4;
-    return [d[i], d[i + 1], d[i + 2], d[i + 3]];
-  });
-}, { urls, want });
-await browser.close();
+const read = want.map(w => {
+  const img = planes[w.key];
+  return img ? img.rgba(w.px, w.py) : null;
+});
 
 const hex = c => c ? '#' + c.slice(0, 3).map(v => v.toString(16).padStart(2, '0')).join('') : '--';
 const got = new Map();
