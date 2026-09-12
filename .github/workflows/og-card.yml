@@ -1,0 +1,68 @@
+name: refresh social card
+
+# og.png carries tonight's actual moon, so it goes stale every day.
+# rebuild it on a schedule, whenever the page or the generator changes,
+# and on demand.
+on:
+  schedule:
+    - cron: '0 18 * * *'   # 18:00 UTC daily, early afternoon in Eastern
+  push:
+    branches: [main]
+    paths:
+      - 'index.html'
+      - 'tools/build-og.mjs'
+      - 'package.json'
+      - '.github/workflows/og-card.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: og-card
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # the card quotes dates as "tonight" for the site's own mountains, so pin the
+    # runner to Eastern rather than letting UTC roll the date over early
+    env:
+      TZ: America/New_York
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Render og.png
+        run: npm run build:og
+
+      - name: Fail if the card was not produced
+        run: test -s og.png
+
+      - name: Commit if the moon moved
+        run: |
+          if git diff --quiet -- og.png; then
+            echo "card unchanged, nothing to commit"
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add og.png
+          git commit -m "Refresh social card for tonight's moon [skip ci]"
+          git push

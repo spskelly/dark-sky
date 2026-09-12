@@ -30,8 +30,8 @@ will be clear, and where to drive.
 
 ## Running it
 
-There is no build step and no dependencies to install — the whole site is one
-`index.html`. Open it directly, or serve the directory:
+The site is one `index.html` with no build step and no runtime dependencies.
+Open it directly, or serve the directory:
 
 ```sh
 python3 -m http.server 8000   # then open http://localhost:8000
@@ -40,6 +40,27 @@ python3 -m http.server 8000   # then open http://localhost:8000
 The map (Leaflet, from cdnjs) and the forecast (Open-Meteo) need network
 access; everything else — the phase maths, the calendar, the spot list —
 works offline, and the map degrades to the list with a note.
+
+## The moon is always current
+
+Two things show tonight's real phase, and neither is hand-drawn.
+
+- **The tab icon** is generated in the browser on every render, from the same
+  `moonPath()` the calendar icons use, and follows the hemisphere toggle. The
+  icon in `<head>` is only the no-script fallback.
+- **`og.png`**, the link-preview image, is rebuilt daily by
+  [a GitHub Action](.github/workflows/og-card.yml). It doesn't recompute
+  anything: `tools/build-og.mjs` loads this very page in headless Chromium and
+  calls the page's own `lunationFraction()`, `moonSvg()` and `phaseWord()`, so
+  the card cannot drift from the calendar it advertises. It commits only when
+  the image actually changes.
+
+The npm dependencies exist for that generator alone — the site itself ships
+nothing from `node_modules`. To rebuild the card by hand:
+
+```sh
+npm ci && npx playwright install chromium && npm run build:og
+```
 
 ## Notes
 

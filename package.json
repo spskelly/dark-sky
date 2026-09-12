@@ -1,0 +1,13 @@
+{
+  "name": "dark-sky",
+  "private": true,
+  "description": "Tooling for the dark sky calendar. The site itself is a single index.html with no build step and no runtime dependencies; these are only used to regenerate the social card.",
+  "scripts": {
+    "build:og": "node tools/build-og.mjs"
+  },
+  "devDependencies": {
+    "@fontsource/fraunces": "^5.0.0",
+    "@fontsource/ibm-plex-sans": "^5.0.0",
+    "playwright": "^1.49.0"
+  }
+}

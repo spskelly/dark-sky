@@ -19,7 +19,7 @@
 <meta name="twitter:title" content="dark sky calendar">
 <meta name="twitter:description" content="Every new-moon window for the next twelve months, tonight's cloud cover hour by hour, and 20 dark places to point a lens from.">
 <meta name="twitter:image" content="https://spskelly.github.io/dark-sky/og.png">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='13' fill='%230f1a34'/%3E%3Ccircle cx='34' cy='32' r='20' fill='%23ece7d4'/%3E%3Ccircle cx='22' cy='27' r='18' fill='%230f1a34'/%3E%3C/svg%3E">
+<link rel="icon" id="favicon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='13' fill='%230f1a34'/%3E%3Ccircle cx='34' cy='32' r='20' fill='%23ece7d4'/%3E%3Ccircle cx='22' cy='27' r='18' fill='%230f1a34'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..600,50&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
@@ -432,22 +432,45 @@ function lunationFraction(t) {
 
 // ---------- drawing ----------
 
-// svg of the moon at lunation fraction p. lit limb on the right while waxing (northern view); flipped for the south
-function moonSvg(p, size, hemi) {
-  const r = 48, cx = 50, cy = 50;
-  const flip = hemi === 'S';
+// the lit limb at lunation fraction p, on a disc of radius r centred at (cx, cy).
+// outer arc runs down the lit side; the terminator comes back up bulging toward or
+// away from it. lit limb is on the right while waxing (northern view), flipped south.
+// shared by the calendar icons and the tab icon so the two can't disagree.
+function moonPath(p, cx, cy, r, hemi) {
   const waxing = p < 0.5;
   const rx = Math.abs(r * Math.cos(2 * Math.PI * p));
-  // outer arc runs down the lit side; terminator arc comes back up bulging toward or away from it
   let outerSweep = waxing ? 1 : 0;
   let termSweep = (p < 0.25 || p >= 0.75) ? (waxing ? 0 : 1) : (waxing ? 1 : 0);
-  if (flip) { outerSweep ^= 1; termSweep ^= 1; }
-  const lit = `M ${cx} ${cy - r} A ${r} ${r} 0 0 ${outerSweep} ${cx} ${cy + r} A ${rx} ${r} 0 0 ${termSweep} ${cx} ${cy - r} Z`;
-  const near = Math.min(p, 1 - p) < 0.02;
+  if (hemi === 'S') { outerSweep ^= 1; termSweep ^= 1; }
+  return `M ${cx} ${cy - r} A ${r} ${r} 0 0 ${outerSweep} ${cx} ${cy + r} A ${rx} ${r} 0 0 ${termSweep} ${cx} ${cy - r} Z`;
+}
+
+const nearNew = p => Math.min(p, 1 - p) < 0.02;
+
+function moonSvg(p, size, hemi) {
   return `<svg viewBox="0 0 100 100" width="${size}" height="${size}" aria-hidden="true">
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="#0a1226" stroke="#3a4a78" stroke-width="1.5"/>
-    ${near ? '' : `<path d="${lit}" fill="var(--moon)"/>`}
+    <circle cx="50" cy="50" r="48" fill="#0a1226" stroke="#3a4a78" stroke-width="1.5"/>
+    ${nearNew(p) ? '' : `<path d="${moonPath(p, 50, 50, 48, hemi)}" fill="var(--moon)"/>`}
   </svg>`;
+}
+
+// the tab icon shows tonight's phase too. at 16px a hairline outline disappears,
+// so the unlit disc is filled a slate that still reads against the tile rather
+// than being drawn as a stroke.
+function faviconSvg(p, hemi) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">`
+    + `<rect width="64" height="64" rx="13" fill="#0f1a34"/>`
+    + `<circle cx="32" cy="32" r="23" fill="#2b3c6b"/>`
+    + (nearNew(p) ? '' : `<path d="${moonPath(p, 32, 32, 23, hemi)}" fill="#ece7d4"/>`)
+    + `</svg>`;
+}
+
+// redrawn on every render, so it follows both the real phase and the hemisphere
+// toggle. the static icon in <head> stays as the no-script fallback.
+function updateFavicon() {
+  const link = document.getElementById('favicon');
+  if (!link) return;
+  link.href = 'data:image/svg+xml,' + encodeURIComponent(faviconSvg(lunationFraction(new Date()), state.hemi));
 }
 
 // ---------- calendar state and render ----------
@@ -1005,7 +1028,7 @@ async function loadPanel(panel, target) {
 const loadHomeForecast = () => loadPanel(fc.home, { ...spotState.home, name: 'home' });
 const loadSpotForecast = spot => loadPanel(fc.spot, { ...spot });
 
-function renderAll() { renderHero(); renderCalendar(); renderWindows(); }
+function renderAll() { updateFavicon(); renderHero(); renderCalendar(); renderWindows(); }
 
 document.getElementById('prev').addEventListener('click', () => { state.view = new Date(state.view.getFullYear(), state.view.getMonth() - 1, 1); renderCalendar(); });
 document.getElementById('next').addEventListener('click', () => { state.view = new Date(state.view.getFullYear(), state.view.getMonth() + 1, 1); renderCalendar(); });
