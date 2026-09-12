@@ -23,7 +23,7 @@ export async function ask(query) {
   const tried = [];
   for (const url of ENDPOINTS) {
     const host = new URL(url).host;
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
       console.log(`asking ${host}…`);
       let res;
       try {
@@ -32,10 +32,13 @@ export async function ask(query) {
       if (res.ok) return res.json();
       const why = await reason(res);
       tried.push(`${host}: ${res.status} ${res.statusText}${why ? ' — ' + why : ''}`);
-      // busy or rate limited rather than broken: one more go before moving on
-      if (res.status !== 429 && res.status !== 504) break;
-      console.log('  busy, waiting five seconds…');
-      await wait(5000);
+      // busy or rate limited rather than broken: a 429 means the slot is taken
+      // and clears when whatever is running finishes, which takes rather longer
+      // than five seconds
+      if ((res.status !== 429 && res.status !== 504) || attempt === 3) break;
+      const pause = [10000, 30000][attempt - 1];
+      console.log(`  ${res.status} ${res.statusText || 'busy'}${why ? ': ' + why.slice(0, 70) : ''} — waiting ${pause / 1000}s`);
+      await wait(pause);
     }
   }
   throw new Error('no overpass endpoint would answer:\n  ' + tried.join('\n  '));

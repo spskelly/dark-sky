@@ -160,53 +160,98 @@ if (process.argv.includes('--snap')) {
 
 // ---------- --osm ----------
 
-const norm = s => s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
-// our names carry context osm does not: "Roan Highlands, Carvers Gap",
+// apostrophes come out rather than becoming a space: "Devil's Courthouse" has
+// to meet osm's "Devils Courthouse", not turn into "devil s courthouse"
+const norm = s => s.toLowerCase().replace(/['\u2019]/g, '')
+  .replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
+  .replace(/^mt /, 'mount ');
+// the generic half of a name, which one side usually spells out and the other
+// leaves off: ours says "Graveyard Fields" where osm says "Graveyard Fields
+// Overlook", and they are the same place
+const GENERIC = /\b(overlook|campground|camp site|picnic area|picnic site|recreation area|state park|state recreational forest|summit|tower|lookout|area)\b/g;
+const core = s => norm(s).replace(GENERIC, '').replace(/\s+/g, ' ').trim();
+// our names also carry context osm does not: "Roan Highlands, Carvers Gap",
 // "Kuwohi (Clingmans Dome)", "Sam Knob / Flat Laurel Creek"
 const variants = name => [...new Set([name, ...name.split(/[/,]|\(|\)/)].map(norm).filter(Boolean))];
 
+// osm features that ARE the destination, so their coordinate is the one to
+// take. a peak is not one of them: for a summit this list deliberately carries
+// the parking or the trailhead, which is what you drive to, and moving those to
+// the top of the mountain would make every drive time on the page a lie.
+const DESTINATION = new Set(['viewpoint', 'rest_area', 'tower', 'picnic_site', 'camp_site', 'attraction']);
+
 if (process.argv.includes('--osm')) {
-  const lats = spots.map(s => s.lat), lons = spots.map(s => s.lon);
-  const bbox = [Math.min(...lats) - 0.1, Math.min(...lons) - 0.1, Math.max(...lats) + 0.1, Math.max(...lons) + 0.1]
-    .map(n => n.toFixed(3)).join(',');
-  const data = await ask(`[out:json][timeout:180];
-(
-  nwr["name"]["tourism"~"^(viewpoint|camp_site|picnic_site|attraction)$"](${bbox});
-  nwr["name"]["natural"="peak"](${bbox});
-  nwr["name"]["man_made"~"^(tower|survey_point)$"](${bbox});
-  nwr["name"]["highway"="rest_area"](${bbox});
-  nwr["name"]["leisure"="park"](${bbox});
-);
-out center;`);
+  // asking for every named park and peak in a box the size of western north
+  // carolina is a heavy query, and overpass throttles it. ask around each spot
+  // instead: forty small lookups cost the server almost nothing, and anything
+  // more than a few km from where we think a spot is would not be evidence
+  // that we had the right feature anyway.
+  const radius = +(process.argv.find(a => a.startsWith('--radius='))?.split('=')[1] || 5000);
+  const FILTERS = [
+    '["tourism"~"^(viewpoint|camp_site|picnic_site|attraction)$"]',
+    '["natural"="peak"]',
+    '["man_made"~"^(tower|survey_point)$"]',
+    '["highway"="rest_area"]',
+  ];
+  const around = spots.flatMap(s =>
+    FILTERS.map(f => `  nwr(around:${radius},${s.lat},${s.lon})["name"]${f};`)).join('\n');
+  const query = `[out:json][timeout:120];\n(\n${around}\n);\nout center;`;
+
+  // overpass is rate limited and this answer barely changes: keep it so that
+  // re-running to look at the report again costs nothing
+  const CACHE = path.join(path.dirname(fileURLToPath(import.meta.url)), '.osm-cache.json');
+  let data;
+  const fresh = !process.argv.includes('--refresh') && fs.existsSync(CACHE)
+    && Date.now() - fs.statSync(CACHE).mtimeMs < 24 * 3600e3;
+  if (fresh) {
+    const c = JSON.parse(fs.readFileSync(CACHE, 'utf8'));
+    if (c.query === query) { data = c.data; console.log('using the cached osm answer (--refresh to ask again)'); }
+  }
+  if (!data) {
+    data = await ask(query);
+    fs.writeFileSync(CACHE, JSON.stringify({ query, data }));
+  }
 
   const features = (data.elements || []).map(e => ({
     name: e.tags?.name || '', type: e.type,
     lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon,
-    kind: e.tags?.tourism || e.tags?.natural || e.tags?.man_made || e.tags?.highway || e.tags?.leisure || '',
+    kind: e.tags?.tourism || e.tags?.natural || e.tags?.man_made || e.tags?.highway || '',
   })).filter(f => f.name && isFinite(f.lat));
-  console.log(`\n${features.length} named osm features in the box\n`);
+  console.log(`\n${features.length} named osm features within ${radius} m of a spot\n`);
 
   const fixes = [];
-  console.log(pad('spot', 32) + 'osm says'.padStart(10) + '   match');
+  console.log(pad('spot', 31) + pad('osm calls it', 31) + pad('what', 13) + 'apart'.padStart(7) + '  verdict');
   for (const s of spots) {
-    const want = variants(s.name);
-    const hits = features.filter(f => want.includes(norm(f.name)))
-      .map(f => ({ ...f, d: dist(s, f) })).sort((a, b) => a.d - b.d);
-    if (!hits.length) { console.log(pad(s.name, 32) + '—'.padStart(10) + '   not named in osm, left alone'); continue; }
-    const h = hits[0];
+    const want = variants(s.name), mine = core(s.name);
+    const scored = features.map(f => {
+      const theirs = core(f.name);
+      const tier = want.includes(norm(f.name)) ? 2                  // the same name
+        : mine && theirs === mine ? 1                               // the same bar the generic word
+        : mine && theirs && (theirs.includes(mine) || mine.includes(theirs)) ? 0   // one inside the other
+        : -1;
+      return tier < 0 ? null : { ...f, d: dist(s, f), tier };
+    }).filter(Boolean).sort((x, y) => (y.tier - x.tier) || (x.d - y.d));
+    if (!scored.length) { console.log(pad(s.name, 31) + '\u2014'); continue; }
+    const h = scored[0];
     // a way or relation reports its centroid, which for a park is a point in
-    // the woods rather than the parking: report it, never apply it
-    const applicable = h.type === 'node' && h.d <= OSM_FIX_MAX;
-    const note = h.d < OSM_WARN ? 'agrees' : applicable ? 'DISAGREES — fixable' : `disagrees (${h.type} ${h.kind}, centroid)`;
-    console.log(pad(s.name, 32) + `${Math.round(h.d)} m`.padStart(10) + `   ${note}`);
-    if (applicable && h.d >= OSM_WARN) fixes.push([s, h]);
+    // the woods rather than its parking: report it, never apply it
+    const why =
+      h.tier === 0 ? 'name only close, check by hand'
+      : h.type !== 'node' ? `${h.type} centroid, check by hand`
+      : !DESTINATION.has(h.kind) ? 'osm has the summit, we want the access \u2014 kept'
+      : h.d < 30 ? 'already there'
+      : h.d > OSM_FIX_MAX ? 'too far apart to be the same thing'
+      : 'WOULD MOVE';
+    console.log(pad(s.name, 31) + pad(h.name, 31) + pad(`${h.type[0]} ${h.kind}`, 13) +
+      `${Math.round(h.d)} m`.padStart(7) + '  ' + why);
+    if (why === 'WOULD MOVE') fixes.push([s, h]);
   }
 
   if (fixes.length && process.argv.includes('--fix')) {
     console.log(`\napplying ${fixes.length} osm coordinate(s):`);
     for (const [s, h] of fixes) {
       const lat = +h.lat.toFixed(4), lon = +h.lon.toFixed(4);
-      console.log(`  ${pad(s.name, 32)} → ${lat},${lon}  (${Math.round(h.d)} m, osm ${h.type} ${h.kind})`);
+      console.log(`  ${pad(s.name, 31)} \u2192 ${lat},${lon}  (${Math.round(h.d)} m to osm's ${h.kind} "${h.name}")`);
       rewrite(s, lat, lon);
       s.lat = lat; s.lon = lon;
     }
