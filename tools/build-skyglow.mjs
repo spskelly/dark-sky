@@ -85,6 +85,28 @@ for (const s of spots) {
 // is a rank, but nothing says which end is dark — this settles it by walking
 // somewhere the answer is already known.
 const CITY = { name: 'asheville', lat: 35.5951, lon: -82.5515 };
+
+// the palette is a list, and this atlas does not order it by brightness: the
+// remotest spots on the page come back as index 7, darker than index 0. so
+// rather than read meaning into a colour, sample places whose sky is not in
+// question and let them sort the scale out. the ocean entry is doing a second
+// job: if open water comes back as its own colour, that colour is "no data"
+// and not darkness, which is worth knowing before calling somewhere pristine.
+const REFERENCE = [
+  ['mid-atlantic ocean', 34.0, -60.0, 'no lights for a thousand miles'],
+  ['greenland interior', 72.0, -40.0, 'ice sheet, nobody home'],
+  ['sahara, libya', 23.0, 14.0, 'desert, essentially pristine'],
+  ['great basin np, nevada', 38.98, -114.30, 'one of the darkest skies in the lower 48'],
+  ['boundary waters, minnesota', 47.95, -91.50, 'dark sky sanctuary'],
+  ['cherry springs, pennsylvania', 41.66, -77.82, 'gold tier dark sky park'],
+  ['blue ridge, mid-page', 35.60, -82.90, 'a ridge on this very map'],
+  ['asheville downtown', 35.5951, -82.5515, 'small city'],
+  ['knoxville downtown', 35.9606, -83.9207, 'mid-size city'],
+  ['charlotte downtown', 35.2271, -80.8431, 'big city'],
+  ['atlanta downtown', 33.7490, -84.3880, 'bigger city'],
+  ['manhattan', 40.7128, -74.0060, 'about as bright as it gets'],
+];
+for (const [name, lat, lon] of REFERENCE) at(lat, lon, `ref|${name}`);
 const hav = (a, b) => {
   const dp = (b.lat - a.lat) * RAD, dl = (b.lon - a.lon) * RAD;
   const x = Math.sin(dp / 2) ** 2 + Math.cos(a.lat * RAD) * Math.cos(b.lat * RAD) * Math.sin(dl / 2) ** 2;
@@ -160,6 +182,14 @@ console.log(ends[0] == null || ends[1] == null ? '  (incomplete)'
   : ends[1] < ends[0] ? '  -> index falls toward town, so a LOWER index is a brighter sky'
   : '  -> both ends the same; the transect settles nothing');
 
+// --- the scale, against places whose sky is not in question -----------------
+console.log('\nreference points, darkest expectation first:\n');
+for (const [name, , , why] of REFERENCE) {
+  const g = got.get(`ref|${name}`);
+  const i = g && g.idx != null ? g.idx : null;
+  console.log(`  ${name.padEnd(28)} ${i == null ? ' - (no tile)' : pad(i) + '  ' + hex(g.rgba)}   ${why}`);
+}
+
 // --- the spots --------------------------------------------------------------
 console.log('\nsky glow by palette index (see the scale above):\n');
 console.log('spot'.padEnd(32) + 'here   ' + RINGS.map(km => `${km} km: ` + COMPASS.join(' ')).join('   '));
@@ -180,13 +210,21 @@ console.log(`\n${census.size} distinct levels across ${read.filter(Boolean).leng
 console.log('\nlooking for the viewer that reads the binary tiles...');
 const UA2 = { 'user-agent': UA['user-agent'] };
 const HOST = 'https://djlorenz.github.io';
-const pages = [`${HOST}/astronomy/lp2025/`, `${HOST}/astronomy/lp2024/`, `${HOST}/astronomy/`];
+// lp2025/ and astronomy/ both 404; the folders that answered before are these,
+// and each was a few hundred bytes, which means a signpost rather than content
+const pages = [`${HOST}/astronomy/lp/`, `${HOST}/astronomy/lp2022/`, `${HOST}/astronomy/lp2020/`];
 const seen = new Set();
 for (const url of pages) {
+  if (seen.has(url) || seen.size > 20) continue;   // following links must terminate
+  seen.add(url);
   const body = await fetch(url, { headers: UA2 }).then(r => r.ok ? r.text() : '').catch(() => '');
   if (!body) continue;
   console.log(`  read ${url} (${(body.length / 1024).toFixed(1)} kB)`);
-  if (body.length < 4096) console.log(body.split('\n').map(l => '    | ' + l).join('\n'));
+  if (body.length < 6000) console.log(body.split('\n').map(l => '    | ' + l).join('\n'));
+  // a stub points somewhere; follow it rather than stopping at the signpost
+  for (const m of body.matchAll(/(?:href|src|url)=["']?([^"'>\s]+\.html?)/gi)) {
+    try { const u = new URL(m[1], url).href; if (u.startsWith(HOST) && !pages.includes(u)) pages.push(u); } catch {}
+  }
   const srcs = [...body.matchAll(/<script[^>]+src=["\']([^"\']+)["\']/gi)].map(m => new URL(m[1], url).href);
   for (const src of srcs) {
     if (seen.has(src) || !src.startsWith(HOST) || /pako|geocoder/i.test(src)) continue;
