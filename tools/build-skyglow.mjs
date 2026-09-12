@@ -43,12 +43,15 @@ if (!spots.length) throw new Error('no spots parsed');
 
 // --- geometry ---------------------------------------------------------------
 const RAD = Math.PI / 180;
-function pixel(lat, lon, z) {
+// where in its tile a point falls, as a fraction. the pixel comes later, from
+// the tile that actually arrives: these are 1024 px, and assuming the usual
+// 256 reads every sample at a quarter of its true offset.
+function place(lat, lon, z) {
   const n = 2 ** z, r = lat * RAD;
   const fx = (lon + 180) / 360 * n;
   const fy = (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n;
   const x = Math.floor(fx), y = Math.floor(fy);
-  return { x, y, px: Math.min(255, Math.floor((fx - x) * 256)), py: Math.min(255, Math.floor((fy - y) * 256)) };
+  return { x, y, u: fx - x, v: fy - y };
 }
 // a point a given distance and bearing away, on the sphere
 function move(lat, lon, km, bearing) {
@@ -58,9 +61,7 @@ function move(lat, lon, km, bearing) {
   return { lat: p2 / RAD, lon: l2 / RAD };
 }
 
-// how wide one pixel is here, which is what decides whether a ring radius is a
-// real measurement or the same pixel read eight times over
-const KM_PER_PX = 40075 * Math.cos(35.6 * RAD) / (2 ** ZOOM) / 256;
+const KM_PER_TILE = 40075 * Math.cos(35.6 * RAD) / (2 ** ZOOM);
 const COMPASS = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'];
 const RINGS = [10, 25, 50];
 const key = (name, part) => `${name}|${part}`;
@@ -68,8 +69,8 @@ const key = (name, part) => `${name}|${part}`;
 // --- what to sample ---------------------------------------------------------
 const want = [];
 const at = (lat, lon, tag) => {
-  const p = pixel(lat, lon, ZOOM);
-  want.push({ key: `${ZOOM}/${p.x}/${p.y}`, px: p.px, py: p.py, tag, x: p.x, y: p.y });
+  const p = place(lat, lon, ZOOM);
+  want.push({ key: `${ZOOM}/${p.x}/${p.y}`, u: p.u, v: p.v, tag, x: p.x, y: p.y });
 };
 for (const s of spots) {
   at(s.lat, s.lon, key(s.name, 'self'));
@@ -80,13 +81,28 @@ for (const s of spots) {
     });
 }
 
+// a line from a dark spot into asheville. the palette is a list and the index
+// is a rank, but nothing says which end is dark — this settles it by walking
+// somewhere the answer is already known.
+const CITY = { name: 'asheville', lat: 35.5951, lon: -82.5515 };
+const hav = (a, b) => {
+  const dp = (b.lat - a.lat) * RAD, dl = (b.lon - a.lon) * RAD;
+  const x = Math.sin(dp / 2) ** 2 + Math.cos(a.lat * RAD) * Math.cos(b.lat * RAD) * Math.sin(dl / 2) ** 2;
+  return 6371 * 2 * Math.asin(Math.sqrt(x));
+};
+const anchor = spots.find(s => /mitchell/i.test(s.name))
+  || spots.slice().sort((a, b) => hav(CITY, b) - hav(CITY, a))[0];
+const STEPS = 12;
+for (let i = 0; i <= STEPS; i++)
+  at(anchor.lat + (CITY.lat - anchor.lat) * i / STEPS,
+     anchor.lon + (CITY.lon - anchor.lon) * i / STEPS, `transect|${i}`);
+
 const tiles = {};
 for (const w of want) tiles[w.key] = TILES
   .replace('{z}', ZOOM).replace('{x}', w.x).replace('{y}', w.y)
   .replace('{-y}', 2 ** ZOOM - 1 - w.y);
 
 console.log(`${spots.length} spots, ${want.length} samples, ${Object.keys(tiles).length} tile(s) at zoom ${ZOOM}`);
-console.log(`one pixel is about ${KM_PER_PX.toFixed(2)} km, so the ${RINGS[0]} km ring is ${(RINGS[0] / KM_PER_PX).toFixed(1)} px out\n`);
 
 // --- fetch and read the tiles ----------------------------------------------
 const UA = { 'user-agent': 'dark-sky-calendar tools (+https://github.com/spskelly/dark-sky)' };
@@ -102,60 +118,103 @@ for (const [k, url] of Object.entries(tiles)) {
   console.log(`  ${img ? `got  ${img.width}x${img.height}, colour type ${img.color}, depth ${img.depth}` : `MISS ${why}`}  ${url}`);
 }
 
+const size = Object.values(planes).find(Boolean)?.width || 0;
+if (size) {
+  const kmPx = KM_PER_TILE / size;
+  console.log(`\ntiles are ${size} px, so one pixel is about ${kmPx.toFixed(2)} km ` +
+    `and the ${RINGS[0]} km ring sits ${(RINGS[0] / kmPx).toFixed(0)} px out`);
+}
+
 const read = want.map(w => {
   const img = planes[w.key];
-  return img ? img.rgba(w.px, w.py) : null;
+  if (!img) return null;
+  const px = Math.min(img.width - 1, Math.floor(w.u * img.width));
+  const py = Math.min(img.height - 1, Math.floor(w.v * img.height));
+  return { rgba: img.rgba(px, py), idx: img.index(px, py) };
 });
 
-const hex = c => c ? '#' + c.slice(0, 3).map(v => v.toString(16).padStart(2, '0')).join('') : '--';
+const hex = c => c ? '#' + c.slice(0, 3).map(v => v.toString(16).padStart(2, '0')).join('') : '------';
 const got = new Map();
 want.forEach((w, i) => got.set(w.tag, read[i]));
+const idx = t => { const g = got.get(t); return g && g.idx != null ? g.idx : null; };
+const pad = v => (v == null ? ' -' : String(v).padStart(2));
 
-// --- report -----------------------------------------------------------------
-console.log('\nspot colours at their own coordinates:\n');
-for (const s of spots) {
-  console.log(`${s.name.padEnd(30)} ${hex(got.get(key(s.name, 'self')))}`);
-  for (const km of RINGS)
-    console.log(`${String(km + ' km').padStart(30)} ${COMPASS.map(d => hex(got.get(key(s.name, d + km)))).join(' ')}`);
+// --- the scale the atlas brought with it ------------------------------------
+const first = Object.values(planes).find(Boolean);
+if (first && first.palette) {
+  console.log(`\nthe tiles carry their own palette, ${first.palette.length} entries:`);
+  first.palette.forEach((c, i) => {
+    const used = read.filter(r => r && r.idx === i).length;
+    console.log(`  ${String(i).padStart(2)}  ${hex(c)}  alpha ${String(c[3]).padStart(3)}` +
+      (used ? `   ${used} sample(s) here` : ''));
+  });
 }
-console.log(`\nring columns are ${COMPASS.join(' ')}`);
 
-// every distinct colour the atlas actually used here. a discrete palette shows
-// up as a short list, which is most of the way to knowing what its steps mean.
+// --- which end of the palette is dark ---------------------------------------
+const walk = Array.from({ length: STEPS + 1 }, (_, i) => idx(`transect|${i}`));
+console.log(`\n${anchor.name} to ${CITY.name}, ${hav(anchor, CITY).toFixed(0)} km in ${STEPS} steps:`);
+console.log('  ' + walk.map(pad).join(' '));
+const ends = [walk[0], walk[walk.length - 1]];
+console.log(ends[0] == null || ends[1] == null ? '  (incomplete)'
+  : ends[1] > ends[0] ? '  -> index rises toward town, so a higher index is a brighter sky'
+  : ends[1] < ends[0] ? '  -> index falls toward town, so a LOWER index is a brighter sky'
+  : '  -> both ends the same; the transect settles nothing');
+
+// --- the spots --------------------------------------------------------------
+console.log('\nsky glow by palette index (see the scale above):\n');
+console.log('spot'.padEnd(32) + 'here   ' + RINGS.map(km => `${km} km: ` + COMPASS.join(' ')).join('   '));
+for (const s of spots) {
+  const ring = RINGS.map(km => COMPASS.map(d => pad(idx(key(s.name, d + km)))).join(' ')).join('   ');
+  console.log(s.name.padEnd(32) + pad(idx(key(s.name, 'self'))) + '     ' + ring);
+}
+
 const census = new Map();
-for (const c of read) if (c) census.set(hex(c), (census.get(hex(c)) || 0) + 1);
-console.log(`\n${census.size} distinct colours across ${read.filter(Boolean).length} samples:`);
-for (const [c, n] of [...census].sort((a, b) => b[1] - a[1])) console.log(`  ${c}  ${n}`);
+for (const r of read) if (r) census.set(r.idx, (census.get(r.idx) || 0) + 1);
+console.log(`\n${census.size} distinct levels across ${read.filter(Boolean).length} samples: ` +
+  [...census].sort((a, b) => a[0] - b[0]).map(([i, n]) => `${i}x${n}`).join('  '));
 
-// --- what does a colour mean? ask the site, do not invent it ----------------
-console.log('\nlooking for the atlas own palette...');
-const GH = 'https://api.github.com/repos/djlorenz/djlorenz.github.io/contents/';
-const listing = await fetch(GH + 'astronomy/src', { headers: { ...UA, accept: 'application/vnd.github+json' } })
-  .then(r => r.ok ? r.json() : null).catch(() => null);
-if (!Array.isArray(listing)) {
-  console.log('  could not list astronomy/src (rate limited, or it is not there)');
-} else {
-  console.log(`  astronomy/src: ${listing.map(e => e.name).join(', ')}`);
-  const RGB_LIST = /\[\s*(?:\[\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\]\s*,?\s*){4,}\]/g;
-  const HEX_LIST = /(?:["']#[0-9a-fA-F]{6}["']\s*,\s*){4,}/g;
-  for (const e of listing.filter(e => e.type === 'file' && /\.(js|html|txt|py|f90|c)$/i.test(e.name)).slice(0, 12)) {
-    const body = await fetch(e.download_url, { headers: UA }).then(r => r.ok ? r.text() : '').catch(() => '');
-    if (!body) continue;
-    const found = [...body.matchAll(RGB_LIST), ...body.matchAll(HEX_LIST)].map(m => m[0]);
-    if (found.length) {
-      console.log(`\n  ${e.name} names a palette:`);
-      for (const f of found.slice(0, 3)) console.log('    ' + f.replace(/\s+/g, ' ').slice(0, 600));
-    }
+// --- what the numbers behind the colours are --------------------------------
+// src/ holds pako, which means the viewer inflates the binary tiles and works
+// out brightness itself. that code is the real scale; find it rather than
+// reverse-engineer a colour ramp.
+console.log('\nlooking for the viewer that reads the binary tiles...');
+const UA2 = { 'user-agent': UA['user-agent'] };
+const HOST = 'https://djlorenz.github.io';
+const pages = [`${HOST}/astronomy/lp2025/`, `${HOST}/astronomy/lp2024/`, `${HOST}/astronomy/`];
+const seen = new Set();
+for (const url of pages) {
+  const body = await fetch(url, { headers: UA2 }).then(r => r.ok ? r.text() : '').catch(() => '');
+  if (!body) continue;
+  console.log(`  read ${url} (${(body.length / 1024).toFixed(1)} kB)`);
+  if (body.length < 4096) console.log(body.split('\n').map(l => '    | ' + l).join('\n'));
+  const srcs = [...body.matchAll(/<script[^>]+src=["\']([^"\']+)["\']/gi)].map(m => new URL(m[1], url).href);
+  for (const src of srcs) {
+    if (seen.has(src) || !src.startsWith(HOST) || /pako|geocoder/i.test(src)) continue;
+    seen.add(src);
+    const js = await fetch(src, { headers: UA2 }).then(r => r.ok ? r.text() : '').catch(() => '');
+    if (!js) continue;
+    console.log(`  read ${src} (${(js.length / 1024).toFixed(1)} kB)`);
+    // how a value becomes a colour, and how a binary tile is addressed
+    const bits = [
+      ...js.matchAll(/(?:binary_tiles|\.bin\b)[^\n]{0,160}/g),
+      ...js.matchAll(/function\s+\w*(?:colou?r|brightness|bortle|ratio|magnitude)\w*[\s\S]{0,500}?\n\}/gi),
+      ...js.matchAll(/\[\s*(?:\[\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\]\s*,?\s*){4,}\]/g),
+      ...js.matchAll(/(?:21\.\d|20\.\d|bortle)[^\n]{0,120}/gi),
+    ].map(m => m[0].replace(/\s+/g, ' ').trim());
+    for (const b of [...new Set(bits)].slice(0, 14)) console.log('      ' + b.slice(0, 220));
   }
 }
 
 const out = opt('--json');
 if (out) {
-  fs.writeFileSync(out, JSON.stringify(spots.map(s => ({
-    name: s.name, lat: s.lat, lon: s.lon,
-    self: got.get(key(s.name, 'self')),
-    ring: Object.fromEntries(RINGS.flatMap(km => COMPASS.map(d => [d + km, got.get(key(s.name, d + km))]))),
-  })), null, 2));
+  fs.writeFileSync(out, JSON.stringify({
+    palette: first && first.palette,
+    transect: walk,
+    spots: spots.map(s => ({
+      name: s.name, lat: s.lat, lon: s.lon, here: idx(key(s.name, 'self')),
+      ring: Object.fromEntries(RINGS.flatMap(km => COMPASS.map(d => [d + km, idx(key(s.name, d + km))]))),
+    })),
+  }, null, 2));
   console.log(`\nwrote ${out}`);
 }
-console.log('\nnothing written into index.html - the colours mean nothing until the palette above is read.');
+console.log('\nnothing written into index.html yet.');
