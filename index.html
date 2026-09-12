@@ -115,7 +115,35 @@
   .tonight .head b { color: var(--ink); font-weight: 500; }
   /* a december night is ~15 columns; let the row scroll rather than push the
      whole page wider than the screen */
-  .tonight .hours { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--line) transparent; padding-bottom: 2px; }
+  /* the forecast is fetched async. every height below is reserved from the
+     first paint, because without it the panel grew from ~44px to ~250px when
+     the tiles landed and dropped the calendar 191px down the page (283px on a
+     phone). the reservations sit on the children rather than the panel so the
+     short error state doesn't leave a hole. */
+  .tonight .hours { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--line) transparent; padding-bottom: 2px; min-height: 80px; }
+  /* when there is nothing to plot, hold the tile row's footprint rather than
+     collapsing the panel and yanking the page up by what it would have filled.
+     dashed, so it reads as an empty state and not as a loading one. */
+  .tonight .sky-empty { min-height: 80px; display: flex; align-items: center; padding: 10px 14px; border: 1px dashed var(--line); border-radius: 10px; font-size: 13px; line-height: 1.5; color: var(--ink-dim); }
+  /* shimmer lines standing in for the verdict sentence, so the space reserved
+     for it reads as loading rather than as a gap. the count matches the lines
+     that sentence actually takes: three wide, five on a phone. */
+  .tonight .sk-lines { display: flex; flex-direction: column; gap: 6px; }
+  .tonight .sk-lines i { height: 0.85em; border-radius: 4px; background: var(--night-3); opacity: 0.5; }
+  .tonight .sk-lines i:nth-child(1) { width: 94%; }
+  .tonight .sk-lines i:nth-child(2) { width: 86%; }
+  .tonight .sk-lines i:nth-child(3) { width: 48%; }
+  .tonight .sk-lines i:nth-child(n+4) { display: none; }
+  /* a stand-in the width of "7:48 PM", so the head label wraps where the real
+     one will rather than gaining a line when the times arrive */
+  .tonight .sk-t { display: inline-block; width: 6.5ch; height: 0.85em; border-radius: 3px; background: var(--night-3); vertical-align: -0.05em; }
+  /* placeholder tiles: the same 78px box as a real hour, minus the data */
+  .tonight .hours.sk i { flex: 1 0 36px; height: 78px; border-radius: 8px; background: var(--night-3); opacity: 0.55; }
+  @media (prefers-reduced-motion: no-preference) {
+    .tonight .hours.sk i { animation: sk-pulse 1.6s ease-in-out infinite; }
+    .tonight .hours.sk i:nth-child(even) { animation-delay: 0.2s; }
+  }
+  @keyframes sk-pulse { 0%, 100% { opacity: 0.32; } 50% { opacity: 0.6; } }
   .tonight .hr { flex: 1 0 36px; display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; padding: 6px 0 5px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; }
   .tonight .hr:hover { border-color: var(--line); }
   .tonight .hr[aria-pressed="true"] { border-color: var(--today); }
@@ -125,8 +153,8 @@
   .tonight .hr .pct { font-size: 11px; color: var(--ink); line-height: 1; margin-top: 2px; }
   .tonight .hr.clear .pct { color: var(--dark-sky); }
   .tonight .hr .tmp { font-size: 10px; color: var(--ink-dim); line-height: 1; }
-  .tonight .summary { font-size: 13px; color: var(--ink-dim); margin-top: 8px; line-height: 1.5; }
-  .tonight .detail { font-size: 12px; color: var(--moon-dim); margin-top: 6px; line-height: 1.45; min-height: 1.45em; }
+  .tonight .summary { font-size: 13px; color: var(--ink-dim); margin-top: 8px; line-height: 1.5; min-height: 4.5em; }
+  .tonight .detail { font-size: 12px; color: var(--moon-dim); margin-top: 6px; line-height: 1.45; min-height: 2.9em; }
   .tonight .detail b { color: var(--moon); font-weight: 500; }
   .tonight .summary b { color: var(--ink); font-weight: 500; }
   .legend-sky { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-size: 11px; color: var(--ink-dim); }
@@ -136,7 +164,7 @@
   .spot-tonight { max-width: none; margin: 0 0 14px; background: var(--night-2); border-radius: 12px; padding: 12px 14px; }
   /* nothing is selected on load, so don't paint an empty card */
   .spot-tonight:empty { display: none; }
-  .day .cloud { font-size: 10px; text-align: center; color: var(--ink-dim); }
+  .day .cloud { font-size: 10px; text-align: center; color: var(--ink-dim); min-height: 1.2em; }
   .day .cloud.clear { color: var(--dark-sky); }
   .day .cloud.mixed { color: var(--moon-dim); }
 
@@ -285,11 +313,22 @@
     .guide a { padding: 10px 14px; }
     .guide b { font-size: 17px; margin-bottom: 2px; }
     .guide span { font-size: 12.5px; line-height: 1.4; }
+    .tonight .summary { min-height: 7.5em; }
+    .tonight .sk-lines i:nth-child(3) { width: 90%; }
+    .tonight .sk-lines i:nth-child(4) { width: 72%; display: block; }
+    .tonight .sk-lines i:nth-child(5) { width: 48%; display: block; }
     .day { min-height: 70px; padding: 5px 4px; }
     .day .icon svg { width: 24px; height: 24px; }
     .day .label { font-size: 10px; }
     .day .illum { display: none; }
+    /* "53% cloud" wraps in a cell this narrow, so reserve both lines */
+    .day .cloud { min-height: 2.4em; }
     .month-nav h2 { font-size: 22px; min-width: 0; }
+  }
+  /* below ~340px the hour breakdown needs a third line; reserving it that wide
+     everywhere would just be dead space on every other screen */
+  @media (max-width: 336px) {
+    .tonight .detail { min-height: 4.35em; }
   }
   @media (prefers-reduced-motion: no-preference) {
     .day { transition: border-color 160ms; }
@@ -673,6 +712,12 @@ function renderCalendar() {
   for (let day = 1; day <= last.getDate(); day++) {
     // phase icon evaluated at 9pm local, roughly when you'd be looking up
     const d = new Date(y, m, day, 21, 0, 0);
+    // the hourly forecast reaches tonight and the six nights after it, and only
+    // those cells ever carry a cloud figure. hold the line open on exactly
+    // those from the first paint: reserving it on all thirty would pad every
+    // row of the grid for a week's worth of data.
+    const offset = Math.round((new Date(y, m, day) - startOfToday) / 86400000);
+    const inHorizon = offset >= 0 && offset < FC_HORIZON;
     const o = info.get(dayKey(d)) || {};
     // a forecast only belongs on a night that hasn't happened yet
     const fcNight = new Date(y, m, day) >= startOfToday ? fc.nightly.get(dayKey(d)) : null;
@@ -695,7 +740,9 @@ function renderCalendar() {
       <div class="num"><b>${day}</b><span class="illum">${illum}%</span></div>
       <div class="icon">${moonSvg(p, 34, state.hemi)}</div>
       ${label}
-      ${fcNight ? `<div class="cloud ${cloudClass(fcNight.mean)}" title="mean cloud cover 9pm to 3am, low ${Math.round(fcNight.tmin)}\u00b0F">${fcNight.mean}% cloud</div>` : ''}
+      ${fcNight
+        ? `<div class="cloud ${cloudClass(fcNight.mean)}" title="mean cloud cover 9pm to 3am, low ${Math.round(fcNight.tmin)}\u00b0F">${fcNight.mean}% cloud</div>`
+        : inHorizon ? '<div class="cloud" aria-hidden="true"></div>' : ''}
     </div>`);
   }
   while (cells.length % 7) cells.push('<div class="day pad" role="gridcell"></div>');
@@ -1179,6 +1226,9 @@ function summarizeNights(d) {
 }
 
 const cloudClass = c => c < 25 ? 'clear' : c < 60 ? 'mixed' : 'cloudy';
+// how many nights summarizeNights keeps out of the 8-day fetch: the first and
+// last are only partly covered, so seven full ones survive
+const FC_HORIZON = 7;
 
 // sky icons for the hourly row. all drawn in palette colors so they read as one set
 const SKY_ICON = {
@@ -1202,12 +1252,34 @@ const SKY_RANGE = { clear: 'under 15% cloud', few: '15 to 40% cloud', partly: '4
 const SKY_SHORT = { clear: '<15%', few: '15–40%', partly: '40–65%', mostly: '65–85%', overcast: '>85%', fog: 'dew pt within 3°' };
 const skyLegend = () => `<div class="legend-sky">${Object.keys(SKY_ICON).map(k => `<span title="${SKY_RANGE[k]}">${SKY_ICON[k]}${SKY_NAME[k]} <i>${SKY_SHORT[k]}</i></span>`).join('')}</div>`;
 
+// before sunrise the loaded panel switches to the shorter "rest of the night"
+// wording, so guess from the clock which one is coming. getting it wrong costs
+// a line of the head on a narrow screen, not correctness.
+const skeletonLabel = name => new Date().getHours() < 7
+  ? `rest of the night at <b>${name}</b> · sunrise <i class="sk-t"></i>`
+  : `tonight at <b>${name}</b> · sunset <i class="sk-t"></i> to sunrise <i class="sk-t"></i>`;
+
 function renderPanel(panel) {
   const el = document.getElementById(panel.el);
   if (!panel.target) { el.innerHTML = ''; return; }
   const name = panel.target.name;
-  if (panel.status === 'loading') { el.innerHTML = `<div class="head"><span>tonight at <b>${name}</b></span></div><div class="summary">loading forecast…</div>`; return; }
-  if (panel.status === 'error' || !panel.data) { el.innerHTML = `<div class="head"><span>tonight at <b>${name}</b></span></div><div class="summary">forecast unavailable right now. the clear outside link on each spot still works.</div>`; return; }
+  // the loading state mirrors the loaded one: same head, a row of placeholder
+  // tiles at the same height, and the legend, which needs no data at all. that
+  // way the panel is already its final size when the forecast lands.
+  if (panel.status === 'loading') {
+    el.innerHTML = `
+      <div class="head"><span>${skeletonLabel(name)}</span><span class="sub">cloud cover and temperature by hour</span></div>
+      <div class="hours sk" aria-hidden="true">${'<i></i>'.repeat(12)}</div>
+      <div class="detail">reading the cloud model for tonight&hellip;</div>
+      <div class="summary sk-lines" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+      ${skyLegend()}`;
+    return;
+  }
+  if (panel.status === 'error' || !panel.data) {
+    el.innerHTML = `<div class="head"><span>tonight at <b>${name}</b></span><span class="sub">cloud cover and temperature by hour</span></div>
+      <div class="sky-empty">forecast unavailable right now. the clear outside link on each spot still works.</div>`;
+    return;
+  }
   const d = panel.data, h = d.hourly;
   const now = new Date();
   // before dawn: the rest of the current night, now through this morning's sunrise.
@@ -1220,7 +1292,11 @@ function renderPanel(panel) {
     const t = new Date(h.time[i]);
     if (t >= new Date(start.getTime() - 30 * 60000) && t <= sunriseNext) idx.push(i);
   }
-  if (!idx.length) { el.innerHTML = `<div class="head"><span>tonight at <b>${name}</b></span></div><div class="summary">no forecast hours left in the current night.</div>`; return; }
+  if (!idx.length) {
+    el.innerHTML = `<div class="head"><span>tonight at <b>${name}</b></span><span class="sub">cloud cover and temperature by hour</span></div>
+      <div class="sky-empty">no forecast hours left in the current night.</div>`;
+    return;
+  }
   const headLabel = preDawn
     ? `rest of the night at <b>${name}</b> · sunrise ${fmtTime(sunriseNext)}`
     : `tonight at <b>${name}</b> · sunset ${fmtTime(start)} to sunrise ${fmtTime(sunriseNext)}`;
