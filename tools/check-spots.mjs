@@ -5,10 +5,11 @@
 // invisible until the parkway got drawn on the map: a pull-off a mile off the
 // road it is a pull-off on is obvious the moment the road is there.
 //
-//   node tools/check-spots.mjs           # report, change nothing
-//   node tools/check-spots.mjs --snap    # put roadside pull-offs on the road
-//   node tools/check-spots.mjs --osm     # compare every spot to openstreetmap
+//   node tools/check-spots.mjs             # report, change nothing
+//   node tools/check-spots.mjs --snap      # put roadside pull-offs on the road
+//   node tools/check-spots.mjs --osm       # compare every spot to openstreetmap
 //   node tools/check-spots.mjs --osm --fix
+//   node tools/check-spots.mjs --osm --refresh   # ignore the cached osm answer
 //
 // two independent references, neither of them a guess:
 //
@@ -16,10 +17,11 @@
 //   is on that road, so an overlook more than a few tens of metres off it is
 //   wrong by construction. --snap moves those, and only those, onto it.
 //
-//   openstreetmap's own named features, for everything else. --osm reports the
-//   distance between our coordinate and the node osm has under the same name;
-//   --fix applies it for point features only, never for the centroid of a park
-//   the size of a county.
+//   openstreetmap's own named features, for everything else. --osm reports what
+//   osm has under the same name and how far off it is. --fix applies only the
+//   features that ARE the spot: never a park's centroid, which is a point in
+//   the woods, and never a peak, because for a summit this list deliberately
+//   carries the parking rather than the top.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -181,43 +183,55 @@ const variants = name => [...new Set([name, ...name.split(/[/,]|\(|\)/)].map(nor
 const DESTINATION = new Set(['viewpoint', 'rest_area', 'tower', 'picnic_site', 'camp_site', 'attraction']);
 
 if (process.argv.includes('--osm')) {
-  // asking for every named park and peak in a box the size of western north
-  // carolina is a heavy query, and overpass throttles it. ask around each spot
-  // instead: forty small lookups cost the server almost nothing, and anything
-  // more than a few km from where we think a spot is would not be evidence
-  // that we had the right feature anyway.
-  const radius = +(process.argv.find(a => a.startsWith('--radius='))?.split('=')[1] || 5000);
-  const FILTERS = [
-    '["tourism"~"^(viewpoint|camp_site|picnic_site|attraction)$"]',
-    '["natural"="peak"]',
-    '["man_made"~"^(tower|survey_point)$"]',
-    '["highway"="rest_area"]',
-  ];
-  const around = spots.flatMap(s =>
-    FILTERS.map(f => `  nwr(around:${radius},${s.lat},${s.lon})["name"]${f};`)).join('\n');
-  const query = `[out:json][timeout:120];\n(\n${around}\n);\nout center;`;
+  // this asks for every named park, peak, viewpoint and tower in a box the size
+  // of western north carolina, which overpass rates as heavy and throttles. an
+  // around: query per spot ought to be cheaper and came back with nothing at
+  // all, so this is the shape that is known to work, and the answer is cached
+  // for a day: it only has to get through once.
+  const lats = spots.map(s => s.lat), lons = spots.map(s => s.lon);
+  const bbox = [Math.min(...lats) - 0.1, Math.min(...lons) - 0.1, Math.max(...lats) + 0.1, Math.max(...lons) + 0.1]
+    .map(n => n.toFixed(3)).join(',');
+  const query = `[out:json][timeout:180];
+(
+  nwr["name"]["tourism"~"^(viewpoint|camp_site|picnic_site|attraction)$"](${bbox});
+  nwr["name"]["natural"="peak"](${bbox});
+  nwr["name"]["man_made"~"^(tower|survey_point)$"](${bbox});
+  nwr["name"]["highway"="rest_area"](${bbox});
+  nwr["name"]["leisure"="park"](${bbox});
+);
+out center;`;
 
-  // overpass is rate limited and this answer barely changes: keep it so that
-  // re-running to look at the report again costs nothing
+  // overpass is rate limited and this answer barely changes: keep it, so that
+  // re-reading the report costs nothing and a --fix run cannot be blocked by a
+  // busy server
   const CACHE = path.join(path.dirname(fileURLToPath(import.meta.url)), '.osm-cache.json');
   let data;
-  const fresh = !process.argv.includes('--refresh') && fs.existsSync(CACHE)
-    && Date.now() - fs.statSync(CACHE).mtimeMs < 24 * 3600e3;
-  if (fresh) {
+  if (!process.argv.includes('--refresh') && fs.existsSync(CACHE)) {
     const c = JSON.parse(fs.readFileSync(CACHE, 'utf8'));
-    if (c.query === query) { data = c.data; console.log('using the cached osm answer (--refresh to ask again)'); }
+    const age = (Date.now() - fs.statSync(CACHE).mtimeMs) / 3600e3;
+    if (c.query === query) {
+      data = c.data;
+      console.log(`using the osm answer cached ${age.toFixed(1)} h ago (--refresh to ask again)`);
+    }
   }
   if (!data) {
     data = await ask(query);
     fs.writeFileSync(CACHE, JSON.stringify({ query, data }));
   }
+  // overpass reports a runtime error in the body of a 200, and an empty answer
+  // to a query this broad means the query is wrong, not the county empty
+  if (data.remark) console.log(`overpass remarked: ${data.remark}`);
+  if (!data.elements?.length) {
+    throw new Error('overpass returned no features at all. that is a problem with the query, ' +
+      'not with the spots \u2014 nothing below would mean anything, so stopping here.');
+  }
 
   const features = (data.elements || []).map(e => ({
     name: e.tags?.name || '', type: e.type,
     lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon,
-    kind: e.tags?.tourism || e.tags?.natural || e.tags?.man_made || e.tags?.highway || '',
+    kind: e.tags?.tourism || e.tags?.natural || e.tags?.man_made || e.tags?.highway || e.tags?.leisure || '',
   })).filter(f => f.name && isFinite(f.lat));
-  console.log(`\n${features.length} named osm features within ${radius} m of a spot\n`);
+  console.log(`\n${features.length} named osm features in the box\n`);
 
   const fixes = [];
   console.log(pad('spot', 31) + pad('osm calls it', 31) + pad('what', 13) + 'apart'.padStart(7) + '  verdict');
