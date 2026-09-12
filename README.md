@@ -87,6 +87,40 @@ markers. The road travels in the page rather than being fetched at runtime, so
 it still draws from `file://` and offline, and cannot break because somebody
 else's API moved. With the block empty the map just doesn't draw it.
 
+## The sky glow layer
+
+The **light pollution** button on the map draws D. Lorenz's world atlas of
+artificial night sky brightness over the topo. That is somebody else's static
+tile set on GitHub Pages, and it is the one part of the page that can break on
+its own: he republishes under a new folder every few years — `lp2016`, `lp2020`,
+`lp2022` — and when the old folder goes, every tile comes back 404.
+
+The page notices. After four misses with nothing loaded it switches the layer
+off, greys the button out and says so, rather than leaving a live-looking
+toggle that does nothing. Every spot still links to its own light map, which is
+where the detail was anyway.
+
+To point it at wherever the tiles live now (needs network):
+
+```sh
+node tools/find-lp-tiles.mjs           # search, report, change nothing
+node tools/find-lp-tiles.mjs --fix     # ... and write the winner into index.html
+```
+
+It reads the overlay's own page and scripts first and prints the code that
+builds their tile URLs, which is the answer rather than a guess at it; only if
+that finds nothing does it try the shapes such tile sets usually take, against a
+tile over Asheville that is certain to have data in it. It then sweeps the zooms
+to find how deep the set goes, so `maxNativeZoom` matches — get that wrong and
+the layer looks broken at exactly the zoom you'd use to pick a spot.
+
+If both passes come up empty, open the overlay in a browser, take one working
+tile URL out of the network tab, and hand it over with the numbers replaced:
+
+```sh
+node tools/find-lp-tiles.mjs --url 'https://.../{z}/{x}/{y}.png' --fix
+```
+
 ## Checking the pins
 
 `tools/check-spots.mjs` measures the spot coordinates against two references
