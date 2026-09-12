@@ -141,10 +141,12 @@ node tools/build-skyglow.mjs              # sample and report
 node tools/build-skyglow.mjs --json sky.json
 ```
 
-The atlas is coloured PNG tiles, so reading it means reading pixels. Chromium
-is already here for the social card, so tiles are decoded in a canvas instead
-of hand-rolling a PNG reader, and they are fetched in Node and passed in as
-data URLs so nothing depends on the tile host's CORS headers.
+The atlas is coloured PNG tiles, so reading it means reading pixels.
+`tools/png.mjs` does that with nothing but Node's own zlib — a PNG is a zlib
+stream plus five row filters — so this runs on a bare Node install like every
+other tool here, with no `npm install` and no browser download. It is checked
+against fixtures covering every colour type, bit depths 1 to 16 and all five
+filters, plus a tile whose 65,536 pixels each encode their own coordinates.
 
 It writes nothing into `index.html`. What a colour *means* is the atlas
 author's business and not something to invent, so the run also prints a census
