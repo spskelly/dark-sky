@@ -1265,11 +1265,17 @@ function initLightPollution(map) {
   };
   // a moved or mistyped tile url would otherwise leave the button looking dead:
   // say so once, rather than on every tile that misses
-  let loaded = false, failed = 0;
+  let loaded = false, failed = 0, dead = false;
   lp.on('tileload', () => { loaded = true; });
   lp.on('tileerror', () => {
-    if (loaded || ++failed < 4) return;
+    if (loaded || dead || ++failed < 4) return;
+    dead = true;
     show(false);
+    // a button that still looks live but does nothing is worse than an off
+    // one. show(false) has already cleared the saved preference, so the next
+    // load will not ask for a few hundred tiles that are not there either.
+    btn.disabled = true;
+    btn.title = 'the sky glow tiles are not answering';
     spotMsg('the light pollution layer could not load. every spot still links to its own light map.');
   });
   btn.addEventListener('click', () => show(!map.hasLayer(lp)));
