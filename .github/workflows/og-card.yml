@@ -61,8 +61,13 @@ jobs:
             echo "card unchanged, nothing to commit"
             exit 0
           fi
+          # slack, imessage and the rest cache og:image by URL for days, so a card
+          # that changes daily behind a fixed URL is a card nobody ever sees change.
+          # stamp the query string to make each day's card a new URL.
+          stamp=$(date +%Y%m%d)
+          sed -i -E "s|(og\.png)\?v=[0-9]+|\1?v=$stamp|g" index.html
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add og.png
+          git add og.png index.html
           git commit -m "Refresh social card for tonight's moon [skip ci]"
           git push

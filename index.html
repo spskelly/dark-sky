@@ -12,13 +12,14 @@
 <meta property="og:url" content="https://spskelly.github.io/dark-sky/">
 <meta property="og:title" content="dark sky calendar">
 <meta property="og:description" content="Every new-moon window for the next twelve months, tonight's cloud cover hour by hour, and 20 dark places to point a lens from.">
-<meta property="og:image" content="https://spskelly.github.io/dark-sky/og.png">
+<meta property="og:image" content="https://spskelly.github.io/dark-sky/og.png?v=20260912">
+<meta property="og:image:alt" content="A crescent moon beside the words dark sky calendar.">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="dark sky calendar">
 <meta name="twitter:description" content="Every new-moon window for the next twelve months, tonight's cloud cover hour by hour, and 20 dark places to point a lens from.">
-<meta name="twitter:image" content="https://spskelly.github.io/dark-sky/og.png">
+<meta name="twitter:image" content="https://spskelly.github.io/dark-sky/og.png?v=20260912">
 <link rel="icon" id="favicon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='13' fill='%230f1a34'/%3E%3Ccircle cx='34' cy='32' r='20' fill='%23ece7d4'/%3E%3Ccircle cx='22' cy='27' r='18' fill='%230f1a34'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..600,50&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
@@ -51,6 +52,7 @@
   button { background: none; border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
   button:hover { border-color: var(--ink-dim); }
   button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--today); outline-offset: 2px; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
   button[aria-pressed="true"] { background: var(--night-3); border-color: var(--ink-dim); }
 
   /* top: hero moon + current status, then controls */
@@ -135,6 +137,8 @@
   .windows { max-width: 1100px; margin: 44px auto 0; }
   .windows h3 { font-family: var(--serif); font-weight: 400; font-size: 24px; margin: 0 0 6px; }
   .windows p.lede { margin: 0 0 18px; color: var(--ink-dim); max-width: 64ch; line-height: 1.5; }
+  p.lede a { color: var(--moon-dim); }
+  p.lede a:hover { color: var(--moon); }
   .windows ol { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
   .windows li { background: var(--night-2); border-radius: 10px; padding: 12px 14px; display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: baseline; cursor: pointer; border: 1px solid transparent; }
   .windows li:hover { border-color: var(--line); }
@@ -154,7 +158,15 @@
   .spot-controls .group { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
   .spot-controls .group button { padding: 4px 11px; font-size: 13px; }
   .spot-controls input { background: var(--night-2); border: 1px solid var(--line); color: var(--ink); border-radius: 6px; padding: 5px 8px; width: 11ch; font: inherit; font-size: 13px; }
-  .spot-controls input:focus-visible { outline: 2px solid var(--today); outline-offset: 1px; }
+  .spot-controls input:focus-visible, .spot-controls select:focus-visible { outline: 2px solid var(--today); outline-offset: 1px; }
+  .spot-controls select { background: var(--night-2); border: 1px solid var(--line); color: var(--ink); border-radius: 999px; padding: 4px 10px; font: inherit; font-size: 13px; max-width: 22ch; }
+  .spot-controls details { flex-basis: 100%; font-size: 13px; }
+  .spot-controls details summary { cursor: pointer; color: var(--ink-dim); width: max-content; }
+  .spot-controls details summary:focus-visible { outline: 2px solid var(--today); outline-offset: 2px; }
+  .spot-controls details .group { margin-top: 8px; }
+  /* armed for a click that sets home */
+  #map.picking { cursor: crosshair; }
+  #map.picking .leaflet-grab { cursor: crosshair; }
   .spot-layout { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 14px; }
   #map { height: 560px; border-radius: 12px; background: var(--night-2); overflow: hidden; }
   /* pull the bright topo tiles down toward the palette; imagery is left alone */
@@ -196,6 +208,15 @@
   .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; color: var(--ink-dim); align-items: center; }
   .legend span { display: inline-flex; align-items: center; gap: 6px; }
 
+  /* the spot notes are hand-written and go stale; say so where it is read */
+  .disclaimer { margin-top: 22px; border-left: 3px solid var(--today); background: var(--night-2); border-radius: 0 10px 10px 0; padding: 14px 18px; max-width: 78ch; }
+  .disclaimer h4 { margin: 0 0 8px; font-family: var(--serif); font-weight: 400; font-size: 17px; color: var(--today); }
+  .disclaimer p { margin: 0 0 8px; font-size: 13px; line-height: 1.55; color: var(--ink-dim); }
+  .disclaimer p:last-child { margin-bottom: 0; }
+  .disclaimer b { color: var(--ink); font-weight: 500; }
+  .disclaimer a { color: var(--moon-dim); }
+  .disclaimer a:hover { color: var(--moon); }
+
   .season { max-width: 1100px; margin: 44px auto 0; }
   .season h3 { font-family: var(--serif); font-weight: 400; font-size: 24px; margin: 0 0 12px; }
   .season ul { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px 24px; }
@@ -209,6 +230,8 @@
   }
 
   .foot { max-width: 1100px; margin: 40px auto 0; color: var(--ink-dim); font-size: 13px; line-height: 1.6; max-width: 70ch; }
+  .foot a { color: var(--moon-dim); }
+  .foot a:hover { color: var(--moon); }
 
   @media (max-width: 720px) {
     .hero { grid-template-columns: minmax(0, 1fr); text-align: center; justify-items: stretch; }
@@ -267,7 +290,7 @@
 
 <section class="spots">
   <h3>where to look up</h3>
-  <p class="lede">a curated set of high, open, dark places within a few hours of Waynesville. teal pins allow overnight camping; ivory pins are drive-up or short-hike viewing only; gold pins have a catch. distances are straight-line from your home point, drive times are rough and assume the parkway is open.</p>
+  <p class="lede">forty high, open, dark places across western north carolina, from the cherohala skyway to doughton park. teal pins allow overnight camping, ivory pins are drive-up or short-hike viewing only, gold pins have a catch, and <a href="#check-before-you-go">all of it needs checking before you drive</a>. set your home town and the list reorders around it; drive times are rough, measured from Waynesville, and assume the parkway is open, so they only set the order while home is there.</p>
   <div class="spot-controls">
     <div class="group" role="group" aria-label="filter spots">
       <button data-filter="all" aria-pressed="true">all</button>
@@ -279,13 +302,20 @@
       <button data-sort="mins" aria-pressed="true">drive time</button>
       <button data-sort="dist" aria-pressed="false">distance</button>
     </div>
-    <div class="group">
+    <div class="group" role="group" aria-label="home location">
       <span>home</span>
-      <input id="home-lat" type="number" step="0.0001" aria-label="home latitude">
-      <input id="home-lon" type="number" step="0.0001" aria-label="home longitude">
-      <button id="home-set">update</button>
+      <select id="home-town" aria-label="home town"></select>
+      <button id="home-pick" aria-pressed="false">pick on map</button>
       <button id="home-geo">use my location</button>
     </div>
+    <details class="coords">
+      <summary>exact coordinates</summary>
+      <div class="group">
+        <input id="home-lat" type="number" step="0.0001" aria-label="home latitude">
+        <input id="home-lon" type="number" step="0.0001" aria-label="home longitude">
+        <button id="home-set">update</button>
+      </div>
+    </details>
   </div>
   <div class="tonight spot-tonight" id="spot-tonight" aria-live="polite"></div>
   <div class="spot-layout">
@@ -298,6 +328,30 @@
     <span><i class="pin warn"></i> restricted, read the note</span>
     <span><i class="pin home"></i> home</span>
   </div>
+
+  <aside class="disclaimer" id="check-before-you-go">
+    <h4>check before you go</h4>
+    <p>
+      this list is one person's notes, not an official source, and it is not kept in sync with anybody's
+      rulebook. <b>coordinates are approximate parking or summit points</b>, elevations and drive times are
+      rounded, and the camping, fire and access notes were true when they were written and may not be true
+      tonight. gates close for ice, forest orders change, permits get introduced, roads wash out, and
+      campgrounds run seasonally.
+    </p>
+    <p>
+      confirm anything you are relying on with whoever manages the land, and never plan a night around a
+      single line of text here:
+      <a href="https://www.nps.gov/blri/planyourvisit/roadclosures.htm" target="_blank" rel="noopener">parkway road closures</a>,
+      <a href="https://www.nps.gov/grsm/planyourvisit/temproadclose.htm" target="_blank" rel="noopener">smokies road status</a>,
+      <a href="https://www.fs.usda.gov/r08/nfsnc" target="_blank" rel="noopener">national forests in nc</a>,
+      <a href="https://www.ncparks.gov/" target="_blank" rel="noopener">nc state parks</a>.
+    </p>
+    <p>
+      these are remote places at four to six thousand feet, often on gravel, usually with no signal. weather
+      turns faster up there than the forecast suggests and a closed gate at 9pm is a long detour. you are
+      responsible for your own safety and for knowing the rules where you park and sleep.
+    </p>
+  </aside>
 </section>
 
 <section class="season">
@@ -314,7 +368,7 @@
 </section>
 
 <p class="foot">
-  phase times come from the meeus true-phase algorithm and are converted to your local time zone, so dates should match published almanacs to the day. the window is a planning heuristic: the moon also rises and sets, so a waxing crescent a few days past new is gone by late evening, and a waning crescent doesn't rise until the small hours. those edge days are often darker than they look.
+  phase times come from the meeus true-phase algorithm and are converted to your local time zone, so dates should match published almanacs to the day. the window is a planning heuristic: the moon also rises and sets, so a waxing crescent a few days past new is gone by late evening, and a waning crescent doesn't rise until the small hours. those edge days are often darker than they look. cloud cover comes from open-meteo and is a model, not a promise; the spot notes are hand-written and are <a href="#check-before-you-go">not a substitute for checking with the land manager</a>.
 </p>
 
 <script>
@@ -705,10 +759,93 @@ const SPOTS = [
     note: 'former nasa tracking station turned observatory campus in the pisgah forest. access is through scheduled public events, not walk-up. worth watching their calendar for new moon nights.' },
   { name: 'Max Patch', lat: 35.7963, lon: -82.9622, elev: 4629, kind: 'warn', mins: 65, tags: ['closed after dark', 'no camping through 2029'],
     note: 'the famous bald, but a forest order closes it from an hour after sunset to an hour before sunrise and bans camping and fires, currently extended into 2029. listed so you do not plan around it.' },
+
+  // ---- black mountains and the north ----
+  { name: 'Mount Mitchell State Park', lat: 35.7650, lon: -82.2652, elev: 6684, kind: 'camp', mins: 95, tags: ['highest point east of the mississippi', 'tent-only campground', 'seasonal'],
+    note: 'the summit deck at 6,684 feet, with a nine-site tent campground below it. the park gate and the parkway approach both close for ice, and the campground runs roughly may through october, so check the park before driving up. asheville glows hard to the south; north and east are excellent.' },
+  { name: 'Craggy Pinnacle', lat: 35.7017, lon: -82.3797, elev: 5892, kind: 'view', mins: 80, tags: ['parkway mp 364.1', 'short hike', '360 degrees'],
+    note: 'half-mile climb from the craggy dome lot to a bald summit with a full horizon. closer to asheville than mitchell, so the southern sky pays for it, but it is the easiest big view on this stretch of parkway. no camping.' },
+  { name: 'Black Mountain Campground', lat: 35.7515, lon: -82.2216, elev: 3000, kind: 'camp', mins: 100, tags: ['pisgah nf', 'reservable', 'valley site'],
+    note: 'developed forest service campground on the south toe river, at the foot of the mount mitchell trail. it is down in the trees, so treat it as a base: sleep here, drive or climb for sky. good fallback when the mitchell gate is shut.' },
+  { name: 'Big Bald', lat: 36.0022, lon: -82.4922, elev: 5516, kind: 'camp', mins: 105, tags: ['appalachian trail', 'grass bald', 'dispersed camping'],
+    note: 'a genuinely big open bald on the tennessee line with very little to the north of it. reached from the at at sams gap or through wolf laurel; the wolf laurel approach crosses private roads, so read the current access notes before committing. dispersed camping along the trail.' },
+
+  // ---- linville gorge and the northeast ----
+  { name: "Wiseman's View", lat: 35.9247, lon: -81.9036, elev: 3400, kind: 'view', mins: 110, tags: ['linville gorge', 'drive-up gravel', 'west facing'],
+    note: 'paved overlook decks a short walk from the lot, looking straight across the gorge at table rock and hawksbill. old nc 105 in is rough gravel but passable in a car. no camping at the overlook; the wilderness behind it needs a permit on weekends may through october.' },
+  { name: 'Table Rock picnic area', lat: 35.8867, lon: -81.8853, elev: 3400, kind: 'view', mins: 120, tags: ['linville gorge', 'steep gravel access', 'summit hike'],
+    note: 'the lot sits at 3,400 feet with the summit a steep mile above it. the access road is long, narrow gravel and gated seasonally. spectacular dark east over the gorge, with morganton and hickory glowing further out. day use only at the picnic area.' },
+  { name: 'Beacon Heights', lat: 36.0872, lon: -81.8125, elev: 4220, kind: 'view', mins: 125, tags: ['parkway mp 305.2', 'short hike', 'quieter than rough ridge'],
+    note: 'quarter-mile walk to open rock slabs under grandfather mountain, with a wide southern and eastern view. the obvious alternative to rough ridge a few miles north, which draws crowds and has no room to set up. no camping.' },
+  { name: 'Grandfather Mountain State Park', lat: 36.1058, lon: -81.8317, elev: 5946, kind: 'camp', mins: 130, tags: ['backcountry permit', 'ridge campsites', 'strenuous'],
+    note: 'the state park side, not the private attraction with the swinging bridge. backcountry sites along the profile and daniel boone scout trails sit high on the ridge with real horizon. permits are required and sites book up; the trails are ladder-and-cable steep, so this is a commitment, not a drive-up.' },
+  { name: 'Elk Knob State Park', lat: 36.3350, lon: -81.6900, elev: 5520, kind: 'view', mins: 145, tags: ['summit hike', 'astronomy programs', 'no camping on summit'],
+    note: 'a moderate 1.9-mile climb to a north-facing summit well away from any city, and one of the darkest skies in the northern mountains. the park runs occasional night programs. gates close at standard park hours, so check before planning a late night.' },
+  { name: 'Doughton Park', lat: 36.4200, lon: -81.1800, elev: 3600, kind: 'camp', mins: 180, tags: ['parkway mp 241', 'campground', 'open meadows'],
+    note: 'big grassy bluffs and a parkway campground at the far northeast end of the range, with the piedmont dropping away to the east. a long drive from haywood county, but the meadows give you horizon in every direction and it is never as busy as the grandfather stretch.' },
+
+  // ---- east and southeast ----
+  { name: 'Lake James State Park', lat: 35.7300, lon: -81.8950, elev: 1200, kind: 'camp', mins: 105, tags: ['lakeshore', 'campground', 'low elevation'],
+    note: 'low and warm compared with the balds, but the water gives you an open northern horizon toward the linville face with nothing in the way. reservable campground and easy access. marion and morganton glow east and south; come here for the moon, planets and meteors rather than the core.' },
+  { name: 'Bearwallow Mountain', lat: 35.4550, lon: -82.3800, elev: 4232, kind: 'view', mins: 65, tags: ['grassy bald', 'conservation easement', 'short hike'],
+    note: 'a mile up an old road to a grazed bald with a tower and a wide southern view over hickory nut gorge. open to the public through a conservation easement, so tread lightly and do not camp. the closest true bald to the hendersonville side.' },
+  { name: 'DuPont State Recreational Forest', lat: 35.2000, lon: -82.6200, elev: 2900, kind: 'warn', mins: 70, tags: ['gates close at night', 'day use only'],
+    note: 'lovely open granite around the waterfalls, but the access areas close thirty minutes after sunset and there is no camping. listed so you know not to build a night around it; gorges state park to the southwest is the version of this you can actually stay at.' },
+
+  // ---- south ----
+  { name: 'Gorges State Park', lat: 35.0900, lon: -82.9500, elev: 3000, kind: 'camp', mins: 80, tags: ['backcountry and drive-in sites', 'south facing', 'jocassee gorges'],
+    note: 'the escarpment drops two thousand feet into the jocassee gorges right in front of you, and there is almost nothing on the south carolina side to light it. backcountry sites plus a small drive-in campground. one of the best southern horizons in the state for the core.' },
+
+  // ---- southwest, highlands and cashiers ----
+  { name: 'Whiteside Mountain', lat: 35.0820, lon: -83.1430, elev: 4930, kind: 'view', mins: 75, tags: ['cliff top', 'loop trail', 'no camping'],
+    note: 'a two-mile loop onto the top of the highest cliffs in the east, looking south and east off the escarpment. no camping and the lot is small, so arrive before dark and mind the unfenced edges. exceptional south-facing view when the escarpment is not fogged in.' },
+
+  // ---- west, nantahala ----
+  { name: 'Wayah Bald', lat: 35.1800, lon: -83.5620, elev: 5342, kind: 'view', mins: 90, tags: ['stone tower', 'drive-up gravel', 'road closed in winter'],
+    note: 'a stone observation tower you can drive most of the way to, with a hundred miles of nantahala and the smokies to the west and nothing much in between. fr 69 is gravel and gated from roughly january into march. no camping at the tower; dispersed sites along the forest road.' },
+  { name: 'Standing Indian Campground', lat: 35.0700, lon: -83.5250, elev: 3400, kind: 'camp', mins: 105, tags: ['nantahala nf', 'reservable', 'at access'],
+    note: 'a large forest service campground in the upper nantahala basin, ringed by five-thousand-foot ridges. the sites are wooded, but the campground field and the road out give you sky, and the at ridges above are a short climb. seasonal, roughly april through november.' },
+  { name: 'Jackrabbit Mountain', lat: 35.0100, lon: -83.7700, elev: 2000, kind: 'camp', mins: 120, tags: ['lake chatuge', 'campground', 'far southwest'],
+    note: 'peninsula campground on lake chatuge at the georgia line, with open water south and west. low, so it is humid and hazier than the balds, but it covers the far southwestern corner and the lakeshore sites have a clean horizon.' },
+
+  // ---- far west, graham and swain ----
+  { name: 'Huckleberry Knob', lat: 35.3350, lon: -83.9880, elev: 5560, kind: 'camp', mins: 115, tags: ['cherohala skyway', 'grass bald', 'dispersed camping'],
+    note: 'the highest point in graham county, a mile of easy old roadbed from the skyway to a treeless summit. dispersed camping is allowed on the bald and there is essentially nothing west of here until tennessee. the best dark sky on this list that you can still walk to in twenty minutes.' },
+  { name: 'Tsali Recreation Area', lat: 35.4000, lon: -83.6000, elev: 1800, kind: 'camp', mins: 60, tags: ['fontana lake', 'campground', 'low but close'],
+    note: 'forest service campground on a fontana lake peninsula, best known for mountain biking. low elevation and tree cover, but it is dark, close to town, and the lakeshore opens up north toward the park. a soft option when the high country is iced in.' },
 ];
 
 const HOME_DEFAULT = { lat: 35.4887, lon: -82.9887, name: 'Waynesville' };
-const spotState = { home: { ...HOME_DEFAULT }, filter: 'all', sort: 'mins', map: null, markers: new Map(), homeMarker: null, active: null };
+
+// somewhere to start from without typing coordinates. spread across the whole
+// region so wherever in wnc you are, something here is close enough to be useful.
+const TOWNS = [
+  ['Andrews', 35.2012, -83.8241], ['Asheville', 35.5951, -82.5515], ['Banner Elk', 36.1629, -81.8712],
+  ['Black Mountain', 35.6182, -82.3212], ['Boone', 36.2168, -81.6746], ['Brevard', 35.2334, -82.7343],
+  ['Bryson City', 35.4298, -83.4471], ['Burnsville', 35.9176, -82.3007], ['Canton', 35.5321, -82.8376],
+  ['Cashiers', 35.1112, -83.0985], ['Cherokee', 35.4740, -83.3140], ['Franklin', 35.1821, -83.3815],
+  ['Hayesville', 35.0462, -83.8188], ['Hendersonville', 35.3187, -82.4610], ['Highlands', 35.0526, -83.1968],
+  ['Hot Springs', 35.8934, -82.8265], ['Lake Lure', 35.4290, -82.2043], ['Marion', 35.6840, -82.0090],
+  ['Marshall', 35.7968, -82.6843], ['Morganton', 35.7454, -81.6848], ['Murphy', 35.0873, -84.0346],
+  ['Newland', 36.0876, -81.9265], ['Robbinsville', 35.3226, -83.8074], ['Spruce Pine', 35.9151, -82.0640],
+  ['Sylva', 35.3737, -83.2254], ['Tryon', 35.2076, -82.2390], ['Waynesville', 35.4887, -82.9887],
+  ['West Jefferson', 36.4035, -81.4926],
+];
+
+const spotState = { home: { ...HOME_DEFAULT }, filter: 'all', sort: 'mins', map: null, markers: new Map(), homeMarker: null, active: null, picking: false };
+
+// remember the home point between visits; storage can throw in a private window
+const HOME_KEY = 'darksky.home';
+function saveHome() {
+  try { localStorage.setItem(HOME_KEY, JSON.stringify(spotState.home)); } catch (e) {}
+}
+function loadSavedHome() {
+  try {
+    const v = JSON.parse(localStorage.getItem(HOME_KEY) || 'null');
+    if (v && isFinite(v.lat) && isFinite(v.lon)) return v;
+  } catch (e) {}
+  return null;
+}
 
 // straight-line distance in miles and compass bearing from home
 function haversine(a, b) {
@@ -733,23 +870,46 @@ function spotLinks(s) {
   return `<a href="${co}" target="_blank" rel="noopener">forecast</a><a href="${lp}" target="_blank" rel="noopener">light map</a><a href="${gm}" target="_blank" rel="noopener">directions</a>`;
 }
 
+const homeIsDefault = () =>
+  Math.abs(spotState.home.lat - HOME_DEFAULT.lat) < 0.01 && Math.abs(spotState.home.lon - HOME_DEFAULT.lon) < 0.01;
+
+// mins is curated road knowledge measured from waynesville. it cannot be
+// recomputed for an arbitrary home, so once home moves it stops being a sort key
+// and distance takes over; otherwise someone in boone gets haywood county first.
+const sortingByDrive = () => spotState.sort === 'mins' && homeIsDefault();
+
 function visibleSpots() {
   const f = spotState.filter;
+  const byDrive = sortingByDrive();
   return SPOTS
     .filter(s => f === 'all' || (f === 'camp' ? s.kind === 'camp' : s.kind === 'view'))
     .map(s => ({ ...s, dist: haversine(spotState.home, s), dir: bearing(spotState.home, s) }))
-    // drive time is what a night hinges on; straight-line distance is the alternative
-    .sort((a, b) => spotState.sort === 'mins' ? a.mins - b.mins || a.dist - b.dist : a.dist - b.dist);
+    .sort((a, b) => byDrive ? a.mins - b.mins || a.dist - b.dist : a.dist - b.dist);
+}
+
+// reflect that in the controls rather than silently ignoring the button
+function syncSortControls() {
+  const dflt = homeIsDefault();
+  const drive = document.querySelector('[data-sort="mins"]');
+  const dist = document.querySelector('[data-sort="dist"]');
+  if (!drive || !dist) return;
+  drive.disabled = !dflt;
+  drive.title = dflt ? 'drive time from Waynesville' : 'drive times are only known from Waynesville, so distance is used while home is elsewhere';
+  drive.setAttribute('aria-pressed', String(sortingByDrive()));
+  dist.setAttribute('aria-pressed', String(!sortingByDrive()));
 }
 
 function renderSpotList() {
   const list = document.getElementById('spot-list');
   const rows = visibleSpots();
+  const dflt = homeIsDefault();
+  syncSortControls();
   list.innerHTML = rows.map(s => `<div class="spot ${spotState.active === s.name ? 'active' : ''}" data-name="${s.name}" tabindex="0" role="button" aria-pressed="${spotState.active === s.name}">
-    <div class="top"><span class="name">${s.name}</span><span class="dist">${s.dist.toFixed(0)} mi ${s.dir} &middot; ~${fmtDur(s.mins)}</span></div>
+    <div class="top"><span class="name">${s.name}</span><span class="dist">${s.dist.toFixed(0)} mi ${s.dir}${dflt ? ` &middot; ~${fmtDur(s.mins)}` : ''}</span></div>
     <div class="tags">
       <span class="tag ${s.kind === 'camp' ? 'camp' : s.kind === 'warn' ? 'warn' : ''}">${s.kind === 'camp' ? 'camp overnight' : s.kind === 'warn' ? 'restricted' : 'viewing only'}</span>
       <span class="tag">${s.elev.toLocaleString()} ft</span>
+      ${dflt ? '' : `<span class="tag">~${fmtDur(s.mins)} from Waynesville</span>`}
       ${s.tags.map(t => `<span class="tag">${t}</span>`).join('')}
     </div>
     <div class="note">${s.note}</div>
@@ -805,6 +965,11 @@ function initMap() {
     attribution: 'USGS The National Map', maxZoom: 16,
   });
   topo.addTo(map);
+  map.on('click', e => {
+    if (!spotState.picking) return;
+    setHome(e.latlng.lat, e.latlng.lng);
+    setPicking(false);
+  });
   L.control.layers({ 'topo': topo, 'imagery': imagery }, null, { position: 'topright', collapsed: false }).addTo(map);
   spotState.map = map;
   for (const s of SPOTS) {
@@ -823,12 +988,16 @@ function initMap() {
 }
 
 // frame the visible spots plus home, so nothing sits off the edge on load
-function fitSpots(animate = true) {
+function fitSpots(animate = true, force = false) {
   if (!spotState.map) return;
   const pts = visibleSpots().map(s => [s.lat, s.lon]);
   pts.push([spotState.home.lat, spotState.home.lon]);
   if (pts.length < 2) return;
-  spotState.map.fitBounds(L.latLngBounds(pts), { padding: [30, 30], maxZoom: 11, animate });
+  const want = L.latLngBounds(pts);
+  // if it all already fits, leave the view alone: yanking the map after every
+  // click is worse than a little wasted margin
+  if (!force && spotState.map.getBounds().contains(want)) return;
+  spotState.map.fitBounds(want, { padding: [30, 30], maxZoom: 11, animate });
 }
 
 function placeHome() {
@@ -838,22 +1007,43 @@ function placeHome() {
     .bindPopup('<b>home</b>').addTo(spotState.map);
 }
 
-function setHome(lat, lon) {
+function setHome(lat, lon, name) {
   if (!isFinite(lat) || !isFinite(lon)) return;
-  spotState.home = { lat, lon };
-  document.getElementById('home-lat').value = lat.toFixed(4);
-  document.getElementById('home-lon').value = lon.toFixed(4);
+  spotState.home = { lat: +lat, lon: +lon, name: name || '' };
+  document.getElementById('home-lat').value = (+lat).toFixed(4);
+  document.getElementById('home-lon').value = (+lon).toFixed(4);
+  // match the dropdown to the point when it lands on a town, else show custom
+  const hit = TOWNS.find(([n, la, lo]) => Math.abs(la - lat) < 0.002 && Math.abs(lo - lon) < 0.002);
+  document.getElementById('home-town').value = hit ? hit[0] : '__custom';
+  saveHome();
   placeHome();
   renderSpotList();
   loadHomeForecast();
 }
 
-document.getElementById('home-set').addEventListener('click', () =>
-  setHome(parseFloat(document.getElementById('home-lat').value), parseFloat(document.getElementById('home-lon').value)));
-document.getElementById('home-geo').addEventListener('click', () => {
-  if (!navigator.geolocation) return;
-  navigator.geolocation.getCurrentPosition(pos => setHome(pos.coords.latitude, pos.coords.longitude), () => {});
-});
+function setPicking(on) {
+  spotState.picking = on;
+  document.getElementById('home-pick').setAttribute('aria-pressed', String(on));
+  document.getElementById('map').classList.toggle('picking', on);
+}
+
+(function initHomeControls() {
+  const sel = document.getElementById('home-town');
+  sel.innerHTML = TOWNS.map(([n]) => `<option value="${n}">${n}</option>`).join('')
+    + '<option value="__custom">custom\u2026</option>';
+  sel.addEventListener('change', () => {
+    const t = TOWNS.find(([n]) => n === sel.value);
+    if (t) setHome(t[1], t[2], t[0]); else setPicking(true);
+  });
+  document.getElementById('home-pick').addEventListener('click', () => setPicking(!spotState.picking));
+  document.getElementById('home-set').addEventListener('click', () =>
+    setHome(parseFloat(document.getElementById('home-lat').value), parseFloat(document.getElementById('home-lon').value)));
+  document.getElementById('home-geo').addEventListener('click', () => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(pos => setHome(pos.coords.latitude, pos.coords.longitude), () => {});
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && spotState.picking) setPicking(false); });
+})();
 document.querySelectorAll('[data-filter]').forEach(b => b.addEventListener('click', () => {
   spotState.filter = b.dataset.filter;
   document.querySelectorAll('[data-filter]').forEach(x => x.setAttribute('aria-pressed', x === b));
@@ -868,8 +1058,9 @@ document.querySelectorAll('[data-sort]').forEach(b => b.addEventListener('click'
 // ---------- forecast (open-meteo, no key) ----------
 
 // two independent panels: home (hero, feeds the calendar badges) and the selected spot (in the spots section)
+const FC_TTL = 30 * 60 * 1000;   // a cached forecast older than this is refetched
 const fc = {
-  cache: new Map(), nightly: new Map(),
+  cache: new Map(), nightly: new Map(), at: 0,
   home: { target: null, data: null, status: 'idle', el: 'tonight' },
   spot: { target: null, data: null, status: 'idle', el: 'spot-tonight' },
 };
@@ -877,7 +1068,8 @@ const fc = {
 // fetch 8 days of hourly sky data for a point, downscaled to its elevation when we know it
 async function fetchForecast(t) {
   const key = `${t.lat.toFixed(3)},${t.lon.toFixed(3)}`;
-  if (fc.cache.has(key)) return fc.cache.get(key);
+  const hit = fc.cache.get(key);
+  if (hit && Date.now() - hit.at < FC_TTL) return hit.data;
   const q = new URLSearchParams({
     latitude: t.lat, longitude: t.lon,
     hourly: 'cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high,temperature_2m,wind_speed_10m,dew_point_2m,precipitation_probability',
@@ -888,7 +1080,8 @@ async function fetchForecast(t) {
   const r = await fetch(`https://api.open-meteo.com/v1/forecast?${q}`);
   if (!r.ok) throw new Error(`forecast ${r.status}`);
   const d = await r.json();
-  fc.cache.set(key, d);
+  fc.cache.set(key, { at: Date.now(), data: d });
+  fc.at = Date.now();
   return d;
 }
 
@@ -1043,6 +1236,30 @@ document.querySelectorAll('[data-hemi]').forEach(b => b.addEventListener('click'
   document.querySelectorAll('[data-hemi]').forEach(x => x.setAttribute('aria-pressed', x === b));
   renderAll();
 }));
+// everything on this page is derived from new Date() at render time, so a tab
+// left open past midnight keeps insisting it is yesterday: "today" sits on the
+// wrong cell, the hero describes last night, and the tab icon shows the wrong
+// phase. re-render when the local day rolls over, and whenever a backgrounded
+// tab comes back, since timers are throttled or frozen while hidden.
+let lastDay = dayKey(new Date());
+function refreshIfStale() {
+  const today = dayKey(new Date());
+  const rolled = today !== lastDay;
+  if (rolled) { lastDay = today; renderAll(); }
+  if (rolled || Date.now() - fc.at > FC_TTL) {
+    loadHomeForecast();
+    if (fc.spot.target) loadSpotForecast(fc.spot.target);
+  }
+}
+function scheduleDayRoll() {
+  const now = new Date();
+  // twenty seconds past midnight, to stay clear of clock jitter and dst edges
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 20);
+  setTimeout(() => { refreshIfStale(); scheduleDayRoll(); }, Math.max(1000, next - now));
+}
+scheduleDayRoll();
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshIfStale(); });
+
 document.addEventListener('keydown', e => {
   const cell = e.target.closest && e.target.closest('.day[data-day]');
   if (cell) {
@@ -1068,11 +1285,11 @@ document.getElementById('cal').addEventListener('focusin', e => {
 });
 
 renderAll();
-document.getElementById('home-lat').value = HOME_DEFAULT.lat.toFixed(4);
-document.getElementById('home-lon').value = HOME_DEFAULT.lon.toFixed(4);
+const savedHome = loadSavedHome() || HOME_DEFAULT;
+spotState.home = { lat: savedHome.lat, lon: savedHome.lon, name: savedHome.name || '' };
 initMap();
-renderSpotList();
-loadHomeForecast();
+// syncs the controls, the list and the forecast to whatever home ended up being
+setHome(spotState.home.lat, spotState.home.lon, spotState.home.name);
 </script>
 </body>
 </html>
