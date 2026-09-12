@@ -22,6 +22,7 @@
 <meta name="twitter:image" content="https://spskelly.github.io/dark-sky/og.png?v=20260912">
 <link rel="icon" id="favicon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='13' fill='%230f1a34'/%3E%3Ccircle cx='34' cy='32' r='20' fill='%23ece7d4'/%3E%3Ccircle cx='22' cy='27' r='18' fill='%230f1a34'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..600,50&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -73,7 +74,7 @@
   .hero svg { width: 100%; height: auto; filter: drop-shadow(0 0 28px rgba(236,231,212,0.18)); }
   /* the headline is static markup now, so the purpose paints before the
      script runs rather than after it */
-  .hero h1 { font-family: var(--serif); font-weight: 300; font-size: clamp(28px, 4.2vw, 46px); line-height: 1.06; margin: 0 0 12px; letter-spacing: -0.01em; }
+  .hero h1 { font-family: var(--serif); font-weight: 300; font-size: clamp(28px, 4.2vw, 46px); line-height: 1.06; margin: 0 0 12px; letter-spacing: -0.01em; min-height: 2.12em; }
   .hero h1 em { font-style: italic; color: var(--moon); }
   .hero p { margin: 0; max-width: 62ch; color: var(--ink-dim); line-height: 1.5; }
   .hero .hero-lede { color: var(--ink); font-size: clamp(15px, 1.4vw, 17px); max-width: 58ch; }
@@ -164,7 +165,7 @@
   .spot-tonight { max-width: none; margin: 0 0 14px; background: var(--night-2); border-radius: 12px; padding: 12px 14px; }
   /* nothing is selected on load, so don't paint an empty card */
   .spot-tonight:empty { display: none; }
-  .day .cloud { font-size: 10px; text-align: center; color: var(--ink-dim); min-height: 1.2em; }
+  .day .cloud { font-size: 10px; line-height: 1.2; text-align: center; color: var(--ink-dim); min-height: 1.2em; }
   .day .cloud.clear { color: var(--dark-sky); }
   .day .cloud.mixed { color: var(--moon-dim); }
 
@@ -293,10 +294,20 @@
   .season li { color: var(--ink-dim); font-size: 14px; line-height: 1.5; }
   .season li b { color: var(--ink); font-weight: 500; }
 
+  /* the list is a scrolling column beside the map on a wide screen. below 900px
+     it stacks under the map and loses that scroll box, which put all forty
+     cards — about fifteen thousand pixels of them — between the map and the
+     rest of the page. show the nearest few and let the rest be asked for. */
+  #spot-more { display: none; margin-top: 10px; width: 100%; padding: 10px 14px; color: var(--ink-dim); }
+  #spot-more:hover { color: var(--ink); }
+  /* the id selector below would otherwise beat the ua rule for [hidden] */
+  #spot-more[hidden] { display: none; }
   @media (max-width: 900px) {
     .spot-layout { grid-template-columns: minmax(0, 1fr); }
     #map { height: 380px; }
     .spot-list { max-height: none; }
+    .spot-list:not(.all) .spot:nth-child(n+7) { display: none; }
+    #spot-more { display: block; }
   }
 
   .foot { max-width: 1100px; margin: 40px auto 0; color: var(--ink-dim); font-size: 13px; line-height: 1.6; max-width: 70ch; }
@@ -430,6 +441,7 @@
     <div id="map"></div>
     <div class="spot-list" id="spot-list"></div>
   </div>
+  <button id="spot-more" aria-expanded="false" aria-controls="spot-list"></button>
   <div class="legend">
     <span><i class="pin camp"></i> overnight camping allowed</span>
     <span><i class="pin view"></i> viewing only</span>
@@ -959,7 +971,7 @@ const TOWNS = [
   ['West Jefferson', 36.4035, -81.4926],
 ];
 
-const spotState = { home: { ...HOME_DEFAULT }, filter: 'all', sort: 'mins', map: null, markers: new Map(), homeMarker: null, active: null, picking: false };
+const spotState = { home: { ...HOME_DEFAULT }, filter: 'all', sort: 'mins', map: null, markers: new Map(), homeMarker: null, active: null, picking: false, showAll: false };
 
 // remember the home point between visits; storage can throw in a private window
 const HOME_KEY = 'darksky.home';
@@ -1016,6 +1028,11 @@ function visibleSpots() {
     .sort((a, b) => byDrive ? a.drive - b.drive || a.dist - b.dist : a.dist - b.dist);
 }
 
+// how many cards the collapsed mobile list shows, and the width it collapses
+// at. both mirror the stylesheet: :nth-child(n+7) inside @media (max-width: 900px)
+const SPOT_PREVIEW = 6;
+const SPOT_COLLAPSE_AT = 900;
+
 function renderSpotList() {
   const list = document.getElementById('spot-list');
   const rows = visibleSpots();
@@ -1029,6 +1046,15 @@ function renderSpotList() {
     <div class="note">${s.note}</div>
     <div class="links">${spotLinks(s)}</div>
   </div>`).join('');
+  // the css only collapses the list below 900px, so the button is only visible
+  // there; its label still has to match whatever the filter left behind
+  list.classList.toggle('all', spotState.showAll);
+  const more = document.getElementById('spot-more');
+  const hidden = rows.length - SPOT_PREVIEW;
+  more.hidden = hidden <= 0;
+  more.textContent = spotState.showAll ? 'show fewer' : `show all ${rows.length} spots`;
+  more.setAttribute('aria-expanded', String(spotState.showAll));
+
   list.querySelectorAll('.spot').forEach(el => {
     const go = () => focusSpot(el.dataset.name);
     el.addEventListener('click', go);
@@ -1047,6 +1073,12 @@ function renderSpotList() {
 
 function focusSpot(name) {
   spotState.active = name;
+  // the card may be one the collapsed list is hiding; opening it from the map
+  // should not scroll to nothing
+  if (!spotState.showAll && window.matchMedia(`(max-width: ${SPOT_COLLAPSE_AT}px)`).matches) {
+    const rank = visibleSpots().findIndex(x => x.name === name);
+    if (rank >= SPOT_PREVIEW) spotState.showAll = true;
+  }
   const s = SPOTS.find(x => x.name === name);
   if (s) loadSpotForecast(s);
   document.querySelectorAll('.spot').forEach(el => el.classList.toggle('active', el.dataset.name === name));
@@ -1168,6 +1200,13 @@ document.querySelectorAll('[data-sort]').forEach(b => b.addEventListener('click'
   document.querySelectorAll('[data-sort]').forEach(x => x.setAttribute('aria-pressed', x === b));
   renderSpotList();
 }));
+document.getElementById('spot-more').addEventListener('click', () => {
+  spotState.showAll = !spotState.showAll;
+  renderSpotList();
+  // collapsing from the bottom of a long list would otherwise leave the view
+  // somewhere below the whole section
+  if (!spotState.showAll) document.getElementById('spot-more').scrollIntoView({ block: 'center' });
+});
 
 // ---------- forecast (open-meteo, no key) ----------
 
