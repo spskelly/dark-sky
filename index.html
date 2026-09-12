@@ -50,7 +50,7 @@
   html, body { margin: 0; background: var(--night); color: var(--ink); font-family: var(--sans); }
   body { min-height: 100vh; padding: 28px clamp(16px, 4vw, 56px) 64px; }
   a, button { color: inherit; font: inherit; }
-  button { background: none; border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
+  button { background: none; border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; line-height: 1.25; cursor: pointer; }
   button:hover { border-color: var(--ink-dim); }
   button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--today); outline-offset: 2px; }
   button:disabled { opacity: 0.45; cursor: not-allowed; }
@@ -62,8 +62,8 @@
   .masthead { max-width: 1100px; margin: 0 auto 24px; display: flex; align-items: baseline; gap: 4px 14px; flex-wrap: wrap; }
   .masthead .mark { align-self: center; display: inline-flex; }
   .masthead .mark svg { width: 21px; height: 21px; display: block; }
-  .masthead .wordmark { font-family: var(--serif); font-weight: 400; font-size: 19px; color: var(--moon); }
-  .masthead .scope { font-size: 13px; color: var(--ink-dim); border-left: 1px solid var(--line); padding-left: 14px; }
+  .masthead .wordmark { font-family: var(--serif); font-weight: 400; font-size: 19px; line-height: 1.26; color: var(--moon); }
+  .masthead .scope { font-size: 13px; line-height: 1.31; color: var(--ink-dim); border-left: 1px solid var(--line); padding-left: 14px; }
 
   /* top: hero moon + what the page is for, then tonight's state, then controls */
   .hero { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 28px; align-items: center; max-width: 1100px; margin: 0 auto 30px; }
@@ -100,9 +100,13 @@
   .guide { max-width: 1100px; margin: 0 auto 34px; display: grid; grid-template-columns: repeat(auto-fit, minmax(232px, 1fr)); gap: 10px; }
   .guide a { display: block; text-decoration: none; background: var(--night-2); border: 1px solid transparent; border-radius: 12px; padding: 13px 16px; }
   .guide a:hover { border-color: var(--line); }
-  .guide b { display: block; font-family: var(--serif); font-weight: 400; font-size: 18px; color: var(--moon); margin-bottom: 4px; }
+  .guide b { display: block; font-family: var(--serif); font-weight: 400; font-size: 18px; line-height: 1.28; color: var(--moon); margin-bottom: 4px; }
   .guide b::after { content: " \2192"; color: var(--ink-dim); }
   .guide span { display: block; font-size: 13px; color: var(--ink-dim); line-height: 1.45; }
+
+  @media (max-width: 480px) {
+    .month-nav h2 { flex: 1 0 100%; order: -1; }
+  }
 
   /* jump links land a heading just under the top edge, not flush against it */
   .windows, .spots, #tonight { scroll-margin-top: 22px; }
@@ -110,8 +114,8 @@
   .tonight { margin-top: 18px; max-width: 640px; width: 100%; }
   /* stacked, not space-between: both labels are long enough to wrap into
      each other on a phone */
-  .tonight .head { display: flex; flex-direction: column; gap: 2px; font-size: 14px; color: var(--ink-dim); margin-bottom: 8px; }
-  .tonight .head .sub { font-size: 12px; }
+  .tonight .head { display: flex; flex-direction: column; gap: 2px; font-size: 14px; line-height: 1.29; color: var(--ink-dim); margin-bottom: 8px; }
+  .tonight .head .sub { font-size: 12px; line-height: 1.25; }
   .tonight .head, .tonight .summary, .tonight .detail, .tonight .legend-sky { text-align: left; }
   .tonight .head b { color: var(--ink); font-weight: 500; }
   /* a december night is ~15 columns; let the row scroll rather than push the
@@ -170,8 +174,8 @@
   .day .cloud.mixed { color: var(--moon-dim); }
 
   .controls { max-width: 1100px; margin: 0 auto 18px; display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center; justify-content: space-between; }
-  .month-nav { display: flex; align-items: center; gap: 14px; }
-  .month-nav h2 { font-family: var(--serif); font-weight: 400; font-size: 28px; margin: 0; min-width: 11ch; }
+  .month-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+  .month-nav h2 { font-family: var(--serif); font-weight: 400; font-size: 28px; line-height: 1.21; margin: 0; min-width: 7.1em; white-space: nowrap; }
   .month-nav h2 span { color: var(--ink-dim); font-weight: 300; }
   .options { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; color: var(--ink-dim); font-size: 14px; }
   .options .group { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
@@ -181,14 +185,14 @@
   .cal { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
   /* role="row" wrappers carry the aria structure without becoming grid items */
   .cal .row { display: contents; }
-  .dow { text-align: center; font-size: 13px; color: var(--ink-dim); padding: 6px 0 10px; }
+  .dow { text-align: center; font-size: 13px; line-height: 1.31; color: var(--ink-dim); padding: 6px 0 10px; }
   .day {
     position: relative; min-height: 96px; border-radius: 10px; padding: 8px 8px 6px;
     background: var(--night-2); display: flex; flex-direction: column; gap: 4px;
     border: 1px solid transparent;
   }
   .day.pad { background: transparent; }
-  .day .num { font-size: 14px; color: var(--ink-dim); display: flex; justify-content: space-between; align-items: baseline; }
+  .day .num { font-size: 14px; line-height: 1.29; color: var(--ink-dim); display: flex; justify-content: space-between; align-items: baseline; }
   .day .num b { font-weight: 500; color: var(--ink); }
   .day .icon { align-self: center; margin-top: auto; margin-bottom: auto; }
   .day .icon svg { width: 34px; height: 34px; }
@@ -206,7 +210,7 @@
 
   /* upcoming windows list */
   .windows { max-width: 1100px; margin: 44px auto 0; }
-  .windows h3 { font-family: var(--serif); font-weight: 400; font-size: 24px; margin: 0 0 6px; }
+  .windows h3 { font-family: var(--serif); font-weight: 400; font-size: 24px; line-height: 1.21; margin: 0 0 6px; }
   .windows p.lede { margin: 0 0 18px; color: var(--ink-dim); max-width: 64ch; line-height: 1.5; }
   p.lede a { color: var(--moon-dim); }
   p.lede a:hover { color: var(--moon); }
@@ -223,7 +227,7 @@
 
   /* spots: map on the left, scrollable list on the right */
   .spots { max-width: 1100px; margin: 56px auto 0; }
-  .spots h3 { font-family: var(--serif); font-weight: 400; font-size: 24px; margin: 0 0 6px; }
+  .spots h3 { font-family: var(--serif); font-weight: 400; font-size: 24px; line-height: 1.21; margin: 0 0 6px; }
   .spots p.lede { margin: 0 0 16px; color: var(--ink-dim); max-width: 64ch; line-height: 1.5; }
   .spot-controls { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 14px; color: var(--ink-dim); font-size: 14px; }
   .spot-controls .group { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
@@ -289,7 +293,7 @@
   .disclaimer a:hover { color: var(--moon); }
 
   .season { max-width: 1100px; margin: 44px auto 0; }
-  .season h3 { font-family: var(--serif); font-weight: 400; font-size: 24px; margin: 0 0 12px; }
+  .season h3 { font-family: var(--serif); font-weight: 400; font-size: 24px; line-height: 1.21; margin: 0 0 12px; }
   .season ul { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px 24px; }
   .season li { color: var(--ink-dim); font-size: 14px; line-height: 1.5; }
   .season li b { color: var(--ink); font-weight: 500; }
