@@ -4,6 +4,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>dark sky calendar</title>
+<meta name="description" content="Moon-phase calendar and hourly sky forecast for planning stargazing nights in the North Carolina mountains, with a map of 20 dark-sky spots near the Blue Ridge Parkway.">
+<link rel="canonical" href="https://spskelly.github.io/dark-sky/">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0f1a34">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://spskelly.github.io/dark-sky/">
+<meta property="og:title" content="dark sky calendar">
+<meta property="og:description" content="Every new-moon window for the next twelve months, tonight's cloud cover hour by hour, and 20 dark places to point a lens from.">
+<meta property="og:image" content="https://spskelly.github.io/dark-sky/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="dark sky calendar">
+<meta name="twitter:description" content="Every new-moon window for the next twelve months, tonight's cloud cover hour by hour, and 20 dark places to point a lens from.">
+<meta name="twitter:image" content="https://spskelly.github.io/dark-sky/og.png">
+<link rel="icon" id="favicon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='13' fill='%230f1a34'/%3E%3Ccircle cx='34' cy='32' r='20' fill='%23ece7d4'/%3E%3Ccircle cx='22' cy='27' r='18' fill='%230f1a34'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..600,50&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
@@ -14,6 +30,9 @@
     --night: #0f1a34;
     --night-2: #17254a;
     --night-3: #22335f;
+    /* --night-3 is a fill; borders need their own token to clear the 3:1
+       non-text contrast floor against --night */
+    --line: #5f74ad;
     --ink: #d5dbea;
     --ink-dim: #8b96b3;
     --moon: #ece7d4;
@@ -29,24 +48,33 @@
   html, body { margin: 0; background: var(--night); color: var(--ink); font-family: var(--sans); }
   body { min-height: 100vh; padding: 28px clamp(16px, 4vw, 56px) 64px; }
   a, button { color: inherit; font: inherit; }
-  button { background: none; border: 1px solid var(--night-3); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
+  button { background: none; border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
   button:hover { border-color: var(--ink-dim); }
   button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--today); outline-offset: 2px; }
   button[aria-pressed="true"] { background: var(--night-3); border-color: var(--ink-dim); }
 
   /* top: hero moon + current status, then controls */
-  .hero { display: grid; grid-template-columns: auto 1fr; gap: 28px; align-items: center; max-width: 1100px; margin: 0 auto 36px; }
+  .hero { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 28px; align-items: center; max-width: 1100px; margin: 0 auto 36px; }
+  .hero > * { min-width: 0; }
   .hero svg { width: clamp(120px, 18vw, 180px); height: auto; filter: drop-shadow(0 0 28px rgba(236,231,212,0.18)); }
   .hero h1 { font-family: var(--serif); font-weight: 300; font-size: clamp(30px, 4.5vw, 50px); line-height: 1.05; margin: 0 0 10px; letter-spacing: -0.01em; }
   .hero h1 em { font-style: italic; color: var(--moon); }
   .hero p { margin: 0; max-width: 62ch; color: var(--ink-dim); line-height: 1.5; }
   .hero .next-window { margin-top: 12px; color: var(--dark-sky); }
   /* hourly sky row: one icon per hour, weather-app style */
-  .tonight { margin-top: 18px; max-width: 640px; }
-  .tonight .head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; font-size: 14px; color: var(--ink-dim); margin-bottom: 8px; }
+  .tonight { margin-top: 18px; max-width: 640px; width: 100%; }
+  /* stacked, not space-between: both labels are long enough to wrap into
+     each other on a phone */
+  .tonight .head { display: flex; flex-direction: column; gap: 2px; font-size: 14px; color: var(--ink-dim); margin-bottom: 8px; }
+  .tonight .head .sub { font-size: 12px; }
+  .tonight .head, .tonight .summary, .tonight .detail, .tonight .legend-sky { text-align: left; }
   .tonight .head b { color: var(--ink); font-weight: 500; }
-  .tonight .hours { display: flex; gap: 2px; }
-  .tonight .hr { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; padding: 6px 0 5px; border-radius: 8px; }
+  /* a december night is ~15 columns; let the row scroll rather than push the
+     whole page wider than the screen */
+  .tonight .hours { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--line) transparent; padding-bottom: 2px; }
+  .tonight .hr { flex: 1 0 36px; display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; padding: 6px 0 5px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; }
+  .tonight .hr:hover { border-color: var(--line); }
+  .tonight .hr[aria-pressed="true"] { border-color: var(--today); }
   .tonight .hr.clear { background: var(--dark-sky-wash); }
   .tonight .hr svg { width: 26px; height: 26px; display: block; }
   .tonight .hr .lbl { font-size: 10px; color: var(--ink-dim); line-height: 1; }
@@ -54,11 +82,16 @@
   .tonight .hr.clear .pct { color: var(--dark-sky); }
   .tonight .hr .tmp { font-size: 10px; color: var(--ink-dim); line-height: 1; }
   .tonight .summary { font-size: 13px; color: var(--ink-dim); margin-top: 8px; line-height: 1.5; }
+  .tonight .detail { font-size: 12px; color: var(--moon-dim); margin-top: 6px; line-height: 1.45; min-height: 1.45em; }
+  .tonight .detail b { color: var(--moon); font-weight: 500; }
   .tonight .summary b { color: var(--ink); font-weight: 500; }
   .legend-sky { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-size: 11px; color: var(--ink-dim); }
   .legend-sky span { display: inline-flex; align-items: center; gap: 4px; cursor: default; }
+  .legend-sky i { font-style: normal; color: var(--moon-dim); }
   .legend-sky svg { width: 16px; height: 16px; }
   .spot-tonight { max-width: none; margin: 0 0 14px; background: var(--night-2); border-radius: 12px; padding: 12px 14px; }
+  /* nothing is selected on load, so don't paint an empty card */
+  .spot-tonight:empty { display: none; }
   .day .cloud { font-size: 10px; text-align: center; color: var(--ink-dim); }
   .day .cloud.clear { color: var(--dark-sky); }
   .day .cloud.mixed { color: var(--moon-dim); }
@@ -68,11 +101,13 @@
   .month-nav h2 { font-family: var(--serif); font-weight: 400; font-size: 28px; margin: 0; min-width: 11ch; }
   .month-nav h2 span { color: var(--ink-dim); font-weight: 300; }
   .options { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; color: var(--ink-dim); font-size: 14px; }
-  .options .group { display: flex; gap: 4px; align-items: center; }
+  .options .group { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
   .options .group button { padding: 4px 11px; font-size: 13px; }
 
   /* the calendar grid */
   .cal { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  /* role="row" wrappers carry the aria structure without becoming grid items */
+  .cal .row { display: contents; }
   .dow { text-align: center; font-size: 13px; color: var(--ink-dim); padding: 6px 0 10px; }
   .day {
     position: relative; min-height: 96px; border-radius: 10px; padding: 8px 8px 6px;
@@ -90,8 +125,8 @@
   /* dark-sky window: teal wash, run edges rounded so a 5-day span reads as one bar */
   .day.dark { background: var(--dark-sky-wash); border-color: rgba(95,194,173,0.35); }
   .day.dark .label { color: var(--dark-sky); }
-  .day.dark.win-start { border-top-left-radius: 22px; border-bottom-left-radius: 22px; }
-  .day.dark.win-end { border-top-right-radius: 22px; border-bottom-right-radius: 22px; }
+  .day.dark.win-start, .day.dark.row-start { border-top-left-radius: 22px; border-bottom-left-radius: 22px; }
+  .day.dark.win-end, .day.dark.row-end { border-top-right-radius: 22px; border-bottom-right-radius: 22px; }
   .day.full-wash { background: var(--full-wash); }
   .day.today { border-color: var(--today); }
   .day.today .num b { color: var(--today); }
@@ -101,11 +136,12 @@
   .windows h3 { font-family: var(--serif); font-weight: 400; font-size: 24px; margin: 0 0 6px; }
   .windows p.lede { margin: 0 0 18px; color: var(--ink-dim); max-width: 64ch; line-height: 1.5; }
   .windows ol { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
-  .windows li { background: var(--night-2); border-radius: 10px; padding: 12px 14px; display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: center; cursor: pointer; border: 1px solid transparent; }
-  .windows li:hover { border-color: var(--night-3); }
-  .windows li .range { font-size: 16px; }
+  .windows li { background: var(--night-2); border-radius: 10px; padding: 12px 14px; display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: baseline; cursor: pointer; border: 1px solid transparent; }
+  .windows li:hover { border-color: var(--line); }
+  .windows li .range { font-size: 16px; color: var(--moon); white-space: nowrap; }
+  .windows li .range .dow { font-size: 13px; color: var(--ink-dim); padding: 0; }
   .windows li .meta { color: var(--ink-dim); font-size: 13px; }
-  .windows li .weekend { color: var(--dark-sky); font-size: 13px; grid-column: 2; grid-row: 1 / span 2; text-align: right; }
+  .windows li .weekend { color: var(--dark-sky); font-size: 13px; grid-column: 2; grid-row: 1; text-align: right; white-space: nowrap; }
   .windows li .weekend.none { color: var(--ink-dim); }
 
   .windows li .core { color: var(--moon-dim); font-size: 13px; grid-column: 1 / -1; }
@@ -115,30 +151,33 @@
   .spots h3 { font-family: var(--serif); font-weight: 400; font-size: 24px; margin: 0 0 6px; }
   .spots p.lede { margin: 0 0 16px; color: var(--ink-dim); max-width: 64ch; line-height: 1.5; }
   .spot-controls { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 14px; color: var(--ink-dim); font-size: 14px; }
-  .spot-controls .group { display: flex; gap: 4px; align-items: center; }
+  .spot-controls .group { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
   .spot-controls .group button { padding: 4px 11px; font-size: 13px; }
-  .spot-controls input { background: var(--night-2); border: 1px solid var(--night-3); color: var(--ink); border-radius: 6px; padding: 5px 8px; width: 9ch; font: inherit; font-size: 13px; }
+  .spot-controls input { background: var(--night-2); border: 1px solid var(--line); color: var(--ink); border-radius: 6px; padding: 5px 8px; width: 11ch; font: inherit; font-size: 13px; }
   .spot-controls input:focus-visible { outline: 2px solid var(--today); outline-offset: 1px; }
-  .spot-layout { display: grid; grid-template-columns: 1fr 420px; gap: 14px; }
+  .spot-layout { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 14px; }
   #map { height: 560px; border-radius: 12px; background: var(--night-2); overflow: hidden; }
   /* pull the bright topo tiles down toward the palette; imagery is left alone */
   #map .tiles-dim { filter: brightness(0.72) saturate(0.7) contrast(1.05); }
-  .leaflet-control-layers { background: var(--night-2); color: var(--ink); border: 1px solid var(--night-3); border-radius: 8px; font-size: 13px; box-shadow: none; }
+  .leaflet-control-layers { background: var(--night-2); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; font-size: 13px; box-shadow: none; }
+  /* leaflet ships unstyled radios; pull them into the palette */
+  .leaflet-control-layers-selector { accent-color: var(--dark-sky); }
+  .leaflet-control-layers label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
   .leaflet-control-layers-expanded { padding: 8px 12px; }
-  .leaflet-bar a { background: var(--night-2); color: var(--ink); border-color: var(--night-3); }
+  .leaflet-bar a { background: var(--night-2); color: var(--ink); border-color: var(--line); }
   .leaflet-bar a:hover { background: var(--night-3); }
   .leaflet-control-attribution { background: rgba(15,26,52,0.7); color: var(--ink-dim); font-size: 10px; }
   .leaflet-control-attribution a { color: var(--moon-dim); }
   .map-fallback { height: 100%; display: grid; place-items: center; color: var(--ink-dim); padding: 20px; text-align: center; line-height: 1.5; }
   .spot-list { max-height: 560px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
   .spot { background: var(--night-2); border-radius: 10px; padding: 12px 14px; cursor: pointer; border: 1px solid transparent; }
-  .spot:hover, .spot.active { border-color: var(--night-3); }
+  .spot:hover, .spot.active { border-color: var(--line); }
   .spot.active { background: var(--night-3); }
   .spot .top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
   .spot .name { font-size: 16px; }
   .spot .dist { color: var(--ink-dim); font-size: 13px; white-space: nowrap; }
   .spot .tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
-  .spot .tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--night-3); color: var(--ink-dim); }
+  .spot .tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-dim); }
   .spot .tag.camp { color: var(--dark-sky); border-color: rgba(95,194,173,0.4); }
   .spot .tag.warn { color: var(--today); border-color: rgba(240,195,107,0.4); }
   .spot .note { color: var(--ink-dim); font-size: 13px; line-height: 1.45; }
@@ -164,7 +203,7 @@
   .season li b { color: var(--ink); font-weight: 500; }
 
   @media (max-width: 900px) {
-    .spot-layout { grid-template-columns: 1fr; }
+    .spot-layout { grid-template-columns: minmax(0, 1fr); }
     #map { height: 380px; }
     .spot-list { max-height: none; }
   }
@@ -172,7 +211,7 @@
   .foot { max-width: 1100px; margin: 40px auto 0; color: var(--ink-dim); font-size: 13px; line-height: 1.6; max-width: 70ch; }
 
   @media (max-width: 720px) {
-    .hero { grid-template-columns: 1fr; text-align: center; justify-items: center; }
+    .hero { grid-template-columns: minmax(0, 1fr); text-align: center; justify-items: stretch; }
     .day { min-height: 70px; padding: 5px 4px; }
     .day .icon svg { width: 24px; height: 24px; }
     .day .label { font-size: 10px; }
@@ -234,6 +273,11 @@
       <button data-filter="all" aria-pressed="true">all</button>
       <button data-filter="camp" aria-pressed="false">camp overnight</button>
       <button data-filter="drive" aria-pressed="false">drive-up</button>
+    </div>
+    <div class="group" role="group" aria-label="sort spots">
+      <span>sort</span>
+      <button data-sort="mins" aria-pressed="true">drive time</button>
+      <button data-sort="dist" aria-pressed="false">distance</button>
     </div>
     <div class="group">
       <span>home</span>
@@ -388,22 +432,45 @@ function lunationFraction(t) {
 
 // ---------- drawing ----------
 
-// svg of the moon at lunation fraction p. lit limb on the right while waxing (northern view); flipped for the south
-function moonSvg(p, size, hemi) {
-  const r = 48, cx = 50, cy = 50;
-  const flip = hemi === 'S';
+// the lit limb at lunation fraction p, on a disc of radius r centred at (cx, cy).
+// outer arc runs down the lit side; the terminator comes back up bulging toward or
+// away from it. lit limb is on the right while waxing (northern view), flipped south.
+// shared by the calendar icons and the tab icon so the two can't disagree.
+function moonPath(p, cx, cy, r, hemi) {
   const waxing = p < 0.5;
   const rx = Math.abs(r * Math.cos(2 * Math.PI * p));
-  // outer arc runs down the lit side; terminator arc comes back up bulging toward or away from it
   let outerSweep = waxing ? 1 : 0;
   let termSweep = (p < 0.25 || p >= 0.75) ? (waxing ? 0 : 1) : (waxing ? 1 : 0);
-  if (flip) { outerSweep ^= 1; termSweep ^= 1; }
-  const lit = `M ${cx} ${cy - r} A ${r} ${r} 0 0 ${outerSweep} ${cx} ${cy + r} A ${rx} ${r} 0 0 ${termSweep} ${cx} ${cy - r} Z`;
-  const near = Math.min(p, 1 - p) < 0.02;
+  if (hemi === 'S') { outerSweep ^= 1; termSweep ^= 1; }
+  return `M ${cx} ${cy - r} A ${r} ${r} 0 0 ${outerSweep} ${cx} ${cy + r} A ${rx} ${r} 0 0 ${termSweep} ${cx} ${cy - r} Z`;
+}
+
+const nearNew = p => Math.min(p, 1 - p) < 0.02;
+
+function moonSvg(p, size, hemi) {
   return `<svg viewBox="0 0 100 100" width="${size}" height="${size}" aria-hidden="true">
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="#0a1226" stroke="#3a4a78" stroke-width="1.5"/>
-    ${near ? '' : `<path d="${lit}" fill="var(--moon)"/>`}
+    <circle cx="50" cy="50" r="48" fill="#0a1226" stroke="#3a4a78" stroke-width="1.5"/>
+    ${nearNew(p) ? '' : `<path d="${moonPath(p, 50, 50, 48, hemi)}" fill="var(--moon)"/>`}
   </svg>`;
+}
+
+// the tab icon shows tonight's phase too. at 16px a hairline outline disappears,
+// so the unlit disc is filled a slate that still reads against the tile rather
+// than being drawn as a stroke.
+function faviconSvg(p, hemi) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">`
+    + `<rect width="64" height="64" rx="13" fill="#0f1a34"/>`
+    + `<circle cx="32" cy="32" r="23" fill="#2b3c6b"/>`
+    + (nearNew(p) ? '' : `<path d="${moonPath(p, 32, 32, 23, hemi)}" fill="#ece7d4"/>`)
+    + `</svg>`;
+}
+
+// redrawn on every render, so it follows both the real phase and the hemisphere
+// toggle. the static icon in <head> stays as the no-script fallback.
+function updateFavicon() {
+  const link = document.getElementById('favicon');
+  if (!link) return;
+  link.href = 'data:image/svg+xml,' + encodeURIComponent(faviconSvg(lunationFraction(new Date()), state.hemi));
 }
 
 // ---------- calendar state and render ----------
@@ -412,6 +479,7 @@ const state = {
   view: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
   win: 5,
   hemi: 'N',
+  focus: null,   // day-of-month holding the calendar's roving tabindex
 };
 
 const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
@@ -420,6 +488,13 @@ const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + 
 const fmtDay = d => d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 const fmtTime = d => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 const PHASE_NAME = { 0: 'new moon', 0.25: 'first quarter', 0.5: 'full moon', 0.75: 'last quarter' };
+// "Sep 9-13 sun-thu", collapsing the month when both ends share one
+const fmtRange = (a, b) => {
+  const md = d => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const dw = d => d.toLocaleDateString(undefined, { weekday: 'short' }).toLowerCase();
+  const right = a.getMonth() === b.getMonth() ? b.getDate() : md(b);
+  return `${md(a)}\u2013${right} <span class="dow">${dw(a)}\u2013${dw(b)}</span>`;
+};
 
 function phaseWord(p) {
   if (p < 0.03 || p > 0.97) return 'new';
@@ -460,35 +535,69 @@ function renderCalendar() {
   const first = new Date(y, m, 1), last = new Date(y, m + 1, 0);
   const info = buildDayInfo(first, last);
   const today = new Date();
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   document.getElementById('month-title').innerHTML =
     `${first.toLocaleDateString(undefined, { month: 'long' })} <span>${y}</span>`;
 
+  // keep the roving tabindex on a day that exists in the month being drawn
+  const inView = sameDay(new Date(y, m, 1), new Date(today.getFullYear(), today.getMonth(), 1));
+  if (!state.focus || state.focus > last.getDate()) state.focus = inView ? today.getDate() : 1;
+
   const cal = document.getElementById('cal');
-  let html = '';
-  for (const d of ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']) html += `<div class="dow">${d}</div>`;
-  for (let i = 0; i < first.getDay(); i++) html += '<div class="day pad"></div>';
+  const cells = [];
+  for (let i = 0; i < first.getDay(); i++) cells.push('<div class="day pad" role="gridcell"></div>');
   for (let day = 1; day <= last.getDate(); day++) {
-    const d = new Date(y, m, day, 21, 0, 0); // phase icon evaluated at 9pm local, roughly when you'd be looking up
+    // phase icon evaluated at 9pm local, roughly when you'd be looking up
+    const d = new Date(y, m, day, 21, 0, 0);
     const o = info.get(dayKey(d)) || {};
-    const fcNight = fc.nightly.get(dayKey(d));
+    // a forecast only belongs on a night that hasn't happened yet
+    const fcNight = new Date(y, m, day) >= startOfToday ? fc.nightly.get(dayKey(d)) : null;
     const p = lunationFraction(d);
     const illum = Math.round((1 - Math.cos(2 * Math.PI * p)) / 2 * 100);
+    const col = (first.getDay() + day - 1) % 7;
     const cls = ['day'];
     if (o.dark) cls.push('dark');
     if (o.winStart) cls.push('win-start');
     if (o.winEnd) cls.push('win-end');
+    // a window that crosses a week break still wants a finished edge on each row
+    if (o.dark && col === 0) cls.push('row-start');
+    if (o.dark && col === 6) cls.push('row-end');
     if (o.fullWash && !o.dark) cls.push('full-wash');
     if (sameDay(d, today)) cls.push('today');
     if (d.getDay() === 0 || d.getDay() === 6 || d.getDay() === 5) cls.push('weekend');
     const label = o.event ? `<div class="label">${PHASE_NAME[o.event.phase]}<br><span class="illum">${fmtTime(o.event.date)}</span></div>` : '';
-    html += `<div class="${cls.join(' ')}" role="gridcell" tabindex="0" aria-label="${fmtDay(d)}, ${phaseWord(p)}, ${illum}% lit${o.dark ? ', dark-sky window' : ''}">
+    const aria = `${fmtDay(d)}, ${phaseWord(p)}, ${illum}% lit${o.dark ? ', dark-sky window' : ''}${fcNight ? `, ${fcNight.mean}% mean cloud cover, low ${Math.round(fcNight.tmin)} degrees` : ''}`;
+    cells.push(`<div class="${cls.join(' ')}" role="gridcell" data-day="${day}" tabindex="${day === state.focus ? 0 : -1}" aria-label="${aria}">
       <div class="num"><b>${day}</b><span class="illum">${illum}%</span></div>
       <div class="icon">${moonSvg(p, 34, state.hemi)}</div>
       ${label}
-      ${fcNight ? `<div class="cloud ${cloudClass(fcNight.mean)}" title="mean cloud cover 9pm to 3am, low ${Math.round(fcNight.tmin)}°F">${fcNight.mean}% cloud</div>` : ''}
-    </div>`;
+      ${fcNight ? `<div class="cloud ${cloudClass(fcNight.mean)}" title="mean cloud cover 9pm to 3am, low ${Math.round(fcNight.tmin)}\u00b0F">${fcNight.mean}% cloud</div>` : ''}
+    </div>`);
+  }
+  while (cells.length % 7) cells.push('<div class="day pad" role="gridcell"></div>');
+
+  let html = '<div class="row" role="row">' +
+    ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].map(d => `<div class="dow" role="columnheader">${d}</div>`).join('') +
+    '</div>';
+  for (let i = 0; i < cells.length; i += 7) {
+    html += '<div class="row" role="row">' + cells.slice(i, i + 7).join('') + '</div>';
   }
   cal.innerHTML = html;
+}
+
+// the calendar is one tab stop; arrows move the focused cell, crossing months at the edges
+function focusDayCell() {
+  document.querySelector(`.day[data-day="${state.focus}"]`)?.focus();
+}
+function moveFocus(delta) {
+  const y = state.view.getFullYear(), m = state.view.getMonth();
+  const target = new Date(y, m, state.focus + delta);
+  if (target.getMonth() !== m || target.getFullYear() !== y) {
+    state.view = new Date(target.getFullYear(), target.getMonth(), 1);
+  }
+  state.focus = target.getDate();
+  renderCalendar();
+  focusDayCell();
 }
 
 function renderHero() {
@@ -537,8 +646,8 @@ function renderWindows() {
       if (d.getDay() === 6) nights.push('sat ' + d.getDate());
     }
     const wk = nights.length ? nights.join(', ') : 'midweek only';
-    return `<li tabindex="0" data-y="${e.date.getFullYear()}" data-m="${e.date.getMonth()}">
-      <span class="range">${fmtDay(ws)} to ${fmtDay(we)}</span>
+    return `<li tabindex="0" role="button" data-y="${e.date.getFullYear()}" data-m="${e.date.getMonth()}" aria-label="dark-sky window ${fmtDay(ws)} to ${fmtDay(we)}, ${wk}">
+      <span class="range">${fmtRange(ws, we)}</span>
       <span class="weekend ${nights.length ? '' : 'none'}">${wk}</span>
       <span class="meta">new moon ${fmtDay(e.date)} at ${fmtTime(e.date)}</span>
       <span class="core">${coreVisibility(e.date.getMonth())}</span>
@@ -599,7 +708,7 @@ const SPOTS = [
 ];
 
 const HOME_DEFAULT = { lat: 35.4887, lon: -82.9887, name: 'Waynesville' };
-const spotState = { home: { ...HOME_DEFAULT }, filter: 'all', map: null, markers: new Map(), homeMarker: null, active: null };
+const spotState = { home: { ...HOME_DEFAULT }, filter: 'all', sort: 'mins', map: null, markers: new Map(), homeMarker: null, active: null };
 
 // straight-line distance in miles and compass bearing from home
 function haversine(a, b) {
@@ -629,13 +738,14 @@ function visibleSpots() {
   return SPOTS
     .filter(s => f === 'all' || (f === 'camp' ? s.kind === 'camp' : s.kind === 'view'))
     .map(s => ({ ...s, dist: haversine(spotState.home, s), dir: bearing(spotState.home, s) }))
-    .sort((a, b) => a.dist - b.dist);
+    // drive time is what a night hinges on; straight-line distance is the alternative
+    .sort((a, b) => spotState.sort === 'mins' ? a.mins - b.mins || a.dist - b.dist : a.dist - b.dist);
 }
 
 function renderSpotList() {
   const list = document.getElementById('spot-list');
   const rows = visibleSpots();
-  list.innerHTML = rows.map(s => `<div class="spot ${spotState.active === s.name ? 'active' : ''}" data-name="${s.name}" tabindex="0">
+  list.innerHTML = rows.map(s => `<div class="spot ${spotState.active === s.name ? 'active' : ''}" data-name="${s.name}" tabindex="0" role="button" aria-pressed="${spotState.active === s.name}">
     <div class="top"><span class="name">${s.name}</span><span class="dist">${s.dist.toFixed(0)} mi ${s.dir} &middot; ~${fmtDur(s.mins)}</span></div>
     <div class="tags">
       <span class="tag ${s.kind === 'camp' ? 'camp' : s.kind === 'warn' ? 'warn' : ''}">${s.kind === 'camp' ? 'camp overnight' : s.kind === 'warn' ? 'restricted' : 'viewing only'}</span>
@@ -656,6 +766,8 @@ function renderSpotList() {
     for (const [name, mk] of spotState.markers) {
       if (shown.has(name)) mk.addTo(spotState.map); else mk.remove();
     }
+    fitSpots(spotState.fitted);
+    spotState.fitted = true;
   }
 }
 
@@ -677,10 +789,14 @@ function pinIcon(kind) {
 function initMap() {
   const el = document.getElementById('map');
   if (typeof L === 'undefined') {
-    el.innerHTML = '<div class="map-fallback">the map tiles could not load (offline, or the viewer blocks external scripts). the list still works; open the file directly in a browser for the map.</div>';
+    el.innerHTML = '<div class="map-fallback">the map could not load \u2014 the leaflet script was blocked or the network is down. the spot list beside it still works, and every spot has forecast, light-map and directions links.</div>';
     return;
   }
-  const map = L.map(el, { zoomControl: true, attributionControl: true }).setView([35.45, -83.0], 9);
+  const map = L.map(el, { zoomControl: true, attributionControl: true });
+  // frame the spots before any tile layer is attached, so the first tile request
+  // is already for the view we mean to show
+  map.fitBounds(L.latLngBounds([...SPOTS.map(s => [s.lat, s.lon]), [spotState.home.lat, spotState.home.lon]]),
+    { padding: [30, 30], maxZoom: 11, animate: false });
   // no-key tile sources. topo is the default: contour lines are what you need to judge a southern horizon
   const topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap contributors, SRTM | &copy; OpenTopoMap (CC-BY-SA)', maxZoom: 17, className: 'tiles-dim',
@@ -704,6 +820,15 @@ function initMap() {
     mk.addTo(map);
   }
   placeHome();
+}
+
+// frame the visible spots plus home, so nothing sits off the edge on load
+function fitSpots(animate = true) {
+  if (!spotState.map) return;
+  const pts = visibleSpots().map(s => [s.lat, s.lon]);
+  pts.push([spotState.home.lat, spotState.home.lon]);
+  if (pts.length < 2) return;
+  spotState.map.fitBounds(L.latLngBounds(pts), { padding: [30, 30], maxZoom: 11, animate });
 }
 
 function placeHome() {
@@ -734,6 +859,11 @@ document.querySelectorAll('[data-filter]').forEach(b => b.addEventListener('clic
   document.querySelectorAll('[data-filter]').forEach(x => x.setAttribute('aria-pressed', x === b));
   renderSpotList();
 }));
+document.querySelectorAll('[data-sort]').forEach(b => b.addEventListener('click', () => {
+  spotState.sort = b.dataset.sort;
+  document.querySelectorAll('[data-sort]').forEach(x => x.setAttribute('aria-pressed', x === b));
+  renderSpotList();
+}));
 
 // ---------- forecast (open-meteo, no key) ----------
 
@@ -762,7 +892,10 @@ async function fetchForecast(t) {
   return d;
 }
 
-// per-night summary: mean total cloud from 9pm to 3am, keyed by the evening's date
+// per-night summary: mean total cloud from 9pm to 3am, keyed by the evening's date.
+// the forecast window starts at midnight today and ends mid-evening on day 8, so the
+// first and last nights are only partly covered; those are dropped rather than shown
+// as if they were a whole night.
 function summarizeNights(d) {
   const out = new Map();
   const h = d.hourly;
@@ -777,7 +910,11 @@ function summarizeNights(d) {
     o.sum += h.cloud_cover[i]; o.n++;
     o.tmin = Math.min(o.tmin, h.temperature_2m[i]);
   }
-  for (const o of out.values()) o.mean = Math.round(o.sum / o.n);
+  const FULL = 7; // 9pm,10,11,12,1,2,3
+  for (const [k, o] of out) {
+    if (o.n < FULL) { out.delete(k); continue; }
+    o.mean = Math.round(o.sum / o.n);
+  }
   return out;
 }
 
@@ -801,7 +938,9 @@ const SKY_ICON = {
 const skyState = c => c < 15 ? 'clear' : c < 40 ? 'few' : c < 65 ? 'partly' : c < 85 ? 'mostly' : 'overcast';
 const SKY_NAME = { clear: 'clear', few: 'a few clouds', partly: 'partly cloudy', mostly: 'mostly cloudy', overcast: 'overcast', fog: 'fog likely' };
 const SKY_RANGE = { clear: 'under 15% cloud', few: '15 to 40% cloud', partly: '40 to 65% cloud', mostly: '65 to 85% cloud', overcast: 'over 85% cloud', fog: 'dew point within 3° of air temp' };
-const skyLegend = () => `<div class="legend-sky">${Object.keys(SKY_ICON).map(k => `<span title="${SKY_RANGE[k]}">${SKY_ICON[k]}${SKY_NAME[k]}</span>`).join('')}</div>`;
+// compact thresholds, shown rather than hidden in a tooltip no phone will fire
+const SKY_SHORT = { clear: '<15%', few: '15–40%', partly: '40–65%', mostly: '65–85%', overcast: '>85%', fog: 'dew pt within 3°' };
+const skyLegend = () => `<div class="legend-sky">${Object.keys(SKY_ICON).map(k => `<span title="${SKY_RANGE[k]}">${SKY_ICON[k]}${SKY_NAME[k]} <i>${SKY_SHORT[k]}</i></span>`).join('')}</div>`;
 
 function renderPanel(panel) {
   const el = document.getElementById(panel.el);
@@ -825,14 +964,16 @@ function renderPanel(panel) {
   const headLabel = preDawn
     ? `rest of the night at <b>${name}</b> · sunrise ${fmtTime(sunriseNext)}`
     : `tonight at <b>${name}</b> · sunset ${fmtTime(start)} to sunrise ${fmtTime(sunriseNext)}`;
+  const esc = t => t.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   const bars = idx.map(i => {
     const c = h.cloud_cover[i], t = new Date(h.time[i]);
     const hh = t.getHours();
     const lbl = hh === 0 ? '12a' : hh < 12 ? hh + 'a' : hh === 12 ? '12p' : (hh - 12) + 'p';
     const spread = h.temperature_2m[i] - h.dew_point_2m[i];
-    const state = spread < 3 ? 'fog' : skyState(c);
-    const tip = `${fmtTime(t)}: ${SKY_NAME[state]}. ${c}% cloud (low ${h.cloud_cover_low[i]}, mid ${h.cloud_cover_mid[i]}, high ${h.cloud_cover_high[i]}), ${Math.round(h.temperature_2m[i])}°F, wind ${Math.round(h.wind_speed_10m[i])} mph, dew point ${Math.round(h.dew_point_2m[i])}°F`;
-    return `<div class="hr ${c < 25 && state !== 'fog' ? 'clear' : ''}" title="${tip}"><div class="lbl">${lbl}</div>${SKY_ICON[state]}<div class="pct">${c}%</div><div class="tmp">${Math.round(h.temperature_2m[i])}°</div></div>`;
+    const sky = spread < 3 ? 'fog' : skyState(c);
+    const plain = `${fmtTime(t)}: ${SKY_NAME[sky]}. ${c}% cloud (low ${h.cloud_cover_low[i]}, mid ${h.cloud_cover_mid[i]}, high ${h.cloud_cover_high[i]}), ${Math.round(h.temperature_2m[i])}°F, wind ${Math.round(h.wind_speed_10m[i])} mph, dew point ${Math.round(h.dew_point_2m[i])}°F`;
+    const rich = `<b>${fmtTime(t)}</b> · ${SKY_NAME[sky]} · ${c}% cloud (low ${h.cloud_cover_low[i]}, mid ${h.cloud_cover_mid[i]}, high ${h.cloud_cover_high[i]}) · ${Math.round(h.temperature_2m[i])}°F · wind ${Math.round(h.wind_speed_10m[i])} mph · dew point ${Math.round(h.dew_point_2m[i])}°F`;
+    return `<div class="hr ${c < 25 && sky !== 'fog' ? 'clear' : ''}" role="button" aria-pressed="false" aria-label="${esc(plain)}" title="${esc(plain)}" data-detail="${esc(rich)}"><div class="lbl">${lbl}</div>${SKY_ICON[sky]}<div class="pct">${c}%</div><div class="tmp">${Math.round(h.temperature_2m[i])}°</div></div>`;
   }).join('');
   const clearHrs = idx.filter(i => h.cloud_cover[i] < 25).length;
   const temps = idx.map(i => h.temperature_2m[i]);
@@ -842,10 +983,34 @@ function renderPanel(panel) {
   const fogRisk = Math.min(...dews) < 3;
   const verdict = clearHrs >= idx.length * 0.7 ? 'mostly clear' : clearHrs >= 3 ? 'partly clear' : 'cloudy';
   el.innerHTML = `
-    <div class="head"><span>${headLabel}</span><span>cloud cover and temperature by hour</span></div>
-    <div class="hours">${bars}</div>
-    <div class="summary"><b>${verdict}</b>, ${clearHrs} of ${idx.length} hours under 25% cloud. low ${Math.round(Math.min(...temps))}°F, wind ${Math.round(Math.min(...winds))} to ${Math.round(Math.max(...winds))} mph${rain >= 30 ? `, ${rain}% chance of rain` : ''}${fogRisk ? ', dew point close to air temp so expect fog or heavy dew' : ''}. hover an hour for the low/mid/high cloud split.</div>
+    <div class="head"><span>${headLabel}</span><span class="sub">cloud cover and temperature by hour</span></div>
+    <div class="hours" role="group" aria-label="sky hour by hour">${bars}</div>
+    <div class="detail" aria-live="polite"></div>
+    <div class="summary"><b>${verdict}</b>, ${clearHrs} of ${idx.length} hours under 25% cloud. low ${Math.round(Math.min(...temps))}°F, wind ${Math.round(Math.min(...winds))} to ${Math.round(Math.max(...winds))} mph${rain >= 30 ? `, ${rain}% chance of rain` : ''}${fogRisk ? ', dew point close to air temp so expect fog or heavy dew' : ''}. tap or arrow through the hours for the low, mid and high cloud split.</div>
     ${skyLegend()}`;
+
+  // the breakdown used to live only in a title tooltip, which a phone never shows.
+  // the row is one tab stop with a roving tabindex; selecting an hour writes it out.
+  const detail = el.querySelector('.detail');
+  const hrs = [...el.querySelectorAll('.hr')];
+  const select = n => {
+    hrs.forEach((x, j) => { x.setAttribute('aria-pressed', j === n); x.tabIndex = j === n ? 0 : -1; });
+    detail.innerHTML = hrs[n].dataset.detail;
+  };
+  hrs.forEach((x, i) => {
+    x.addEventListener('mouseenter', () => select(i));
+    x.addEventListener('click', () => { select(i); x.focus(); });
+    x.addEventListener('focus', () => select(i));
+    x.addEventListener('keydown', ev => {
+      const d = ev.key === 'ArrowLeft' ? -1 : ev.key === 'ArrowRight' ? 1 : 0;
+      if (!d) return;
+      ev.preventDefault();
+      const n = Math.max(0, Math.min(hrs.length - 1, i + d));
+      select(n); hrs[n].focus();
+      hrs[n].scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    });
+  });
+  if (hrs.length) select(0);
 }
 
 async function loadPanel(panel, target) {
@@ -863,7 +1028,7 @@ async function loadPanel(panel, target) {
 const loadHomeForecast = () => loadPanel(fc.home, { ...spotState.home, name: 'home' });
 const loadSpotForecast = spot => loadPanel(fc.spot, { ...spot });
 
-function renderAll() { renderHero(); renderCalendar(); renderWindows(); }
+function renderAll() { updateFavicon(); renderHero(); renderCalendar(); renderWindows(); }
 
 document.getElementById('prev').addEventListener('click', () => { state.view = new Date(state.view.getFullYear(), state.view.getMonth() - 1, 1); renderCalendar(); });
 document.getElementById('next').addEventListener('click', () => { state.view = new Date(state.view.getFullYear(), state.view.getMonth() + 1, 1); renderCalendar(); });
@@ -879,9 +1044,27 @@ document.querySelectorAll('[data-hemi]').forEach(b => b.addEventListener('click'
   renderAll();
 }));
 document.addEventListener('keydown', e => {
-  if (e.target.closest('button, li')) return;
+  const cell = e.target.closest && e.target.closest('.day[data-day]');
+  if (cell) {
+    const step = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 }[e.key];
+    if (step) { e.preventDefault(); moveFocus(step); return; }
+    if (e.key === 'Home') { e.preventDefault(); moveFocus(1 - state.focus); return; }
+    if (e.key === 'End') {
+      e.preventDefault();
+      moveFocus(new Date(state.view.getFullYear(), state.view.getMonth() + 1, 0).getDate() - state.focus);
+      return;
+    }
+    return;
+  }
+  // outside the grid the arrows page the month, as before
+  if (e.target.closest('button, li, input, a, .spot, .hr, .leaflet-container')) return;
   if (e.key === 'ArrowLeft') document.getElementById('prev').click();
   if (e.key === 'ArrowRight') document.getElementById('next').click();
+});
+// remember which cell the roving tabindex should sit on
+document.getElementById('cal').addEventListener('focusin', e => {
+  const c = e.target.closest && e.target.closest('.day[data-day]');
+  if (c) state.focus = +c.dataset.day;
 });
 
 renderAll();
