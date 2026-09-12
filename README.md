@@ -36,7 +36,8 @@ will be clear, and where to drive.
   home is. That makes it a property of the spot rather than of any one town.
 
 - **Light pollution and the parkway, on the map.** A sky-brightness overlay
-  (the familiar green-to-red wash) sits behind the pins on a toggle, and the
+  (the familiar green-to-red wash) sits behind the pins, on by default and
+  remembered, alongside topo and imagery in the map's own layers control. The
   Blue Ridge Parkway is drawn as a line so the route the notes keep referring
   to is one you can actually see. Both are off the critical path: the overlay
   says so if its tiles stop loading, and the parkway is simply absent until
@@ -89,15 +90,14 @@ else's API moved. With the block empty the map just doesn't draw it.
 
 ## The sky glow layer
 
-The **light pollution** button on the map draws D. Lorenz's world atlas of
-artificial night sky brightness over the topo. That is somebody else's static
+The **light pollution** overlay in the map's layers control draws D. Lorenz's
+world atlas of artificial night sky brightness over the topo. That is somebody else's static
 tile set on GitHub Pages, and it is the one part of the page that can break on
 its own: he republishes under a new folder every few years — `lp2016`, `lp2020`,
 `lp2022` — and when the old folder goes, every tile comes back 404.
 
 The page notices. After four misses with nothing loaded it switches the layer
-off, greys the button out and says so, rather than leaving a live-looking
-toggle that does nothing. Every spot still links to its own light map, which is
+off and says so, rather than leaving a live-looking overlay that does nothing. Every spot still links to its own light map, which is
 where the detail was anyway.
 
 To point it at wherever the tiles live now (needs network):
