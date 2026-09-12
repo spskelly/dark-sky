@@ -281,9 +281,6 @@
   /* what the map draws, as opposed to which spots it draws: kept next to the
      map rather than up in the spot toolbar, and reachable on a phone without
      opening leaflet's own layer control */
-  .map-tools { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-bottom: 10px; color: var(--ink-dim); font-size: 14px; }
-  .map-tools[hidden] { display: none; }
-  .map-tools button { padding: 4px 11px; font-size: 13px; }
   /* only occupies space when it has something to say */
   .spot-msg { margin: 0 0 10px; font-size: 13px; line-height: 1.45; color: var(--today); }
   .spot-msg:empty { display: none; }
@@ -532,10 +529,6 @@
     </details>
   </div>
   <p class="spot-msg" id="spot-msg" role="status"></p>
-  <div class="map-tools">
-    <span>map</span>
-    <button id="lp-toggle" aria-pressed="false">light pollution</button>
-  </div>
   <div class="legend">
     <span><i class="pin camp"></i> overnight camping allowed</span>
     <span><i class="pin view"></i> viewing only</span>
@@ -1242,10 +1235,9 @@ const LP_TILES = 'https://djlorenz.github.io/astronomy/image_tiles/tiles2025/til
 const LP_ATTR = 'sky glow &copy; <a href="https://djlorenz.github.io/astronomy/image_tiles/" target="_blank" rel="noopener">D. Lorenz</a>, world atlas / VIIRS';
 const LP_KEY = 'darksky.lightpollution';
 
-function initLightPollution(map) {
-  const btn = document.getElementById('lp-toggle');
-  const key = document.querySelector('.lp-key');
-  const lp = L.tileLayer(LP_TILES, {
+// the layer itself, built before the layers control so the control can own it
+function lightPollutionLayer() {
+  return L.tileLayer(LP_TILES, {
     attribution: LP_ATTR,
     // half strength: the point of the topo underneath is the ridge line
     // between you and a town, and the overlay should not bury it
@@ -1257,31 +1249,42 @@ function initLightPollution(map) {
     // above them
     zIndex: 10,
   });
-  const show = on => {
-    if (on) lp.addTo(map); else lp.remove();
-    btn.setAttribute('aria-pressed', String(on));
-    key.hidden = !on;
-    try { localStorage.setItem(LP_KEY, on ? '1' : '0'); } catch (e) {}
-  };
-  // a moved or mistyped tile url would otherwise leave the button looking dead:
-  // say so once, rather than on every tile that misses
+}
+
+// on by default, and remembered. someone opening this page is deciding where
+// to drive to get away from town, and the glow is the whole answer to that.
+function initLightPollution(map, lp) {
+  const key = document.querySelector('.lp-key');
   let loaded = false, failed = 0, dead = false;
+
+  // the layers control fires these for overlays, so ticking the box and
+  // switching the layer on in code both land in the same place
+  map.on('overlayadd', e => {
+    if (e.layer !== lp) return;
+    key.hidden = false;
+    // a fresh try deserves a fresh verdict, and a fresh complaint if it fails
+    failed = 0; dead = false;
+    try { localStorage.setItem(LP_KEY, '1'); } catch (err) {}
+  });
+  map.on('overlayremove', e => {
+    if (e.layer !== lp) return;
+    key.hidden = true;
+    try { localStorage.setItem(LP_KEY, '0'); } catch (err) {}
+  });
+
+  // a moved or mistyped tile url would otherwise leave the box ticked over an
+  // empty map: take the layer off, which unticks it, and say so once
   lp.on('tileload', () => { loaded = true; });
   lp.on('tileerror', () => {
     if (loaded || dead || ++failed < 4) return;
     dead = true;
-    show(false);
-    // a button that still looks live but does nothing is worse than an off
-    // one. show(false) has already cleared the saved preference, so the next
-    // load will not ask for a few hundred tiles that are not there either.
-    btn.disabled = true;
-    btn.title = 'the sky glow tiles are not answering';
+    map.removeLayer(lp);
     spotMsg('the light pollution layer could not load. every spot still links to its own light map.');
   });
-  btn.addEventListener('click', () => show(!map.hasLayer(lp)));
-  let want = false;
-  try { want = localStorage.getItem(LP_KEY) === '1'; } catch (e) {}
-  if (want) show(true);
+
+  let want = true;
+  try { want = localStorage.getItem(LP_KEY) !== '0'; } catch (err) {}
+  if (want) lp.addTo(map);
 }
 
 // ---------- the blue ridge parkway ----------
@@ -1616,8 +1619,6 @@ function initMap() {
   const el = document.getElementById('map');
   if (typeof L === 'undefined') {
     el.innerHTML = '<div class="map-fallback">the map could not load \u2014 the leaflet script was blocked or the network is down. the spot list beside it still works, and every spot has forecast, light-map and directions links.</div>';
-    // nothing for the map controls to control
-    document.querySelector('.map-tools').hidden = true;
     return;
   }
   const map = L.map(el, { zoomControl: true, attributionControl: true });
@@ -1632,6 +1633,10 @@ function initMap() {
   const imagery = L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}', {
     attribution: 'USGS The National Map', maxZoom: 16,
   });
+  // sky glow sits on top of whichever basemap is showing rather than replacing
+  // one, so it belongs in the same control as an overlay, not in a toolbar of
+  // its own beside the map
+  const lp = lightPollutionLayer();
   topo.addTo(map);
   map.on('click', e => {
     if (!spotState.picking) return;
@@ -1641,7 +1646,8 @@ function initMap() {
   // open on a wide screen, where it costs nothing; an icon on a phone, where
   // an always-open box covers a corner of a map that is already small
   const narrow = window.matchMedia('(max-width: 720px)').matches;
-  L.control.layers({ 'topo': topo, 'imagery': imagery }, null, { position: 'topright', collapsed: narrow }).addTo(map);
+  L.control.layers({ 'topo': topo, 'imagery': imagery }, { 'light pollution': lp },
+    { position: 'topright', collapsed: narrow }).addTo(map);
   spotState.map = map;
   for (const s of SPOTS) {
     const mk = L.marker([s.lat, s.lon], { icon: pinIcon(s.kind), title: s.name })
@@ -1656,7 +1662,8 @@ function initMap() {
     mk.addTo(map);
   }
   drawParkway(map);
-  initLightPollution(map);
+  // after the control exists, so switching it on fires the control's own event
+  initLightPollution(map, lp);
   placeHome();
 }
 
