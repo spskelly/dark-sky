@@ -33,7 +33,7 @@ const FILE = path.join(ROOT, 'index.html');
 const SNAP_MIN = 100;      // metres: below this a pull-off is already on the road
 const SNAP_MAX = 3000;     // metres: past this, something else is wrong, so say so
 const OSM_WARN = 2000;     // metres: report an osm disagreement bigger than this
-const OSM_FIX_MAX = 5000;  // metres: refuse to apply a move larger than this
+const OSM_FIX_MAX = 4000;  // metres: refuse to apply a move larger than this
 
 // ---------- reading the page ----------
 
@@ -163,8 +163,10 @@ if (process.argv.includes('--snap')) {
 // ---------- --osm ----------
 
 // apostrophes come out rather than becoming a space: "Devil's Courthouse" has
-// to meet osm's "Devils Courthouse", not turn into "devil s courthouse"
-const norm = s => s.toLowerCase().replace(/['\u2019]/g, '')
+// to meet osm's "Devils Courthouse", not turn into "devil s courthouse". a
+// parenthetical comes out whole, so osm's "Cowee mountains Overlook (MP 430.7)"
+// is the same name as ours rather than merely a similar one.
+const norm = s => s.toLowerCase().replace(/['\u2019]/g, '').replace(/\([^)]*\)/g, ' ')
   .replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
   .replace(/^mt /, 'mount ');
 // the generic half of a name, which one side usually spells out and the other
@@ -181,6 +183,18 @@ const variants = name => [...new Set([name, ...name.split(/[/,]|\(|\)/)].map(nor
 // the parking or the trailhead, which is what you drive to, and moving those to
 // the top of the mountain would make every drive time on the page a lie.
 const DESTINATION = new Set(['viewpoint', 'rest_area', 'tower', 'picnic_site', 'camp_site', 'attraction']);
+
+// a name that says what kind of thing it is. stripping that word is what lets
+// "Graveyard Fields" meet "Graveyard Fields Overlook", but it also let "Mount
+// Pisgah campground" meet the summit of Mount Pisgah, which is a mile up the
+// mountain and not a campground at all. a spot that names a facility is not a
+// peak, whatever the rest of the name says.
+const FACILITY = /\b(campground|camp site|tower|picnic area|picnic site|recreation area|overlook|visitor centre|visitors? center|state park)\b/;
+
+// nothing this far away is the same feature, however well the name reads. one
+// of ours matched a node called "Truck" a hundred and forty km away, because
+// "struck" contains "truck".
+const MAX_MATCH = 8000;
 
 if (process.argv.includes('--osm')) {
   // this asks for every named park, peak, viewpoint and tower in a box the size
@@ -237,13 +251,18 @@ out center;`;
   console.log(pad('spot', 31) + pad('osm calls it', 31) + pad('what', 13) + 'apart'.padStart(7) + '  verdict');
   for (const s of spots) {
     const want = variants(s.name), mine = core(s.name);
+    const facility = FACILITY.test(norm(s.name));
     const scored = features.map(f => {
+      const d = dist(s, f);
+      if (d > MAX_MATCH) return null;
+      // "Mount Pisgah campground" is not the peak called Mount Pisgah
+      if (facility && f.kind === 'peak') return null;
       const theirs = core(f.name);
       const tier = want.includes(norm(f.name)) ? 2                  // the same name
         : mine && theirs === mine ? 1                               // the same bar the generic word
         : mine && theirs && (theirs.includes(mine) || mine.includes(theirs)) ? 0   // one inside the other
         : -1;
-      return tier < 0 ? null : { ...f, d: dist(s, f), tier };
+      return tier < 0 ? null : { ...f, d, tier };
     }).filter(Boolean).sort((x, y) => (y.tier - x.tier) || (x.d - y.d));
     if (!scored.length) { console.log(pad(s.name, 31) + '\u2014'); continue; }
     const h = scored[0];
