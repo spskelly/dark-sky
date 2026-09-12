@@ -62,6 +62,22 @@ nothing from `node_modules`. To rebuild the card by hand:
 npm ci && npx playwright install chromium && npm run build:og
 ```
 
+## Check before you go
+
+The spot list is one person's notes, not an official source. Coordinates are
+approximate parking or summit points; elevations and drive times are rounded;
+and the camping, fire and access notes were true when written and may not be
+true tonight. Gates close for ice, forest orders change, permits appear, roads
+wash out, campgrounds run seasonally.
+
+Confirm anything you are relying on with whoever manages the land —
+[parkway road closures](https://www.nps.gov/blri/planyourvisit/roadclosures.htm),
+[Smokies road status](https://www.nps.gov/grsm/planyourvisit/temproadclose.htm),
+[National Forests in NC](https://www.fs.usda.gov/r08/nfsnc),
+[NC State Parks](https://www.ncparks.gov/) — and treat the forecast as a model
+rather than a promise. These are remote places at four to six thousand feet,
+often on gravel, usually with no signal.
+
 ## Notes
 
 - The window is a planning heuristic. The moon also rises and sets, so a
