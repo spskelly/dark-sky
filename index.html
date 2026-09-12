@@ -1,0 +1,735 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dark sky calendar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..600,50&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  /* palette: deep blue night, ivory moon, teal for the dark-sky window */
+  :root {
+    --night: #0f1a34;
+    --night-2: #17254a;
+    --night-3: #22335f;
+    --ink: #d5dbea;
+    --ink-dim: #8b96b3;
+    --moon: #ece7d4;
+    --moon-dim: #a9a58f;
+    --dark-sky: #5fc2ad;
+    --dark-sky-wash: rgba(95, 194, 173, 0.13);
+    --full-wash: rgba(236, 231, 212, 0.09);
+    --today: #f0c36b;
+    --serif: "Fraunces", Georgia, serif;
+    --sans: "IBM Plex Sans", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--night); color: var(--ink); font-family: var(--sans); }
+  body { min-height: 100vh; padding: 28px clamp(16px, 4vw, 56px) 64px; }
+  a, button { color: inherit; font: inherit; }
+  button { background: none; border: 1px solid var(--night-3); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
+  button:hover { border-color: var(--ink-dim); }
+  button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--today); outline-offset: 2px; }
+  button[aria-pressed="true"] { background: var(--night-3); border-color: var(--ink-dim); }
+
+  /* top: hero moon + current status, then controls */
+  .hero { display: grid; grid-template-columns: auto 1fr; gap: 28px; align-items: center; max-width: 1100px; margin: 0 auto 36px; }
+  .hero svg { width: clamp(120px, 18vw, 180px); height: auto; filter: drop-shadow(0 0 28px rgba(236,231,212,0.18)); }
+  .hero h1 { font-family: var(--serif); font-weight: 300; font-size: clamp(30px, 4.5vw, 50px); line-height: 1.05; margin: 0 0 10px; letter-spacing: -0.01em; }
+  .hero h1 em { font-style: italic; color: var(--moon); }
+  .hero p { margin: 0; max-width: 62ch; color: var(--ink-dim); line-height: 1.5; }
+  .hero .next-window { margin-top: 12px; color: var(--dark-sky); }
+
+  .controls { max-width: 1100px; margin: 0 auto 18px; display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center; justify-content: space-between; }
+  .month-nav { display: flex; align-items: center; gap: 14px; }
+  .month-nav h2 { font-family: var(--serif); font-weight: 400; font-size: 28px; margin: 0; min-width: 11ch; }
+  .month-nav h2 span { color: var(--ink-dim); font-weight: 300; }
+  .options { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; color: var(--ink-dim); font-size: 14px; }
+  .options .group { display: flex; gap: 4px; align-items: center; }
+  .options .group button { padding: 4px 11px; font-size: 13px; }
+
+  /* the calendar grid */
+  .cal { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .dow { text-align: center; font-size: 13px; color: var(--ink-dim); padding: 6px 0 10px; }
+  .day {
+    position: relative; min-height: 96px; border-radius: 10px; padding: 8px 8px 6px;
+    background: var(--night-2); display: flex; flex-direction: column; gap: 4px;
+    border: 1px solid transparent;
+  }
+  .day.pad { background: transparent; }
+  .day .num { font-size: 14px; color: var(--ink-dim); display: flex; justify-content: space-between; align-items: baseline; }
+  .day .num b { font-weight: 500; color: var(--ink); }
+  .day .icon { align-self: center; margin-top: auto; margin-bottom: auto; }
+  .day .icon svg { width: 34px; height: 34px; }
+  .day .label { font-size: 12px; text-align: center; color: var(--moon); line-height: 1.2; }
+  .day .illum { font-size: 11px; color: var(--ink-dim); }
+  .day.weekend .num b { color: var(--moon); }
+  /* dark-sky window: teal wash, run edges rounded so a 5-day span reads as one bar */
+  .day.dark { background: var(--dark-sky-wash); border-color: rgba(95,194,173,0.35); }
+  .day.dark .label { color: var(--dark-sky); }
+  .day.dark.win-start { border-top-left-radius: 22px; border-bottom-left-radius: 22px; }
+  .day.dark.win-end { border-top-right-radius: 22px; border-bottom-right-radius: 22px; }
+  .day.full-wash { background: var(--full-wash); }
+  .day.today { border-color: var(--today); }
+  .day.today .num b { color: var(--today); }
+
+  /* upcoming windows list */
+  .windows { max-width: 1100px; margin: 44px auto 0; }
+  .windows h3 { font-family: var(--serif); font-weight: 400; font-size: 24px; margin: 0 0 6px; }
+  .windows p.lede { margin: 0 0 18px; color: var(--ink-dim); max-width: 64ch; line-height: 1.5; }
+  .windows ol { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+  .windows li { background: var(--night-2); border-radius: 10px; padding: 12px 14px; display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: center; cursor: pointer; border: 1px solid transparent; }
+  .windows li:hover { border-color: var(--night-3); }
+  .windows li .range { font-size: 16px; }
+  .windows li .meta { color: var(--ink-dim); font-size: 13px; }
+  .windows li .weekend { color: var(--dark-sky); font-size: 13px; grid-column: 2; grid-row: 1 / span 2; text-align: right; }
+  .windows li .weekend.none { color: var(--ink-dim); }
+
+  .windows li .core { color: var(--moon-dim); font-size: 13px; grid-column: 1 / -1; }
+
+  /* spots: map on the left, scrollable list on the right */
+  .spots { max-width: 1100px; margin: 56px auto 0; }
+  .spots h3 { font-family: var(--serif); font-weight: 400; font-size: 24px; margin: 0 0 6px; }
+  .spots p.lede { margin: 0 0 16px; color: var(--ink-dim); max-width: 64ch; line-height: 1.5; }
+  .spot-controls { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 14px; color: var(--ink-dim); font-size: 14px; }
+  .spot-controls .group { display: flex; gap: 4px; align-items: center; }
+  .spot-controls .group button { padding: 4px 11px; font-size: 13px; }
+  .spot-controls input { background: var(--night-2); border: 1px solid var(--night-3); color: var(--ink); border-radius: 6px; padding: 5px 8px; width: 9ch; font: inherit; font-size: 13px; }
+  .spot-controls input:focus-visible { outline: 2px solid var(--today); outline-offset: 1px; }
+  .spot-layout { display: grid; grid-template-columns: 1fr 420px; gap: 14px; }
+  #map { height: 560px; border-radius: 12px; background: var(--night-2); overflow: hidden; }
+  /* pull the bright topo tiles down toward the palette; imagery is left alone */
+  #map .tiles-dim { filter: brightness(0.72) saturate(0.7) contrast(1.05); }
+  .leaflet-control-layers { background: var(--night-2); color: var(--ink); border: 1px solid var(--night-3); border-radius: 8px; font-size: 13px; box-shadow: none; }
+  .leaflet-control-layers-expanded { padding: 8px 12px; }
+  .leaflet-bar a { background: var(--night-2); color: var(--ink); border-color: var(--night-3); }
+  .leaflet-bar a:hover { background: var(--night-3); }
+  .leaflet-control-attribution { background: rgba(15,26,52,0.7); color: var(--ink-dim); font-size: 10px; }
+  .leaflet-control-attribution a { color: var(--moon-dim); }
+  .map-fallback { height: 100%; display: grid; place-items: center; color: var(--ink-dim); padding: 20px; text-align: center; line-height: 1.5; }
+  .spot-list { max-height: 560px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
+  .spot { background: var(--night-2); border-radius: 10px; padding: 12px 14px; cursor: pointer; border: 1px solid transparent; }
+  .spot:hover, .spot.active { border-color: var(--night-3); }
+  .spot.active { background: var(--night-3); }
+  .spot .top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+  .spot .name { font-size: 16px; }
+  .spot .dist { color: var(--ink-dim); font-size: 13px; white-space: nowrap; }
+  .spot .tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+  .spot .tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--night-3); color: var(--ink-dim); }
+  .spot .tag.camp { color: var(--dark-sky); border-color: rgba(95,194,173,0.4); }
+  .spot .tag.warn { color: var(--today); border-color: rgba(240,195,107,0.4); }
+  .spot .note { color: var(--ink-dim); font-size: 13px; line-height: 1.45; }
+  .spot .links { margin-top: 6px; font-size: 12px; }
+  .spot .links a { color: var(--moon-dim); text-decoration: none; margin-right: 12px; }
+  .spot .links a:hover { color: var(--moon); text-decoration: underline; }
+  .leaflet-container { font-family: var(--sans); }
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--night-2); color: var(--ink); box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+  .leaflet-popup-content { margin: 10px 14px; font-size: 13px; line-height: 1.4; }
+  .leaflet-popup-content b { color: var(--moon); font-weight: 500; }
+  .pin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--night); box-shadow: 0 0 0 1px rgba(255,255,255,0.15); }
+  .pin.camp { background: var(--dark-sky); }
+  .pin.view { background: var(--moon); }
+  .pin.warn { background: var(--today); }
+  .pin.home { background: transparent; border: 2px solid var(--today); width: 18px; height: 18px; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; color: var(--ink-dim); align-items: center; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+
+  .season { max-width: 1100px; margin: 44px auto 0; }
+  .season h3 { font-family: var(--serif); font-weight: 400; font-size: 24px; margin: 0 0 12px; }
+  .season ul { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px 24px; }
+  .season li { color: var(--ink-dim); font-size: 14px; line-height: 1.5; }
+  .season li b { color: var(--ink); font-weight: 500; }
+
+  @media (max-width: 900px) {
+    .spot-layout { grid-template-columns: 1fr; }
+    #map { height: 380px; }
+    .spot-list { max-height: none; }
+  }
+
+  .foot { max-width: 1100px; margin: 40px auto 0; color: var(--ink-dim); font-size: 13px; line-height: 1.6; max-width: 70ch; }
+
+  @media (max-width: 720px) {
+    .hero { grid-template-columns: 1fr; text-align: center; justify-items: center; }
+    .day { min-height: 70px; padding: 5px 4px; }
+    .day .icon svg { width: 24px; height: 24px; }
+    .day .label { font-size: 10px; }
+    .day .illum { display: none; }
+    .month-nav h2 { font-size: 22px; min-width: 0; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .day { transition: border-color 160ms; }
+  }
+</style>
+</head>
+<body>
+
+<section class="hero" aria-label="tonight">
+  <div id="hero-moon"></div>
+  <div>
+    <h1 id="hero-title"></h1>
+    <p id="hero-sub"></p>
+    <p class="next-window" id="hero-next"></p>
+  </div>
+</section>
+
+<div class="controls">
+  <div class="month-nav">
+    <button id="prev" aria-label="previous month">&larr;</button>
+    <h2 id="month-title"></h2>
+    <button id="next" aria-label="next month">&rarr;</button>
+    <button id="today-btn">today</button>
+  </div>
+  <div class="options">
+    <div class="group" role="group" aria-label="dark-sky window length">
+      <span>window</span>
+      <button data-win="3" aria-pressed="false">3 days</button>
+      <button data-win="5" aria-pressed="true">5 days</button>
+      <button data-win="7" aria-pressed="false">7 days</button>
+    </div>
+    <div class="group" role="group" aria-label="hemisphere">
+      <span>hemisphere</span>
+      <button data-hemi="N" aria-pressed="true">north</button>
+      <button data-hemi="S" aria-pressed="false">south</button>
+    </div>
+  </div>
+</div>
+
+<div class="cal" id="cal" role="grid"></div>
+
+<section class="windows">
+  <h3>upcoming dark-sky windows</h3>
+  <p class="lede">every new moon for the next twelve months, with the days on either side that make up the window. click one to jump the calendar there.</p>
+  <ol id="windows"></ol>
+</section>
+
+<section class="spots">
+  <h3>where to look up</h3>
+  <p class="lede">a curated set of high, open, dark places within a few hours of Waynesville. teal pins allow overnight camping; ivory pins are drive-up or short-hike viewing only; gold pins have a catch. distances are straight-line from your home point, drive times are rough and assume the parkway is open.</p>
+  <div class="spot-controls">
+    <div class="group" role="group" aria-label="filter spots">
+      <button data-filter="all" aria-pressed="true">all</button>
+      <button data-filter="camp" aria-pressed="false">camp overnight</button>
+      <button data-filter="drive" aria-pressed="false">drive-up</button>
+    </div>
+    <div class="group">
+      <span>home</span>
+      <input id="home-lat" type="number" step="0.0001" aria-label="home latitude">
+      <input id="home-lon" type="number" step="0.0001" aria-label="home longitude">
+      <button id="home-set">update</button>
+      <button id="home-geo">use my location</button>
+    </div>
+  </div>
+  <div class="spot-layout">
+    <div id="map"></div>
+    <div class="spot-list" id="spot-list"></div>
+  </div>
+  <div class="legend">
+    <span><i class="pin camp"></i> overnight camping allowed</span>
+    <span><i class="pin view"></i> viewing only</span>
+    <span><i class="pin warn"></i> restricted, read the note</span>
+    <span><i class="pin home"></i> home</span>
+  </div>
+</section>
+
+<section class="season">
+  <h3>reading the mountains</h3>
+  <ul>
+    <li><b>parkway gates.</b> the high sections between Mount Pisgah and Waterrock Knob close for ice and snow, often for weeks at a time from November into April. check the NPS road status page before driving up; a closed gate at 9pm is a long detour.</li>
+    <li><b>milky way core.</b> at this latitude the galactic center sits in the southern sky. it clears the ridge before dawn from late February, is up most of the night by June, and is an evening object August through October. each window in the list above says which.</li>
+    <li><b>south-facing matters.</b> the core rises in the southeast and sets in the southwest, low. overlooks that face south or west across a big valley (Cowee, Devil's Courthouse, Cherohala) beat 360-degree summits with a nearby ridge to the south.</li>
+    <li><b>fog and dew.</b> valleys fog in after midnight most of the year; ridgetops above 5,500 feet usually stay clear of it but everything gets wet. bring a lens warmer and expect the tent fly to be soaked.</li>
+    <li><b>temperature.</b> subtract about 15 degrees from the Waynesville forecast for the 6,000-foot balds, and add wind. July nights on Black Balsam run in the 50s.</li>
+    <li><b>leaf season.</b> October new moons are the best of the year for sky, and the worst for finding a parking spot at Graveyard Fields. arrive before sunset or go somewhere less famous.</li>
+    <li><b>forecasting.</b> every spot links to its clear outside forecast: cloud cover by hour, plus transparency and seeing, which matter more than the daytime forecast suggests.</li>
+  </ul>
+</section>
+
+<p class="foot">
+  phase times come from the meeus true-phase algorithm and are converted to your local time zone, so dates should match published almanacs to the day. the window is a planning heuristic: the moon also rises and sets, so a waxing crescent a few days past new is gone by late evening, and a waning crescent doesn't rise until the small hours. those edge days are often darker than they look.
+</p>
+
+<script>
+// ---------- lunar phase math (meeus, astronomical algorithms ch. 49) ----------
+
+const SYNODIC = 29.530588861;
+const rad = d => d * Math.PI / 180;
+const norm360 = d => ((d % 360) + 360) % 360;
+
+// jde of the true phase for lunation number k. phase: 0 new, 0.25 first q, 0.5 full, 0.75 last q
+function truePhaseJde(k, phase) {
+  k = Math.floor(k) + phase;
+  const T = k / 1236.85;
+  const T2 = T * T, T3 = T2 * T, T4 = T3 * T;
+  let jde = 2451550.09766 + SYNODIC * k + 0.00015437 * T2 - 0.000000150 * T3 + 0.00000000073 * T4;
+  const E = 1 - 0.002516 * T - 0.0000074 * T2;
+  // mean anomalies and arguments, in radians
+  const M  = rad(norm360(2.5534 + 29.10535670 * k - 0.0000014 * T2 - 0.00000011 * T3));
+  const Mp = rad(norm360(201.5643 + 385.81693528 * k + 0.0107582 * T2 + 0.00001238 * T3 - 0.000000058 * T4));
+  const F  = rad(norm360(160.7108 + 390.67050284 * k - 0.0016118 * T2 - 0.00000227 * T3 + 0.000000011 * T4));
+  const Om = rad(norm360(124.7746 - 1.56375588 * k + 0.0020672 * T2 + 0.00000215 * T3));
+  const s = Math.sin, c = Math.cos;
+  let corr = 0;
+  if (phase === 0 || phase === 0.5) {
+    // new and full share a table with slightly different leading coefficients
+    const nm = phase === 0;
+    corr =
+      (nm ? -0.40720 : -0.40614) * s(Mp)
+      + (nm ? 0.17241 : 0.17302) * E * s(M)
+      + (nm ? 0.01608 : 0.01614) * s(2 * Mp)
+      + (nm ? 0.01039 : 0.01043) * s(2 * F)
+      + (nm ? 0.00739 : 0.00734) * E * s(Mp - M)
+      - (nm ? 0.00514 : 0.00515) * E * s(Mp + M)
+      + (nm ? 0.00208 : 0.00209) * E * E * s(2 * M)
+      - 0.00111 * s(Mp - 2 * F)
+      - 0.00057 * s(Mp + 2 * F)
+      + 0.00056 * E * s(2 * Mp + M)
+      - 0.00042 * s(3 * Mp)
+      + 0.00042 * E * s(M + 2 * F)
+      + 0.00038 * E * s(M - 2 * F)
+      - 0.00024 * E * s(2 * Mp - M)
+      - 0.00017 * s(Om)
+      - 0.00007 * s(Mp + 2 * M)
+      + 0.00004 * s(2 * Mp - 2 * F)
+      + 0.00004 * s(3 * M)
+      + 0.00003 * s(Mp + M - 2 * F)
+      + 0.00003 * s(2 * Mp + 2 * F)
+      - 0.00003 * s(Mp + M + 2 * F)
+      + 0.00003 * s(Mp - M + 2 * F)
+      - 0.00002 * s(Mp - M - 2 * F)
+      - 0.00002 * s(3 * Mp + M)
+      + 0.00002 * s(4 * Mp);
+  } else {
+    corr =
+      -0.62801 * s(Mp)
+      + 0.17172 * E * s(M)
+      - 0.01183 * E * s(Mp + M)
+      + 0.00862 * s(2 * Mp)
+      + 0.00804 * s(2 * F)
+      + 0.00454 * E * s(Mp - M)
+      + 0.00204 * E * E * s(2 * M)
+      - 0.00180 * s(Mp - 2 * F)
+      - 0.00070 * s(Mp + 2 * F)
+      - 0.00040 * s(3 * Mp)
+      - 0.00034 * E * s(2 * Mp - M)
+      + 0.00032 * E * s(M + 2 * F)
+      + 0.00032 * E * s(M - 2 * F)
+      - 0.00028 * E * E * s(Mp + 2 * M)
+      + 0.00027 * E * s(2 * Mp + M)
+      - 0.00017 * s(Om)
+      - 0.00005 * s(Mp - M - 2 * F)
+      + 0.00004 * s(2 * Mp + 2 * F)
+      - 0.00004 * s(Mp + M + 2 * F)
+      + 0.00004 * s(Mp - 2 * M)
+      + 0.00003 * s(Mp + M - 2 * F)
+      + 0.00003 * s(3 * M)
+      + 0.00002 * s(2 * Mp - 2 * F)
+      + 0.00002 * s(Mp - M + 2 * F)
+      - 0.00002 * s(3 * Mp + M);
+    // quarter-specific term, added for first quarter and subtracted for last
+    const W = 0.00306 - 0.00038 * E * c(M) + 0.00026 * c(Mp) - 0.00002 * c(Mp - M) + 0.00002 * c(Mp + M) + 0.00002 * c(2 * F);
+    corr += phase === 0.25 ? W : -W;
+  }
+  // planetary perturbations are ~0.0003 day at most and are omitted; delta-t (~70s) also omitted
+  return jde + corr;
+}
+
+const jdToDate = jd => new Date((jd - 2440587.5) * 86400000);
+const dateToJd = d => d.getTime() / 86400000 + 2440587.5;
+
+// all phase events between two dates, as {date, phase, jd}
+function phasesBetween(start, end) {
+  const kStart = Math.floor((start.getFullYear() - 2000 + start.getMonth() / 12) * 12.3685) - 2;
+  const kEnd = Math.ceil((end.getFullYear() - 2000 + end.getMonth() / 12) * 12.3685) + 2;
+  const out = [];
+  for (let k = kStart; k <= kEnd; k++) {
+    for (const ph of [0, 0.25, 0.5, 0.75]) {
+      const jd = truePhaseJde(k, ph);
+      const d = jdToDate(jd);
+      if (d >= start && d <= end) out.push({ date: d, phase: ph, jd });
+    }
+  }
+  return out.sort((a, b) => a.jd - b.jd);
+}
+
+// fraction of the current lunation elapsed at time t (0 = new, 0.5 = full), via true new moons on either side
+function lunationFraction(t) {
+  const jd = dateToJd(t);
+  let k = Math.floor((jd - 2451550.09766) / SYNODIC);
+  let prev = truePhaseJde(k, 0), next = truePhaseJde(k + 1, 0);
+  while (jd < prev) { k--; next = prev; prev = truePhaseJde(k, 0); }
+  while (jd >= next) { k++; prev = next; next = truePhaseJde(k + 1, 0); }
+  return (jd - prev) / (next - prev);
+}
+
+// ---------- drawing ----------
+
+// svg of the moon at lunation fraction p. lit limb on the right while waxing (northern view); flipped for the south
+function moonSvg(p, size, hemi) {
+  const r = 48, cx = 50, cy = 50;
+  const flip = hemi === 'S';
+  const waxing = p < 0.5;
+  const rx = Math.abs(r * Math.cos(2 * Math.PI * p));
+  // outer arc runs down the lit side; terminator arc comes back up bulging toward or away from it
+  let outerSweep = waxing ? 1 : 0;
+  let termSweep = (p < 0.25 || p >= 0.75) ? (waxing ? 0 : 1) : (waxing ? 1 : 0);
+  if (flip) { outerSweep ^= 1; termSweep ^= 1; }
+  const lit = `M ${cx} ${cy - r} A ${r} ${r} 0 0 ${outerSweep} ${cx} ${cy + r} A ${rx} ${r} 0 0 ${termSweep} ${cx} ${cy - r} Z`;
+  const near = Math.min(p, 1 - p) < 0.02;
+  return `<svg viewBox="0 0 100 100" width="${size}" height="${size}" aria-hidden="true">
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="#0a1226" stroke="#3a4a78" stroke-width="1.5"/>
+    ${near ? '' : `<path d="${lit}" fill="var(--moon)"/>`}
+  </svg>`;
+}
+
+// ---------- calendar state and render ----------
+
+const state = {
+  view: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+  win: 5,
+  hemi: 'N',
+};
+
+const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+const dayKey = d => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+const fmtDay = d => d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+const fmtTime = d => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+const PHASE_NAME = { 0: 'new moon', 0.25: 'first quarter', 0.5: 'full moon', 0.75: 'last quarter' };
+
+function phaseWord(p) {
+  if (p < 0.03 || p > 0.97) return 'new';
+  if (p < 0.22) return 'waxing crescent';
+  if (p < 0.28) return 'first quarter';
+  if (p < 0.47) return 'waxing gibbous';
+  if (p < 0.53) return 'full';
+  if (p < 0.72) return 'waning gibbous';
+  if (p < 0.78) return 'last quarter';
+  return 'waning crescent';
+}
+
+// map of dayKey -> set of flags, built from phase events for a wide span around the visible month
+function buildDayInfo(start, end) {
+  const half = Math.floor(state.win / 2);
+  const events = phasesBetween(addDays(start, -10), addDays(end, 10));
+  const info = new Map();
+  const get = d => { const k = dayKey(d); if (!info.has(k)) info.set(k, {}); return info.get(k); };
+  for (const ev of events) {
+    get(ev.date).event = ev;
+    if (ev.phase === 0) {
+      for (let i = -half; i <= half; i++) {
+        const o = get(addDays(ev.date, i));
+        o.dark = true;
+        if (i === -half) o.winStart = true;
+        if (i === half) o.winEnd = true;
+      }
+    }
+    if (ev.phase === 0.5) {
+      for (let i = -1; i <= 1; i++) get(addDays(ev.date, i)).fullWash = true;
+    }
+  }
+  return info;
+}
+
+function renderCalendar() {
+  const y = state.view.getFullYear(), m = state.view.getMonth();
+  const first = new Date(y, m, 1), last = new Date(y, m + 1, 0);
+  const info = buildDayInfo(first, last);
+  const today = new Date();
+  document.getElementById('month-title').innerHTML =
+    `${first.toLocaleDateString(undefined, { month: 'long' })} <span>${y}</span>`;
+
+  const cal = document.getElementById('cal');
+  let html = '';
+  for (const d of ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']) html += `<div class="dow">${d}</div>`;
+  for (let i = 0; i < first.getDay(); i++) html += '<div class="day pad"></div>';
+  for (let day = 1; day <= last.getDate(); day++) {
+    const d = new Date(y, m, day, 21, 0, 0); // phase icon evaluated at 9pm local, roughly when you'd be looking up
+    const o = info.get(dayKey(d)) || {};
+    const p = lunationFraction(d);
+    const illum = Math.round((1 - Math.cos(2 * Math.PI * p)) / 2 * 100);
+    const cls = ['day'];
+    if (o.dark) cls.push('dark');
+    if (o.winStart) cls.push('win-start');
+    if (o.winEnd) cls.push('win-end');
+    if (o.fullWash && !o.dark) cls.push('full-wash');
+    if (sameDay(d, today)) cls.push('today');
+    if (d.getDay() === 0 || d.getDay() === 6 || d.getDay() === 5) cls.push('weekend');
+    const label = o.event ? `<div class="label">${PHASE_NAME[o.event.phase]}<br><span class="illum">${fmtTime(o.event.date)}</span></div>` : '';
+    html += `<div class="${cls.join(' ')}" role="gridcell" tabindex="0" aria-label="${fmtDay(d)}, ${phaseWord(p)}, ${illum}% lit${o.dark ? ', dark-sky window' : ''}">
+      <div class="num"><b>${day}</b><span class="illum">${illum}%</span></div>
+      <div class="icon">${moonSvg(p, 34, state.hemi)}</div>
+      ${label}
+    </div>`;
+  }
+  cal.innerHTML = html;
+}
+
+function renderHero() {
+  const now = new Date();
+  const p = lunationFraction(now);
+  const illum = Math.round((1 - Math.cos(2 * Math.PI * p)) / 2 * 100);
+  document.getElementById('hero-moon').innerHTML = moonSvg(p, 180, state.hemi);
+  document.getElementById('hero-title').innerHTML = `tonight the moon is <em>${phaseWord(p)}</em>`;
+  const upcoming = phasesBetween(now, addDays(now, 40));
+  const nextNew = upcoming.find(e => e.phase === 0);
+  const nextFull = upcoming.find(e => e.phase === 0.5);
+  document.getElementById('hero-sub').textContent =
+    `${illum}% lit. next full moon ${fmtDay(nextFull.date)}, next new moon ${fmtDay(nextNew.date)}.`;
+  const half = Math.floor(state.win / 2);
+  const ws = addDays(nextNew.date, -half), we = addDays(nextNew.date, half);
+  const inWindow = now >= new Date(ws.getFullYear(), ws.getMonth(), ws.getDate()) && now < addDays(we, 1);
+  document.getElementById('hero-next').textContent = inWindow
+    ? `you are inside a dark-sky window right now, through ${fmtDay(we)}.`
+    : `next dark-sky window: ${fmtDay(ws)} through ${fmtDay(we)}.`;
+}
+
+// rough guide to when the galactic core is above the horizon at ~35N, by month
+function coreVisibility(m) {
+  return [
+    'core not visible', 'core not visible', 'core rises before dawn', 'core up from ~3am',
+    'core up after midnight', 'core up by ~11pm', 'core up all evening', 'core up all evening',
+    'core up at dusk, sets ~midnight', 'core low in the southwest at dusk', 'core not visible', 'core not visible',
+  ][m];
+}
+
+function renderWindows() {
+  const now = new Date();
+  const half = Math.floor(state.win / 2);
+  const news = phasesBetween(addDays(now, -half), addDays(now, 370)).filter(e => e.phase === 0);
+  const ol = document.getElementById('windows');
+  ol.innerHTML = news.map(e => {
+    const ws = addDays(e.date, -half), we = addDays(e.date, half);
+    // which weekend nights (fri/sat) fall inside the window, since that's what a camping trip hinges on
+    const nights = [];
+    for (let i = -half; i <= half; i++) {
+      const d = addDays(e.date, i);
+      if (d.getDay() === 5) nights.push('fri ' + d.getDate());
+      if (d.getDay() === 6) nights.push('sat ' + d.getDate());
+    }
+    const wk = nights.length ? nights.join(', ') : 'midweek only';
+    return `<li tabindex="0" data-y="${e.date.getFullYear()}" data-m="${e.date.getMonth()}">
+      <span class="range">${fmtDay(ws)} to ${fmtDay(we)}</span>
+      <span class="weekend ${nights.length ? '' : 'none'}">${wk}</span>
+      <span class="meta">new moon ${fmtDay(e.date)} at ${fmtTime(e.date)}</span>
+      <span class="core">${coreVisibility(e.date.getMonth())}</span>
+    </li>`;
+  }).join('');
+  ol.querySelectorAll('li').forEach(li => {
+    const go = () => { state.view = new Date(+li.dataset.y, +li.dataset.m, 1); renderCalendar(); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+    li.addEventListener('click', go);
+    li.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(); } });
+  });
+}
+
+// ---------- dark-sky spots ----------
+
+// kind: camp = overnight allowed, view = viewing only, warn = restricted
+// mins = rough drive from waynesville with the parkway open. coordinates are approximate parking or summit points
+const SPOTS = [
+  { name: 'Waterrock Knob', lat: 35.4605, lon: -83.1400, elev: 5820, kind: 'view', mins: 30, tags: ['parkway mp 451', 'east and west views'],
+    note: 'highest parkway visitor area, big parking lot, no camping. closest real dark sky to town and the fastest bail-out when a forecast turns. summit trail adds 360 degrees but scout it in daylight first. sylva and the cherokee casino glow to the south and west, so it is better for meteors and overhead than for the core.' },
+  { name: 'Thunder Struck Ridge Overlook', lat: 35.4738, lon: -83.1682, elev: 4780, kind: 'view', mins: 35, tags: ['parkway mp 454.4', 'drive-up', 'waterrock backup'],
+    note: 'three minutes past waterrock, wide valley view, a fraction of the traffic. the move when the waterrock lot is full of sunset crowds. lower and more directional than the knob.' },
+  { name: 'Cove Field Ridge Overlook', lat: 35.4407, lon: -83.0197, elev: 4620, kind: 'view', mins: 15, tags: ['parkway mp 439.4', 'closest to town', 'moon and planets'],
+    note: 'the local test run: fifteen minutes from waynesville, good enough for the moon, planets, and gear shakedowns. town glow and the lower elevation make it weak for faint stuff; do not judge a new-moon night here.' },
+  { name: 'Black Balsam Knob', lat: 35.3276, lon: -82.8757, elev: 6214, kind: 'camp', mins: 50, tags: ['parkway mp 420, fr 816', 'grass bald', 'no fires'],
+    note: 'the standard answer. treeless summit with a full horizon, dispersed camping on the bald and along the art loeb trail. gets crowded on good weekends; walk past the first ridge for quiet. fires are banned across the shining rock area.' },
+  { name: 'Sam Knob / Flat Laurel Creek', lat: 35.3298, lon: -82.8920, elev: 5800, kind: 'camp', mins: 50, tags: ['fr 816 end', 'quieter than black balsam'],
+    note: 'same parking as black balsam, opposite direction. flat laurel creek trail has sheltered tent sites in the valley and sam knob summit is a short climb for the view. better wind protection for sleeping.' },
+  { name: 'Graveyard Fields', lat: 35.3204, lon: -82.8469, elev: 5120, kind: 'camp', mins: 45, tags: ['parkway mp 418.8', 'no fires', 'busy'],
+    note: 'open high valley with a wide south-facing sky, the reason it shows up in every milky way photo of nc. backcountry camping allowed, no fires. the parking lot fills by early afternoon in fall.' },
+  { name: "Devil's Courthouse", lat: 35.3037, lon: -82.8991, elev: 5720, kind: 'view', mins: 50, tags: ['parkway mp 422.4', 'short steep hike', 'south facing'],
+    note: 'a rock outcrop looking straight south over the valley toward south carolina. probably the best core view on this stretch. half-mile paved climb from the overlook, no camping.' },
+  { name: 'Cowee Mountains Overlook', lat: 35.3701, lon: -82.9836, elev: 5950, kind: 'view', mins: 40, tags: ['parkway mp 430.7', 'west facing', 'drive-up'],
+    note: 'huge pull-off with an unobstructed western horizon, the classic sunset overlook on the parkway. no hiking needed, set up a scope off the tailgate. richland balsam, the highest point on the road, is a half mile on.' },
+  { name: 'Wolf Mountain Overlook', lat: 35.3123, lon: -82.9296, elev: 5460, kind: 'view', mins: 50, tags: ['parkway mp 424.8', 'drive-up', 'quiet'],
+    note: 'less traffic than the overlooks nearer 276, wide view across nantahala. good fallback when graveyard fields and black balsam are packed.' },
+  { name: 'Fryingpan Mountain tower', lat: 35.3809, lon: -82.7920, elev: 5340, kind: 'view', mins: 45, tags: ['parkway mp 409.6', '1.5 mi round trip', 'fire tower'],
+    note: 'gravel road walk from the parkway to a 70-foot lookout tower with a full horizon. the tower stairs are open. closer to the asheville glow to the northeast than the 215 area but still dark.' },
+  { name: 'Mount Pisgah campground', lat: 35.4142, lon: -82.7522, elev: 4960, kind: 'camp', mins: 40, tags: ['parkway mp 408.6', 'reservable', 'seasonal'],
+    note: 'developed nps campground, the easiest legal overnight on the parkway. mostly under trees, so it is a base camp: sleep here and walk or drive to fryingpan or the pisgah inn lot for the sky. open roughly may through october.' },
+  { name: 'Cataloochee Valley', lat: 35.6392, lon: -83.0947, elev: 2650, kind: 'camp', mins: 55, tags: ['great smoky mountains np', 'campground', 'gravel road', 'elk'],
+    note: 'remote valley in the park, very dark, with a small reservable campground. ridges cut off the low horizon so it favors overhead and meteor watching over the core. check nps for road and campground status, it has been closed for repairs since helene.' },
+  { name: 'Mount Sterling summit', lat: 35.7004, lon: -83.1116, elev: 5842, kind: 'camp', mins: 75, tags: ['great smoky mountains np', 'backcountry site 38', 'fire tower', 'permit'],
+    note: 'fire tower on a 5,800-foot summit with a campsite right at the top. best-in-class sky with the whole smokies dark to the south and west. 2.7 miles and 2,000 feet up from mt sterling gap, backcountry permit through the park.' },
+  { name: 'Kuwohi (Clingmans Dome)', lat: 35.5628, lon: -83.4986, elev: 6643, kind: 'view', mins: 90, tags: ['great smoky mountains np', 'road closed dec to mar', 'observation tower'],
+    note: 'highest point in the park, half-mile paved walk to the tower. gatlinburg glows to the north but south and west are black. no camping; the lot is open at night when the road is.' },
+  { name: 'Cherohala Skyway, Hooper Bald', lat: 35.3278, lon: -84.0203, elev: 5290, kind: 'view', mins: 110, tags: ['cherohala skyway', 'darkest westward sky', 'drive-up'],
+    note: 'the skyway overlooks between santeetlah gap and the tennessee line are the darkest drive-up sky in the region, with nothing to the west for a hundred miles. hooper bald is a short walk from its lot. dispersed camping is nearby off the forest roads but not at the overlooks.' },
+  { name: 'Panthertown Valley', lat: 35.1650, lon: -83.0227, elev: 3900, kind: 'camp', mins: 75, tags: ['nantahala nf', 'backcountry', 'granite domes'],
+    note: 'high valley with bare granite domes (salt rock, big green) that open up the sky above the trees. free dispersed camping, no permits. domes are wet and slick after dark, know your route.' },
+  { name: 'Roan Highlands, Carvers Gap', lat: 36.1064, lon: -82.1105, elev: 5512, kind: 'camp', mins: 150, tags: ['appalachian trail', 'grass balds', 'far'],
+    note: 'miles of open bald along the at; grassy ridge bald is the classic overnight. a long drive for a weekend, but the most black balsam-like sky north of it, and the rhododendron in june is a bonus.' },
+  { name: 'Mayland Earth to Sky Park', lat: 35.9247, lon: -82.1868, elev: 2700, kind: 'view', mins: 125, tags: ['darksky certified park', 'observatory', 'public nights'],
+    note: 'the only darksky international certified park in the state, with the bare dark sky observatory. public viewing nights on a schedule, scopes provided. not a camping spot, but the right place to take someone new to this.' },
+  { name: 'PARI', lat: 35.1996, lon: -82.8720, elev: 2900, kind: 'view', mins: 70, tags: ['pisgah astronomical research institute', 'events only'],
+    note: 'former nasa tracking station turned observatory campus in the pisgah forest. access is through scheduled public events, not walk-up. worth watching their calendar for new moon nights.' },
+  { name: 'Max Patch', lat: 35.7963, lon: -82.9622, elev: 4629, kind: 'warn', mins: 65, tags: ['closed after dark', 'no camping through 2029'],
+    note: 'the famous bald, but a forest order closes it from an hour after sunset to an hour before sunrise and bans camping and fires, currently extended into 2029. listed so you do not plan around it.' },
+];
+
+const HOME_DEFAULT = { lat: 35.4887, lon: -82.9887, name: 'Waynesville' };
+const spotState = { home: { ...HOME_DEFAULT }, filter: 'all', map: null, markers: new Map(), homeMarker: null, active: null };
+
+// straight-line distance in miles and compass bearing from home
+function haversine(a, b) {
+  const R = 3958.8, toR = x => x * Math.PI / 180;
+  const dLat = toR(b.lat - a.lat), dLon = toR(b.lon - a.lon);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(toR(a.lat)) * Math.cos(toR(b.lat)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+function bearing(a, b) {
+  const toR = x => x * Math.PI / 180;
+  const y = Math.sin(toR(b.lon - a.lon)) * Math.cos(toR(b.lat));
+  const x = Math.cos(toR(a.lat)) * Math.sin(toR(b.lat)) - Math.sin(toR(a.lat)) * Math.cos(toR(b.lat)) * Math.cos(toR(b.lon - a.lon));
+  const deg = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  return ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'][Math.round(deg / 45) % 8];
+}
+const fmtDur = m => m < 60 ? `${m} min` : `${Math.floor(m / 60)}h${m % 60 ? ' ' + (m % 60) : ''}`;
+
+function spotLinks(s) {
+  const co = `https://clearoutside.com/forecast/${s.lat.toFixed(2)}/${s.lon.toFixed(2)}`;
+  const lp = `https://www.lightpollutionmap.info/#zoom=11&lat=${s.lat}&lon=${s.lon}`;
+  const gm = `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lon}`;
+  return `<a href="${co}" target="_blank" rel="noopener">forecast</a><a href="${lp}" target="_blank" rel="noopener">light map</a><a href="${gm}" target="_blank" rel="noopener">directions</a>`;
+}
+
+function visibleSpots() {
+  const f = spotState.filter;
+  return SPOTS
+    .filter(s => f === 'all' || (f === 'camp' ? s.kind === 'camp' : s.kind === 'view'))
+    .map(s => ({ ...s, dist: haversine(spotState.home, s), dir: bearing(spotState.home, s) }))
+    .sort((a, b) => a.dist - b.dist);
+}
+
+function renderSpotList() {
+  const list = document.getElementById('spot-list');
+  const rows = visibleSpots();
+  list.innerHTML = rows.map(s => `<div class="spot ${spotState.active === s.name ? 'active' : ''}" data-name="${s.name}" tabindex="0">
+    <div class="top"><span class="name">${s.name}</span><span class="dist">${s.dist.toFixed(0)} mi ${s.dir} &middot; ~${fmtDur(s.mins)}</span></div>
+    <div class="tags">
+      <span class="tag ${s.kind === 'camp' ? 'camp' : s.kind === 'warn' ? 'warn' : ''}">${s.kind === 'camp' ? 'camp overnight' : s.kind === 'warn' ? 'restricted' : 'viewing only'}</span>
+      <span class="tag">${s.elev.toLocaleString()} ft</span>
+      ${s.tags.map(t => `<span class="tag">${t}</span>`).join('')}
+    </div>
+    <div class="note">${s.note}</div>
+    <div class="links">${spotLinks(s)}</div>
+  </div>`).join('');
+  list.querySelectorAll('.spot').forEach(el => {
+    const go = () => focusSpot(el.dataset.name);
+    el.addEventListener('click', go);
+    el.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(); } });
+  });
+  // keep the map markers in step with the filter
+  if (spotState.map) {
+    const shown = new Set(rows.map(s => s.name));
+    for (const [name, mk] of spotState.markers) {
+      if (shown.has(name)) mk.addTo(spotState.map); else mk.remove();
+    }
+  }
+}
+
+function focusSpot(name) {
+  spotState.active = name;
+  const s = SPOTS.find(x => x.name === name);
+  document.querySelectorAll('.spot').forEach(el => el.classList.toggle('active', el.dataset.name === name));
+  if (spotState.map && s) {
+    spotState.map.flyTo([s.lat, s.lon], Math.max(spotState.map.getZoom(), 11), { duration: 0.6 });
+    spotState.markers.get(name)?.openPopup();
+  }
+}
+
+function pinIcon(kind) {
+  return L.divIcon({ className: '', html: `<div class="pin ${kind}"></div>`, iconSize: kind === 'home' ? [18, 18] : [14, 14], iconAnchor: kind === 'home' ? [9, 9] : [7, 7] });
+}
+
+function initMap() {
+  const el = document.getElementById('map');
+  if (typeof L === 'undefined') {
+    el.innerHTML = '<div class="map-fallback">the map tiles could not load (offline, or the viewer blocks external scripts). the list still works; open the file directly in a browser for the map.</div>';
+    return;
+  }
+  const map = L.map(el, { zoomControl: true, attributionControl: true }).setView([35.45, -83.0], 9);
+  // no-key tile sources. topo is the default: contour lines are what you need to judge a southern horizon
+  const topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors, SRTM | &copy; OpenTopoMap (CC-BY-SA)', maxZoom: 17, className: 'tiles-dim',
+  });
+  const imagery = L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'USGS The National Map', maxZoom: 16,
+  });
+  topo.addTo(map);
+  L.control.layers({ 'topo': topo, 'imagery': imagery }, null, { position: 'topright', collapsed: false }).addTo(map);
+  spotState.map = map;
+  for (const s of SPOTS) {
+    const mk = L.marker([s.lat, s.lon], { icon: pinIcon(s.kind), title: s.name })
+      .bindPopup(`<b>${s.name}</b><br>${s.elev.toLocaleString()} ft &middot; ~${fmtDur(s.mins)} from Waynesville<br>${s.tags.join(', ')}`);
+    mk.on('click', () => {
+      spotState.active = s.name;
+      document.querySelectorAll('.spot').forEach(e => e.classList.toggle('active', e.dataset.name === s.name));
+      document.querySelector(`.spot[data-name="${s.name}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+    spotState.markers.set(s.name, mk);
+    mk.addTo(map);
+  }
+  placeHome();
+}
+
+function placeHome() {
+  if (!spotState.map) return;
+  if (spotState.homeMarker) spotState.homeMarker.remove();
+  spotState.homeMarker = L.marker([spotState.home.lat, spotState.home.lon], { icon: pinIcon('home'), title: 'home', zIndexOffset: 1000 })
+    .bindPopup('<b>home</b>').addTo(spotState.map);
+}
+
+function setHome(lat, lon) {
+  if (!isFinite(lat) || !isFinite(lon)) return;
+  spotState.home = { lat, lon };
+  document.getElementById('home-lat').value = lat.toFixed(4);
+  document.getElementById('home-lon').value = lon.toFixed(4);
+  placeHome();
+  renderSpotList();
+}
+
+document.getElementById('home-set').addEventListener('click', () =>
+  setHome(parseFloat(document.getElementById('home-lat').value), parseFloat(document.getElementById('home-lon').value)));
+document.getElementById('home-geo').addEventListener('click', () => {
+  if (!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(pos => setHome(pos.coords.latitude, pos.coords.longitude), () => {});
+});
+document.querySelectorAll('[data-filter]').forEach(b => b.addEventListener('click', () => {
+  spotState.filter = b.dataset.filter;
+  document.querySelectorAll('[data-filter]').forEach(x => x.setAttribute('aria-pressed', x === b));
+  renderSpotList();
+}));
+
+function renderAll() { renderHero(); renderCalendar(); renderWindows(); }
+
+document.getElementById('prev').addEventListener('click', () => { state.view = new Date(state.view.getFullYear(), state.view.getMonth() - 1, 1); renderCalendar(); });
+document.getElementById('next').addEventListener('click', () => { state.view = new Date(state.view.getFullYear(), state.view.getMonth() + 1, 1); renderCalendar(); });
+document.getElementById('today-btn').addEventListener('click', () => { state.view = new Date(new Date().getFullYear(), new Date().getMonth(), 1); renderCalendar(); });
+document.querySelectorAll('[data-win]').forEach(b => b.addEventListener('click', () => {
+  state.win = +b.dataset.win;
+  document.querySelectorAll('[data-win]').forEach(x => x.setAttribute('aria-pressed', x === b));
+  renderAll();
+}));
+document.querySelectorAll('[data-hemi]').forEach(b => b.addEventListener('click', () => {
+  state.hemi = b.dataset.hemi;
+  document.querySelectorAll('[data-hemi]').forEach(x => x.setAttribute('aria-pressed', x === b));
+  renderAll();
+}));
+document.addEventListener('keydown', e => {
+  if (e.target.closest('button, li')) return;
+  if (e.key === 'ArrowLeft') document.getElementById('prev').click();
+  if (e.key === 'ArrowRight') document.getElementById('next').click();
+});
+
+renderAll();
+document.getElementById('home-lat').value = HOME_DEFAULT.lat.toFixed(4);
+document.getElementById('home-lon').value = HOME_DEFAULT.lon.toFixed(4);
+initMap();
+renderSpotList();
+</script>
+</body>
+</html>
