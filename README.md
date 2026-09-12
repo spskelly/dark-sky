@@ -148,6 +148,23 @@ other tool here, with no `npm install` and no browser download. It is checked
 against fixtures covering every colour type, bit depths 1 to 16 and all five
 filters, plus a tile whose 65,536 pixels each encode their own coordinates.
 
+Each tile ships its own palette holding only the colours that tile happens to
+use, in whatever order they were written, so a palette index means nothing
+outside the tile it came from — index 9 is near-black in Nevada and near-white
+in Charlotte. Everything keys on the colour itself.
+
+The order of those colours is not a guess about what they look like. A transect
+walking from Mount Mitchell into Asheville fixes the middle of the scale, and a
+dozen places whose skies are not in question — the Sahara, Great Basin, the
+Boundary Waters, Cherry Springs, then Knoxville, Charlotte, Manhattan — fix the
+ends. Every run re-checks that reading them in order never steps backwards, and
+says so loudly if it does, or if a colour turns up that the scale does not list.
+The atlas ships no tile at all over open ocean or the Greenland ice sheet, which
+is how we know its blues mean a dark sky rather than missing data.
+
+What a band is worth in mag/arcsec² is the atlas author's business, so the run
+also prints his own two legend pages verbatim.
+
 It writes nothing into `index.html`. What a colour *means* is the atlas
 author's business and not something to invent, so the run also prints a census
 of every colour that actually turned up and whatever the site's own source says
