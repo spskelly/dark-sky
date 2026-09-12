@@ -41,6 +41,27 @@
   .hero h1 em { font-style: italic; color: var(--moon); }
   .hero p { margin: 0; max-width: 62ch; color: var(--ink-dim); line-height: 1.5; }
   .hero .next-window { margin-top: 12px; color: var(--dark-sky); }
+  /* hourly sky row: one icon per hour, weather-app style */
+  .tonight { margin-top: 18px; max-width: 640px; }
+  .tonight .head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; font-size: 14px; color: var(--ink-dim); margin-bottom: 8px; }
+  .tonight .head b { color: var(--ink); font-weight: 500; }
+  .tonight .hours { display: flex; gap: 2px; }
+  .tonight .hr { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; padding: 6px 0 5px; border-radius: 8px; }
+  .tonight .hr.clear { background: var(--dark-sky-wash); }
+  .tonight .hr svg { width: 26px; height: 26px; display: block; }
+  .tonight .hr .lbl { font-size: 10px; color: var(--ink-dim); line-height: 1; }
+  .tonight .hr .pct { font-size: 11px; color: var(--ink); line-height: 1; margin-top: 2px; }
+  .tonight .hr.clear .pct { color: var(--dark-sky); }
+  .tonight .hr .tmp { font-size: 10px; color: var(--ink-dim); line-height: 1; }
+  .tonight .summary { font-size: 13px; color: var(--ink-dim); margin-top: 8px; line-height: 1.5; }
+  .tonight .summary b { color: var(--ink); font-weight: 500; }
+  .legend-sky { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-size: 11px; color: var(--ink-dim); }
+  .legend-sky span { display: inline-flex; align-items: center; gap: 4px; cursor: default; }
+  .legend-sky svg { width: 16px; height: 16px; }
+  .spot-tonight { max-width: none; margin: 0 0 14px; background: var(--night-2); border-radius: 12px; padding: 12px 14px; }
+  .day .cloud { font-size: 10px; text-align: center; color: var(--ink-dim); }
+  .day .cloud.clear { color: var(--dark-sky); }
+  .day .cloud.mixed { color: var(--moon-dim); }
 
   .controls { max-width: 1100px; margin: 0 auto 18px; display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center; justify-content: space-between; }
   .month-nav { display: flex; align-items: center; gap: 14px; }
@@ -171,6 +192,7 @@
     <h1 id="hero-title"></h1>
     <p id="hero-sub"></p>
     <p class="next-window" id="hero-next"></p>
+    <div class="tonight" id="tonight" aria-live="polite"></div>
   </div>
 </section>
 
@@ -221,6 +243,7 @@
       <button id="home-geo">use my location</button>
     </div>
   </div>
+  <div class="tonight spot-tonight" id="spot-tonight" aria-live="polite"></div>
   <div class="spot-layout">
     <div id="map"></div>
     <div class="spot-list" id="spot-list"></div>
@@ -447,6 +470,7 @@ function renderCalendar() {
   for (let day = 1; day <= last.getDate(); day++) {
     const d = new Date(y, m, day, 21, 0, 0); // phase icon evaluated at 9pm local, roughly when you'd be looking up
     const o = info.get(dayKey(d)) || {};
+    const fcNight = fc.nightly.get(dayKey(d));
     const p = lunationFraction(d);
     const illum = Math.round((1 - Math.cos(2 * Math.PI * p)) / 2 * 100);
     const cls = ['day'];
@@ -461,6 +485,7 @@ function renderCalendar() {
       <div class="num"><b>${day}</b><span class="illum">${illum}%</span></div>
       <div class="icon">${moonSvg(p, 34, state.hemi)}</div>
       ${label}
+      ${fcNight ? `<div class="cloud ${cloudClass(fcNight.mean)}" title="mean cloud cover 9pm to 3am, low ${Math.round(fcNight.tmin)}°F">${fcNight.mean}% cloud</div>` : ''}
     </div>`;
   }
   cal.innerHTML = html;
@@ -478,7 +503,10 @@ function renderHero() {
   document.getElementById('hero-sub').textContent =
     `${illum}% lit. next full moon ${fmtDay(nextFull.date)}, next new moon ${fmtDay(nextNew.date)}.`;
   const half = Math.floor(state.win / 2);
-  const ws = addDays(nextNew.date, -half), we = addDays(nextNew.date, half);
+  // the relevant new moon is the most recent one if we're still inside its window, else the next
+  const recent = phasesBetween(addDays(now, -(half + 1)), now).filter(e => e.phase === 0).pop();
+  const anchor = recent && now < addDays(addDays(recent.date, half), 1) ? recent : nextNew;
+  const ws = addDays(anchor.date, -half), we = addDays(anchor.date, half);
   const inWindow = now >= new Date(ws.getFullYear(), ws.getMonth(), ws.getDate()) && now < addDays(we, 1);
   document.getElementById('hero-next').textContent = inWindow
     ? `you are inside a dark-sky window right now, through ${fmtDay(we)}.`
@@ -634,6 +662,7 @@ function renderSpotList() {
 function focusSpot(name) {
   spotState.active = name;
   const s = SPOTS.find(x => x.name === name);
+  if (s) loadSpotForecast(s);
   document.querySelectorAll('.spot').forEach(el => el.classList.toggle('active', el.dataset.name === name));
   if (spotState.map && s) {
     spotState.map.flyTo([s.lat, s.lon], Math.max(spotState.map.getZoom(), 11), { duration: 0.6 });
@@ -667,6 +696,7 @@ function initMap() {
       .bindPopup(`<b>${s.name}</b><br>${s.elev.toLocaleString()} ft &middot; ~${fmtDur(s.mins)} from Waynesville<br>${s.tags.join(', ')}`);
     mk.on('click', () => {
       spotState.active = s.name;
+      loadSpotForecast(s);
       document.querySelectorAll('.spot').forEach(e => e.classList.toggle('active', e.dataset.name === s.name));
       document.querySelector(`.spot[data-name="${s.name}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     });
@@ -690,6 +720,7 @@ function setHome(lat, lon) {
   document.getElementById('home-lon').value = lon.toFixed(4);
   placeHome();
   renderSpotList();
+  loadHomeForecast();
 }
 
 document.getElementById('home-set').addEventListener('click', () =>
@@ -703,6 +734,134 @@ document.querySelectorAll('[data-filter]').forEach(b => b.addEventListener('clic
   document.querySelectorAll('[data-filter]').forEach(x => x.setAttribute('aria-pressed', x === b));
   renderSpotList();
 }));
+
+// ---------- forecast (open-meteo, no key) ----------
+
+// two independent panels: home (hero, feeds the calendar badges) and the selected spot (in the spots section)
+const fc = {
+  cache: new Map(), nightly: new Map(),
+  home: { target: null, data: null, status: 'idle', el: 'tonight' },
+  spot: { target: null, data: null, status: 'idle', el: 'spot-tonight' },
+};
+
+// fetch 8 days of hourly sky data for a point, downscaled to its elevation when we know it
+async function fetchForecast(t) {
+  const key = `${t.lat.toFixed(3)},${t.lon.toFixed(3)}`;
+  if (fc.cache.has(key)) return fc.cache.get(key);
+  const q = new URLSearchParams({
+    latitude: t.lat, longitude: t.lon,
+    hourly: 'cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high,temperature_2m,wind_speed_10m,dew_point_2m,precipitation_probability',
+    daily: 'sunrise,sunset',
+    timezone: 'auto', forecast_days: 8, temperature_unit: 'fahrenheit', wind_speed_unit: 'mph',
+  });
+  if (t.elev) q.set('elevation', Math.round(t.elev * 0.3048));
+  const r = await fetch(`https://api.open-meteo.com/v1/forecast?${q}`);
+  if (!r.ok) throw new Error(`forecast ${r.status}`);
+  const d = await r.json();
+  fc.cache.set(key, d);
+  return d;
+}
+
+// per-night summary: mean total cloud from 9pm to 3am, keyed by the evening's date
+function summarizeNights(d) {
+  const out = new Map();
+  const h = d.hourly;
+  for (let i = 0; i < h.time.length; i++) {
+    const t = new Date(h.time[i]);
+    const hr = t.getHours();
+    if (hr < 21 && hr > 3) continue;
+    const evening = hr >= 21 ? t : addDays(t, -1);
+    const k = dayKey(evening);
+    if (!out.has(k)) out.set(k, { sum: 0, n: 0, tmin: Infinity });
+    const o = out.get(k);
+    o.sum += h.cloud_cover[i]; o.n++;
+    o.tmin = Math.min(o.tmin, h.temperature_2m[i]);
+  }
+  for (const o of out.values()) o.mean = Math.round(o.sum / o.n);
+  return out;
+}
+
+const cloudClass = c => c < 25 ? 'clear' : c < 60 ? 'mixed' : 'cloudy';
+
+// sky icons for the hourly row. all drawn in palette colors so they read as one set
+const SKY_ICON = {
+  // clear: a scatter of stars
+  clear: `<svg viewBox="0 0 24 24"><g fill="var(--moon)"><circle cx="6" cy="8" r="1.4"/><circle cx="14" cy="5" r="1.1"/><circle cx="18" cy="13" r="1.5"/><circle cx="9" cy="16" r="1.1"/><circle cx="15" cy="19" r="0.9"/><circle cx="4" cy="19" r="0.8"/><circle cx="20" cy="5" r="0.7"/></g></svg>`,
+  // few: stars with one small cloud low in the frame
+  few: `<svg viewBox="0 0 24 24"><g fill="var(--moon)"><circle cx="6" cy="6" r="1.3"/><circle cx="15" cy="4" r="1"/><circle cx="19" cy="9" r="1.2"/><circle cx="10" cy="11" r="0.9"/></g><path d="M7 20h9a3 3 0 0 0 .4-6 4 4 0 0 0-7.6-.6A3.3 3.3 0 0 0 7 20z" fill="var(--ink-dim)"/></svg>`,
+  // partly: a cloud covering about half the stars
+  partly: `<svg viewBox="0 0 24 24"><g fill="var(--moon)"><circle cx="5" cy="5" r="1.2"/><circle cx="12" cy="4" r="0.9"/><circle cx="19" cy="6" r="1.1"/></g><path d="M5 19h12a3.5 3.5 0 0 0 .5-7 5 5 0 0 0-9.6-.8A3.9 3.9 0 0 0 5 19z" fill="var(--ink-dim)"/></svg>`,
+  // mostly: big cloud, one star peeking
+  mostly: `<svg viewBox="0 0 24 24"><circle cx="19" cy="5" r="1.1" fill="var(--moon)"/><path d="M4 20h13.5a4 4 0 0 0 .6-8 6 6 0 0 0-11.5-1A4.5 4.5 0 0 0 4 20z" fill="var(--ink-dim)"/></svg>`,
+  // overcast: layered clouds, no sky
+  overcast: `<svg viewBox="0 0 24 24"><path d="M3 21h14a3.5 3.5 0 0 0 .5-7 5.5 5.5 0 0 0-10.6-1A4 4 0 0 0 3 21z" fill="var(--ink-dim)"/><path d="M9 11h11a3 3 0 0 0 .4-6 4.5 4.5 0 0 0-8.6-.8A3.4 3.4 0 0 0 9 11z" fill="var(--ink-dim)" opacity="0.6"/></svg>`,
+  // fog: horizontal bands
+  fog: `<svg viewBox="0 0 24 24"><g stroke="var(--ink-dim)" stroke-width="2" stroke-linecap="round" fill="none"><path d="M3 8h18"/><path d="M5 12h14"/><path d="M3 16h16"/><path d="M7 20h11"/></g></svg>`,
+};
+const skyState = c => c < 15 ? 'clear' : c < 40 ? 'few' : c < 65 ? 'partly' : c < 85 ? 'mostly' : 'overcast';
+const SKY_NAME = { clear: 'clear', few: 'a few clouds', partly: 'partly cloudy', mostly: 'mostly cloudy', overcast: 'overcast', fog: 'fog likely' };
+const SKY_RANGE = { clear: 'under 15% cloud', few: '15 to 40% cloud', partly: '40 to 65% cloud', mostly: '65 to 85% cloud', overcast: 'over 85% cloud', fog: 'dew point within 3° of air temp' };
+const skyLegend = () => `<div class="legend-sky">${Object.keys(SKY_ICON).map(k => `<span title="${SKY_RANGE[k]}">${SKY_ICON[k]}${SKY_NAME[k]}</span>`).join('')}</div>`;
+
+function renderPanel(panel) {
+  const el = document.getElementById(panel.el);
+  if (!panel.target) { el.innerHTML = ''; return; }
+  const name = panel.target.name;
+  if (panel.status === 'loading') { el.innerHTML = `<div class="head"><span>tonight at <b>${name}</b></span></div><div class="summary">loading forecast…</div>`; return; }
+  if (panel.status === 'error' || !panel.data) { el.innerHTML = `<div class="head"><span>tonight at <b>${name}</b></span></div><div class="summary">forecast unavailable right now. the clear outside link on each spot still works.</div>`; return; }
+  const d = panel.data, h = d.hourly;
+  const now = new Date();
+  // before dawn: the rest of the current night, now through this morning's sunrise.
+  // otherwise: tonight, from sunset through tomorrow's sunrise
+  const preDawn = now < new Date(d.daily.sunrise[0]);
+  const start = preDawn ? now : new Date(d.daily.sunset[0]);
+  const sunriseNext = new Date(preDawn ? d.daily.sunrise[0] : d.daily.sunrise[1]);
+  const idx = [];
+  for (let i = 0; i < h.time.length; i++) {
+    const t = new Date(h.time[i]);
+    if (t >= new Date(start.getTime() - 30 * 60000) && t <= sunriseNext) idx.push(i);
+  }
+  if (!idx.length) { el.innerHTML = `<div class="head"><span>tonight at <b>${name}</b></span></div><div class="summary">no forecast hours left in the current night.</div>`; return; }
+  const headLabel = preDawn
+    ? `rest of the night at <b>${name}</b> · sunrise ${fmtTime(sunriseNext)}`
+    : `tonight at <b>${name}</b> · sunset ${fmtTime(start)} to sunrise ${fmtTime(sunriseNext)}`;
+  const bars = idx.map(i => {
+    const c = h.cloud_cover[i], t = new Date(h.time[i]);
+    const hh = t.getHours();
+    const lbl = hh === 0 ? '12a' : hh < 12 ? hh + 'a' : hh === 12 ? '12p' : (hh - 12) + 'p';
+    const spread = h.temperature_2m[i] - h.dew_point_2m[i];
+    const state = spread < 3 ? 'fog' : skyState(c);
+    const tip = `${fmtTime(t)}: ${SKY_NAME[state]}. ${c}% cloud (low ${h.cloud_cover_low[i]}, mid ${h.cloud_cover_mid[i]}, high ${h.cloud_cover_high[i]}), ${Math.round(h.temperature_2m[i])}°F, wind ${Math.round(h.wind_speed_10m[i])} mph, dew point ${Math.round(h.dew_point_2m[i])}°F`;
+    return `<div class="hr ${c < 25 && state !== 'fog' ? 'clear' : ''}" title="${tip}"><div class="lbl">${lbl}</div>${SKY_ICON[state]}<div class="pct">${c}%</div><div class="tmp">${Math.round(h.temperature_2m[i])}°</div></div>`;
+  }).join('');
+  const clearHrs = idx.filter(i => h.cloud_cover[i] < 25).length;
+  const temps = idx.map(i => h.temperature_2m[i]);
+  const winds = idx.map(i => h.wind_speed_10m[i]);
+  const dews = idx.map(i => h.temperature_2m[i] - h.dew_point_2m[i]);
+  const rain = Math.max(...idx.map(i => h.precipitation_probability[i] || 0));
+  const fogRisk = Math.min(...dews) < 3;
+  const verdict = clearHrs >= idx.length * 0.7 ? 'mostly clear' : clearHrs >= 3 ? 'partly clear' : 'cloudy';
+  el.innerHTML = `
+    <div class="head"><span>${headLabel}</span><span>cloud cover and temperature by hour</span></div>
+    <div class="hours">${bars}</div>
+    <div class="summary"><b>${verdict}</b>, ${clearHrs} of ${idx.length} hours under 25% cloud. low ${Math.round(Math.min(...temps))}°F, wind ${Math.round(Math.min(...winds))} to ${Math.round(Math.max(...winds))} mph${rain >= 30 ? `, ${rain}% chance of rain` : ''}${fogRisk ? ', dew point close to air temp so expect fog or heavy dew' : ''}. hover an hour for the low/mid/high cloud split.</div>
+    ${skyLegend()}`;
+}
+
+async function loadPanel(panel, target) {
+  panel.target = target;
+  panel.status = 'loading'; renderPanel(panel);
+  try { panel.data = await fetchForecast(target); panel.status = 'ok'; }
+  catch (e) { panel.data = null; panel.status = 'error'; }
+  renderPanel(panel);
+  if (panel === fc.home) {
+    fc.nightly = panel.data ? summarizeNights(panel.data) : new Map();
+    renderCalendar();
+  }
+}
+
+const loadHomeForecast = () => loadPanel(fc.home, { ...spotState.home, name: 'home' });
+const loadSpotForecast = spot => loadPanel(fc.spot, { ...spot });
 
 function renderAll() { renderHero(); renderCalendar(); renderWindows(); }
 
@@ -730,6 +889,7 @@ document.getElementById('home-lat').value = HOME_DEFAULT.lat.toFixed(4);
 document.getElementById('home-lon').value = HOME_DEFAULT.lon.toFixed(4);
 initMap();
 renderSpotList();
+loadHomeForecast();
 </script>
 </body>
 </html>
