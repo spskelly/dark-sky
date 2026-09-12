@@ -130,6 +130,28 @@ tile URL out of the network tab, and hand it over with the numbers replaced:
 node tools/find-lp-tiles.mjs --url 'https://.../{z}/{x}/{y}.png' --fix
 ```
 
+## Reading the glow at a spot
+
+`tools/build-skyglow.mjs` samples the light pollution atlas at every spot and
+in a ring of eight bearings at 10, 25 and 50 km around it, so a note can say
+which way the sky is worst rather than guessing.
+
+```sh
+node tools/build-skyglow.mjs              # sample and report
+node tools/build-skyglow.mjs --json sky.json
+```
+
+The atlas is coloured PNG tiles, so reading it means reading pixels. Chromium
+is already here for the social card, so tiles are decoded in a canvas instead
+of hand-rolling a PNG reader, and they are fetched in Node and passed in as
+data URLs so nothing depends on the tile host's CORS headers.
+
+It writes nothing into `index.html`. What a colour *means* is the atlas
+author's business and not something to invent, so the run also prints a census
+of every colour that actually turned up and whatever the site's own source says
+about its palette. The mapping from colour to sky brightness goes in once that
+has been read.
+
 ## Checking the pins
 
 `tools/check-spots.mjs` measures the spot coordinates against two references
