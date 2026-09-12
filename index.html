@@ -102,14 +102,12 @@
   .guide a:hover { border-color: var(--line); }
   .guide b { display: block; font-family: var(--serif); font-weight: 400; font-size: 18px; line-height: 1.28; color: var(--moon); margin-bottom: 4px; }
   .guide b::after { content: " \2192"; color: var(--ink-dim); }
-  .guide span { display: block; font-size: 13px; color: var(--ink-dim); line-height: 1.45; }
-
-  @media (max-width: 480px) {
-    .month-nav h2 { flex: 1 0 100%; order: -1; }
-  }
+  .guide .what { display: block; font-size: 13px; color: var(--ink-dim); line-height: 1.45; }
+  /* the two-word version of each question. only the sticky phone strip wears it */
+  .guide .short { display: none; }
 
   /* jump links land a heading just under the top edge, not flush against it */
-  .windows, .spots, #tonight { scroll-margin-top: 22px; }
+  .windows, .spots, #tonight, #cal, .controls { scroll-margin-top: 22px; }
   /* hourly sky row: one icon per hour, weather-app style */
   .tonight { margin-top: 18px; max-width: 640px; width: 100%; }
   /* stacked, not space-between: both labels are long enough to wrap into
@@ -280,8 +278,23 @@
   .pin.view { background: var(--moon); }
   .pin.warn { background: var(--today); }
   .pin.home { background: transparent; border: 2px solid var(--today); width: 18px; height: 18px; }
-  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; color: var(--ink-dim); align-items: center; }
+  /* what the map draws, as opposed to which spots it draws: kept next to the
+     map rather than up in the spot toolbar, and reachable on a phone without
+     opening leaflet's own layer control */
+  .map-tools { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-bottom: 10px; color: var(--ink-dim); font-size: 14px; }
+  .map-tools[hidden] { display: none; }
+  .map-tools button { padding: 4px 11px; font-size: 13px; }
+  /* only occupies space when it has something to say */
+  .spot-msg { margin: 0 0 10px; font-size: 13px; line-height: 1.45; color: var(--today); }
+  .spot-msg:empty { display: none; }
+  .legend { display: flex; gap: 8px 14px; flex-wrap: wrap; margin: 0 0 12px; font-size: 13px; color: var(--ink-dim); align-items: center; }
   .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  /* a line, not a dot, so the road reads as a route beside the pins */
+  .legend .line { width: 20px; height: 3px; border-radius: 2px; background: var(--moon); box-shadow: 0 0 0 1px rgba(15,26,52,0.85); }
+  /* the overlay's own ramp, roughly: night sky through green rural to a city core */
+  .legend .ramp { width: 84px; height: 10px; border-radius: 999px; background: linear-gradient(90deg, #1b2a4d, #2f6f5a, #6fbf3f, #d8d84a, #e8a33d, #d8443a, #f2e9df); }
+  /* .legend span above would otherwise beat the ua rule for [hidden] */
+  .legend span[hidden] { display: none; }
 
   /* the spot notes are hand-written and go stale; say so where it is read */
   .disclaimer { margin-top: 22px; border-left: 3px solid var(--today); background: var(--night-2); border-radius: 0 10px 10px 0; padding: 14px 18px; max-width: 78ch; }
@@ -293,8 +306,13 @@
   .disclaimer a:hover { color: var(--moon); }
 
   .season { max-width: 1100px; margin: 44px auto 0; }
-  .season h3 { font-family: var(--serif); font-weight: 400; font-size: 24px; line-height: 1.21; margin: 0 0 12px; }
-  .season ul { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px 24px; }
+  .season > summary { list-style: none; cursor: pointer; display: block; }
+  .season > summary::-webkit-details-marker { display: none; }
+  .season h3 { display: inline; font-family: var(--serif); font-weight: 400; font-size: 24px; line-height: 1.21; margin: 0; }
+  .season > summary::after { content: " \2014\00a0show"; font-size: 14px; color: var(--ink-dim); }
+  .season[open] > summary::after { content: " \2014\00a0hide"; }
+  .season > summary:focus-visible { outline: 2px solid var(--today); outline-offset: 4px; border-radius: 4px; }
+  .season ul { margin: 12px 0 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px 24px; }
   .season li { color: var(--ink-dim); font-size: 14px; line-height: 1.5; }
   .season li b { color: var(--ink); font-weight: 500; }
 
@@ -302,10 +320,10 @@
      it stacks under the map and loses that scroll box, which put all forty
      cards — about fifteen thousand pixels of them — between the map and the
      rest of the page. show the nearest few and let the rest be asked for. */
-  #spot-more { display: none; margin-top: 10px; width: 100%; padding: 10px 14px; color: var(--ink-dim); }
-  #spot-more:hover { color: var(--ink); }
+  #spot-more, #win-more { display: none; margin-top: 10px; width: 100%; padding: 10px 14px; color: var(--ink-dim); }
+  #spot-more:hover, #win-more:hover { color: var(--ink); }
   /* the id selector below would otherwise beat the ua rule for [hidden] */
-  #spot-more[hidden] { display: none; }
+  #spot-more[hidden], #win-more[hidden] { display: none; }
   @media (max-width: 900px) {
     .spot-layout { grid-template-columns: minmax(0, 1fr); }
     #map { height: 380px; }
@@ -318,27 +336,98 @@
   .foot a { color: var(--moon-dim); }
   .foot a:hover { color: var(--moon); }
 
+  /* a 26px pill is a miss with a thumb. wherever the pointer is a finger,
+     every control gets a box you can hit without aiming, without touching the
+     type sizes the rest of the design is built on. */
+  @media (pointer: coarse) {
+    button, .spot-controls select, .spot-controls input { min-height: 44px; }
+    .options .group button, .spot-controls .group button { padding: 6px 14px; }
+    .spot-controls details summary, .season > summary { padding: 9px 0; }
+    /* three text links in a row, each a thumb's width apart */
+    .spot .links { display: flex; gap: 18px; }
+    .spot .links a { display: inline-flex; align-items: center; min-height: 40px; margin-right: 0; }
+  }
+
   @media (max-width: 720px) {
-    .hero { grid-template-columns: minmax(0, 1fr); text-align: center; justify-items: stretch; }
-    .hero .hero-lede, .hero p { margin-inline: auto; }
-    .hero .tonight-now { text-align: center; }
-    .masthead { justify-content: center; }
+    /* the hero used to centre itself while every other section stayed left
+       aligned, so the page had two different left edges in its first screen */
+    .hero { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+    #hero-moon { width: 104px; margin-inline: 0; }
+    .hero h1 { font-size: 26px; margin-bottom: 10px; }
+    .hero .hero-lede { font-size: 15px; }
+    .hero .tonight-now { margin-top: 12px; }
+    .masthead { margin-bottom: 18px; }
     .masthead .scope { border-left: 0; padding-left: 0; }
-    .guide { gap: 8px; margin-bottom: 28px; }
-    .guide a { padding: 10px 14px; }
-    .guide b { font-size: 17px; margin-bottom: 2px; }
-    .guide span { font-size: 12.5px; line-height: 1.4; }
+
+    /* the three questions were three cards you scrolled past once and never
+       saw again, on a page eight screens long. on a phone they become the
+       page's navigation: a sticky strip of short labels that marks where you
+       are and gets you to the other two sections in one tap. */
+    .guide {
+      position: sticky; top: 0; z-index: 1100;
+      grid-template-columns: repeat(3, 1fr); gap: 0; margin-bottom: 20px;
+      /* out to the body's gutters, so nothing shows through underneath it */
+      margin-inline: calc(-1 * clamp(16px, 4vw, 56px)); padding-inline: clamp(16px, 4vw, 56px);
+      background: var(--night); border-bottom: 1px solid var(--night-3);
+    }
+    .guide a {
+      display: flex; align-items: center; justify-content: center; text-align: center;
+      background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0;
+      padding: 12px 2px; min-height: 46px;
+    }
+    .guide a:hover { border-color: transparent; border-bottom-color: var(--line); }
+    .guide b, .guide .what { display: none; }
+    .guide .short { display: block; font-size: 13px; line-height: 1.2; color: var(--ink-dim); }
+    .guide a[aria-current] { border-bottom-color: var(--dark-sky); }
+    .guide a[aria-current] .short { color: var(--moon); }
+    /* anchors land below the strip rather than under it */
+    .windows, .spots, #tonight, #cal, .controls { scroll-margin-top: 58px; }
+
     .tonight .summary { min-height: 7.5em; }
     .tonight .sk-lines i:nth-child(3) { width: 90%; }
     .tonight .sk-lines i:nth-child(4) { width: 72%; display: block; }
     .tonight .sk-lines i:nth-child(5) { width: 48%; display: block; }
+
     .day { min-height: 70px; padding: 5px 4px; }
     .day .icon svg { width: 24px; height: 24px; }
     .day .label { font-size: 10px; }
     .day .illum { display: none; }
     /* "53% cloud" wraps in a cell this narrow, so reserve both lines */
     .day .cloud { min-height: 2.4em; }
-    .month-nav h2 { font-size: 22px; min-width: 0; }
+
+    /* month, arrows and today on one row, with the month between the arrows
+       that move it instead of stacked above them */
+    .controls { gap: 10px 14px; }
+    .month-nav { flex-wrap: nowrap; width: 100%; gap: 8px; }
+    /* nowrap on one row of fixed-width buttons runs the month straight through
+       the arrow on a 320px screen; let it take a second line instead */
+    .month-nav h2 { flex: 1; min-width: 0; font-size: clamp(17px, 5vw, 20px); text-align: center; white-space: normal; line-height: 1.15; }
+    .month-nav button { flex: none; }
+    #prev, #next { min-width: 44px; padding: 6px 10px; }
+    .options { width: 100%; gap: 6px 12px; font-size: 13px; }
+
+    /* thirteen windows, three lines each, was a screen and a half of scrolling
+       before the map. tighten the rows and hand over the first five. */
+    .windows ol { gap: 6px; }
+    .windows li { padding: 9px 12px; gap: 1px 10px; }
+    .windows li .range { font-size: 15px; }
+    .windows li .meta, .windows li .core, .windows li .weekend, .windows li .range .dow { font-size: 12px; }
+    .windows ol:not(.all) li:nth-child(n+6) { display: none; }
+    #win-more { display: block; }
+
+    /* the notes run to a paragraph each. three lines is enough to choose by;
+       the card opens the rest when you tap it. */
+    .spot .note { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    .spot.active .note { -webkit-line-clamp: unset; overflow: visible; }
+    .spot-controls { gap: 6px 12px; }
+
+    /* the map shrinks so that the toolbar above it, the pin key and the map
+       itself fit on one screen. the filters were a screen above the map, which
+       is the same as not having them. */
+    #map { height: 320px; }
+    .season { margin-top: 32px; }
+    .disclaimer { padding: 12px 14px; }
+    .foot { margin-top: 28px; }
   }
   /* below ~340px the hour breakdown needs a third line; reserving it that wide
      everywhere would just be dead space on every other screen */
@@ -376,9 +465,9 @@
 </section>
 
 <nav class="guide" aria-label="what this page answers">
-  <a href="#when"><b>when is it dark?</b><span>every new-moon window for the next twelve months, with the weekend nights called out</span></a>
-  <a href="#tonight"><b>will it be clear?</b><span>tonight's cloud cover, temperature and dew point hour by hour, sunset to sunrise</span></a>
-  <a href="#where"><b>where do i go?</b><span>forty dark-sky spots on a map, ranked by drive time from wherever home is</span></a>
+  <a href="#when" data-from="#cal"><b>when is it dark?</b><span class="what">every new-moon window for the next twelve months, with the weekend nights called out</span><span class="short">dark nights</span></a>
+  <a href="#tonight"><b>will it be clear?</b><span class="what">tonight's cloud cover, temperature and dew point hour by hour, sunset to sunrise</span><span class="short">tonight's sky</span></a>
+  <a href="#where"><b>where do i go?</b><span class="what">forty dark-sky spots on a map, ranked by drive time from wherever home is</span><span class="short">where to go</span></a>
 </nav>
 
 <div class="controls">
@@ -409,13 +498,15 @@
   <h3>upcoming dark-sky windows</h3>
   <p class="lede">every new moon for the next twelve months, with the days on either side that make up the window. click one to jump the calendar there.</p>
   <ol id="windows"></ol>
+  <button id="win-more" hidden aria-expanded="false" aria-controls="windows"></button>
 </section>
 
 <section class="spots" id="where">
   <h3>where to look up</h3>
-  <p class="lede">forty high, open, dark places across western north carolina, from the cherohala skyway to doughton park. teal pins allow overnight camping, ivory pins are drive-up or short-hike viewing only, gold pins have a catch, and <a href="#check-before-you-go">all of it needs checking before you drive</a>. set your home town and everything below reorders around it. drive times are estimates from that point, not routing, and assume the parkway is open.</p>
+  <p class="lede">forty high, open, dark places across western north carolina, from the cherohala skyway to doughton park. set your home town and the map and the list reorder around it, nearest first. drive times are estimates, and <a href="#check-before-you-go">all of it needs checking before you drive</a>.</p>
   <div class="spot-controls">
     <div class="group" role="group" aria-label="filter spots">
+      <span>show</span>
       <button data-filter="all" aria-pressed="true">all</button>
       <button data-filter="camp" aria-pressed="false">camp overnight</button>
       <button data-filter="drive" aria-pressed="false">drive-up</button>
@@ -440,19 +531,25 @@
       </div>
     </details>
   </div>
+  <p class="spot-msg" id="spot-msg" role="status"></p>
+  <div class="map-tools">
+    <span>map</span>
+    <button id="lp-toggle" aria-pressed="false">light pollution</button>
+  </div>
+  <div class="legend">
+    <span><i class="pin camp"></i> overnight camping allowed</span>
+    <span><i class="pin view"></i> viewing only</span>
+    <span><i class="pin warn"></i> restricted, read the note</span>
+    <span><i class="pin home"></i> home</span>
+    <span class="road-key" hidden><i class="line"></i> blue ridge parkway</span>
+    <span class="lp-key" hidden><i class="ramp"></i> sky glow, darkest to city</span>
+  </div>
   <div class="tonight spot-tonight" id="spot-tonight" aria-live="polite"></div>
   <div class="spot-layout">
     <div id="map"></div>
     <div class="spot-list" id="spot-list"></div>
   </div>
   <button id="spot-more" aria-expanded="false" aria-controls="spot-list"></button>
-  <div class="legend">
-    <span><i class="pin camp"></i> overnight camping allowed</span>
-    <span><i class="pin view"></i> viewing only</span>
-    <span><i class="pin warn"></i> restricted, read the note</span>
-    <span><i class="pin home"></i> home</span>
-  </div>
-
   <aside class="disclaimer" id="check-before-you-go">
     <h4>check before you go</h4>
     <p>
@@ -479,8 +576,11 @@
   </aside>
 </section>
 
-<section class="season">
-  <h3>reading the mountains</h3>
+<!-- reference reading, not a task: nine hundred pixels of it sat between the
+     spot list and the footer on a phone. open on a wide screen, folded on a
+     narrow one by the script just below, so no-script still gets all of it. -->
+<details class="season" id="notes" open>
+  <summary><h3>reading the mountains</h3></summary>
   <ul>
     <li><b>parkway gates.</b> the high sections between Mount Pisgah and Waterrock Knob close for ice and snow, often for weeks at a time from November into April. check the NPS road status page before driving up; a closed gate at 9pm is a long detour.</li>
     <li><b>milky way core.</b> at this latitude the galactic center sits in the southern sky. it clears the ridge before dawn from late February, is up most of the night by June, and is an evening object August through October. each window in the list above says which.</li>
@@ -490,7 +590,12 @@
     <li><b>leaf season.</b> October new moons are the best of the year for sky, and the worst for finding a parking spot at Graveyard Fields. arrive before sunset or go somewhere less famous.</li>
     <li><b>forecasting.</b> every spot links to its clear outside forecast: cloud cover by hour, plus transparency and seeing, which matter more than the daytime forecast suggests.</li>
   </ul>
-</section>
+</details>
+<script>
+  // runs the moment the element is parsed, so a phone never paints the open
+  // state and then snaps it shut
+  if (window.matchMedia('(max-width: 720px)').matches) document.getElementById('notes').open = false;
+</script>
 
 <p class="foot">
   phase times come from the meeus true-phase algorithm and are converted to your local time zone, so dates should match published almanacs to the day. the window is a planning heuristic: the moon also rises and sets, so a waxing crescent a few days past new is gone by late evening, and a waning crescent doesn't rise until the small hours. those edge days are often darker than they look. cloud cover comes from open-meteo and is a model, not a promise; the spot notes are hand-written and are <a href="#check-before-you-go">not a substitute for checking with the land manager</a>.
@@ -659,7 +764,12 @@ const state = {
   win: 5,
   hemi: 'N',
   focus: null,   // day-of-month holding the calendar's roving tabindex
+  winAll: false, // whether the windows list is showing all twelve months
 };
+
+// how many windows the collapsed phone list shows, and the width it collapses
+// at. both mirror the stylesheet: :nth-child(n+6) inside @media (max-width: 720px)
+const WIN_PREVIEW = 5;
 
 const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 const dayKey = d => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
@@ -717,6 +827,12 @@ function renderCalendar() {
   const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   document.getElementById('month-title').innerHTML =
     `${first.toLocaleDateString(undefined, { month: 'long' })} <span>${y}</span>`;
+  // "today" is a no-op while today's month is the one on screen; saying so
+  // stops it reading as a third way to move the calendar
+  const onToday = y === today.getFullYear() && m === today.getMonth();
+  const todayBtn = document.getElementById('today-btn');
+  todayBtn.disabled = onToday;
+  todayBtn.setAttribute('aria-disabled', String(onToday));
 
   // keep the roving tabindex on a day that exists in the month being drawn
   const inView = sameDay(new Date(y, m, 1), new Date(today.getFullYear(), today.getMonth(), 1));
@@ -846,12 +962,35 @@ function renderWindows() {
       <span class="core">${coreVisibility(e.date.getMonth())}</span>
     </li>`;
   }).join('');
+  // the css only collapses the list below 720px, so the button is only visible
+  // there; the label still has to name the real count
+  ol.classList.toggle('all', state.winAll);
+  const more = document.getElementById('win-more');
+  more.hidden = news.length <= WIN_PREVIEW;
+  more.textContent = state.winAll ? 'show fewer' : `show all ${news.length} windows`;
+  more.setAttribute('aria-expanded', String(state.winAll));
+
   ol.querySelectorAll('li').forEach(li => {
-    const go = () => { state.view = new Date(+li.dataset.y, +li.dataset.m, 1); renderCalendar(); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+    // jumping the calendar to another month and then throwing the reader back
+    // to the top of the page loses the thing that changed. land on the month
+    // heading instead, which is what moved.
+    const go = () => {
+      state.view = new Date(+li.dataset.y, +li.dataset.m, 1);
+      renderCalendar();
+      document.querySelector('.controls').scrollIntoView({ block: 'start', behavior: 'smooth' });
+    };
     li.addEventListener('click', go);
     li.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(); } });
   });
 }
+
+document.getElementById('win-more').addEventListener('click', () => {
+  state.winAll = !state.winAll;
+  renderWindows();
+  // collapsing from the bottom of twelve months would otherwise leave the view
+  // somewhere below the whole section
+  if (!state.winAll) document.getElementById('win-more').scrollIntoView({ block: 'center' });
+});
 
 // ---------- dark-sky spots ----------
 
@@ -1092,6 +1231,74 @@ function focusSpot(name) {
   }
 }
 
+// ---------- light pollution overlay ----------
+
+// world atlas / viirs sky-brightness tiles, rendered by david lorenz and served
+// from his github pages site, which is the one source of these that is free to
+// hotlink: lightpollutionmap.info's own tiles need an api key. if the layer
+// stops drawing, this url is the line to change — he publishes a new atlas
+// every few years under a new folder (lp2020, lp2022, …).
+const LP_TILES = 'https://djlorenz.github.io/astronomy/lp2022/overlay/tiles/tile_{z}_{x}_{y}.png';
+const LP_ATTR = 'sky glow &copy; <a href="https://djlorenz.github.io/astronomy/lp2022/" target="_blank" rel="noopener">D. Lorenz</a>, world atlas / VIIRS';
+const LP_KEY = 'darksky.lightpollution';
+
+function initLightPollution(map) {
+  const btn = document.getElementById('lp-toggle');
+  const key = document.querySelector('.lp-key');
+  const lp = L.tileLayer(LP_TILES, {
+    attribution: LP_ATTR,
+    // half strength: the point of the topo underneath is the ridge line
+    // between you and a town, and the overlay should not bury it
+    opacity: 0.5,
+    // the data is coarse, so past its own zoom the tiles are stretched rather
+    // than requested and 404ing
+    maxNativeZoom: 8, maxZoom: 17,
+    // the layer control auto-numbers the base layers from 1; this has to sit
+    // above them
+    zIndex: 10,
+  });
+  const show = on => {
+    if (on) lp.addTo(map); else lp.remove();
+    btn.setAttribute('aria-pressed', String(on));
+    key.hidden = !on;
+    try { localStorage.setItem(LP_KEY, on ? '1' : '0'); } catch (e) {}
+  };
+  // a moved or mistyped tile url would otherwise leave the button looking dead:
+  // say so once, rather than on every tile that misses
+  let loaded = false, failed = 0;
+  lp.on('tileload', () => { loaded = true; });
+  lp.on('tileerror', () => {
+    if (loaded || ++failed < 4) return;
+    show(false);
+    spotMsg('the light pollution layer could not load. every spot still links to its own light map.');
+  });
+  btn.addEventListener('click', () => show(!map.hasLayer(lp)));
+  let want = false;
+  try { want = localStorage.getItem(LP_KEY) === '1'; } catch (e) {}
+  if (want) show(true);
+}
+
+// ---------- the blue ridge parkway ----------
+
+// the road half this page's advice is about, as a simplified centreline so it
+// can be picked out of the topo at a glance. generated from openstreetmap by
+// tools/build-parkway.mjs; while it is empty the map simply does without it,
+// which is the honest failure: a road drawn from memory over a map that shows
+// the real one is worse than no road at all.
+// --- parkway:start (generated, do not edit by hand) ---
+const PARKWAY = [];
+// --- parkway:end ---
+
+function drawParkway(map) {
+  if (!PARKWAY.length) return;
+  document.querySelector('.road-key').hidden = false;
+  // a dark casing under a bright core, so the line holds up over the topo, the
+  // imagery and the sky-glow overlay alike. neither stroke takes clicks: the
+  // map has to stay clickable through it for "pick on map".
+  L.polyline(PARKWAY, { color: '#0b1226', weight: 6, opacity: 0.5, lineJoin: 'round', lineCap: 'round', interactive: false }).addTo(map);
+  L.polyline(PARKWAY, { color: '#ece7d4', weight: 2, opacity: 0.85, lineJoin: 'round', lineCap: 'round', interactive: false }).addTo(map);
+}
+
 function pinIcon(kind) {
   return L.divIcon({ className: '', html: `<div class="pin ${kind}"></div>`, iconSize: kind === 'home' ? [18, 18] : [14, 14], iconAnchor: kind === 'home' ? [9, 9] : [7, 7] });
 }
@@ -1100,6 +1307,8 @@ function initMap() {
   const el = document.getElementById('map');
   if (typeof L === 'undefined') {
     el.innerHTML = '<div class="map-fallback">the map could not load \u2014 the leaflet script was blocked or the network is down. the spot list beside it still works, and every spot has forecast, light-map and directions links.</div>';
+    // nothing for the map controls to control
+    document.querySelector('.map-tools').hidden = true;
     return;
   }
   const map = L.map(el, { zoomControl: true, attributionControl: true });
@@ -1120,7 +1329,10 @@ function initMap() {
     setHome(e.latlng.lat, e.latlng.lng);
     setPicking(false);
   });
-  L.control.layers({ 'topo': topo, 'imagery': imagery }, null, { position: 'topright', collapsed: false }).addTo(map);
+  // open on a wide screen, where it costs nothing; an icon on a phone, where
+  // an always-open box covers a corner of a map that is already small
+  const narrow = window.matchMedia('(max-width: 720px)').matches;
+  L.control.layers({ 'topo': topo, 'imagery': imagery }, null, { position: 'topright', collapsed: narrow }).addTo(map);
   spotState.map = map;
   for (const s of SPOTS) {
     const mk = L.marker([s.lat, s.lon], { icon: pinIcon(s.kind), title: s.name })
@@ -1134,6 +1346,8 @@ function initMap() {
     spotState.markers.set(s.name, mk);
     mk.addTo(map);
   }
+  drawParkway(map);
+  initLightPollution(map);
   placeHome();
 }
 
@@ -1166,15 +1380,21 @@ function setHome(lat, lon, name) {
   const hit = TOWNS.find(([n, la, lo]) => Math.abs(la - lat) < 0.002 && Math.abs(lo - lon) < 0.002);
   document.getElementById('home-town').value = hit ? hit[0] : '__custom';
   saveHome();
+  spotMsg('');
   placeHome();
   renderSpotList();
   loadHomeForecast();
 }
 
+// the only sign that picking was armed used to be a crosshair cursor, which a
+// touch screen has no way to show. say it in words instead.
+function spotMsg(text) { document.getElementById('spot-msg').textContent = text || ''; }
+
 function setPicking(on) {
   spotState.picking = on;
   document.getElementById('home-pick').setAttribute('aria-pressed', String(on));
   document.getElementById('map').classList.toggle('picking', on);
+  spotMsg(on ? 'tap anywhere on the map to set home \u2014 or press “pick on map” again to cancel' : '');
 }
 
 (function initHomeControls() {
@@ -1189,8 +1409,15 @@ function setPicking(on) {
   document.getElementById('home-set').addEventListener('click', () =>
     setHome(parseFloat(document.getElementById('home-lat').value), parseFloat(document.getElementById('home-lon').value)));
   document.getElementById('home-geo').addEventListener('click', () => {
-    if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(pos => setHome(pos.coords.latitude, pos.coords.longitude), () => {});
+    if (!navigator.geolocation) { spotMsg('this browser will not share a location. pick a town or a point on the map instead.'); return; }
+    spotMsg('finding your location\u2026');
+    navigator.geolocation.getCurrentPosition(
+      pos => { setHome(pos.coords.latitude, pos.coords.longitude); spotMsg(''); },
+      // a refused or failed prompt used to leave the button looking broken
+      () => spotMsg('could not get your location. pick a town or a point on the map instead.'),
+      // without a timeout a prompt that is dismissed rather than answered never
+      // calls back, and the line sits on "finding your location" for good
+      { timeout: 10000, maximumAge: 600000 });
   });
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && spotState.picking) setPicking(false); });
 })();
@@ -1422,6 +1649,39 @@ document.querySelectorAll('[data-hemi]').forEach(b => b.addEventListener('click'
   document.querySelectorAll('[data-hemi]').forEach(x => x.setAttribute('aria-pressed', x === b));
   renderAll();
 }));
+// ---------- section strip ----------
+// on a phone the three guide links are the page's only navigation, pinned to
+// the top, so they have to say which section you are actually in. the links
+// read as a question in order on a wide screen but their targets are not in
+// that order down the page, so sort by position before picking the current one.
+(function trackSections() {
+  // data-from, where present, is where the section starts for the purpose of
+  // marking it; href stays where the link goes
+  const links = [...document.querySelectorAll('.guide a')]
+    .map(a => ({ a, t: document.querySelector(a.dataset.from || a.getAttribute('href')) }))
+    .filter(x => x.t);
+  if (!links.length) return;
+  let queued = false;
+  const mark = () => {
+    queued = false;
+    // a third of the way down the viewport: a heading that has just come into
+    // view is the section you are reading, not the one you are leaving
+    const line = window.scrollY + Math.max(120, window.innerHeight * 0.33);
+    const tops = new Map(links.map(x => [x, x.t.getBoundingClientRect().top + window.scrollY]));
+    let cur = null;
+    for (const x of [...links].sort((a, b) => tops.get(a) - tops.get(b))) {
+      if (tops.get(x) <= line) cur = x;
+    }
+    for (const x of links) {
+      if (x === cur) x.a.setAttribute('aria-current', 'location');
+      else x.a.removeAttribute('aria-current');
+    }
+  };
+  addEventListener('scroll', () => { if (!queued) { queued = true; requestAnimationFrame(mark); } }, { passive: true });
+  addEventListener('resize', mark);
+  mark();
+})();
+
 // everything on this page is derived from new Date() at render time, so a tab
 // left open past midnight keeps insisting it is yesterday: "today" sits on the
 // wrong cell, the hero describes last night, and the tab icon shows the wrong

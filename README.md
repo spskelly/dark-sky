@@ -35,6 +35,13 @@ will be clear, and where to drive.
   the walk in from the lot), and the rest scales with distance from wherever
   home is. That makes it a property of the spot rather than of any one town.
 
+- **Light pollution and the parkway, on the map.** A sky-brightness overlay
+  (the familiar green-to-red wash) sits behind the pins on a toggle, and the
+  Blue Ridge Parkway is drawn as a line so the route the notes keep referring
+  to is one you can actually see. Both are off the critical path: the overlay
+  says so if its tiles stop loading, and the parkway is simply absent until
+  `tools/build-parkway.mjs` has been run.
+
 ## Running it
 
 The site is one `index.html` with no build step and no runtime dependencies.
@@ -61,6 +68,24 @@ Two things show tonight's real phase, and neither is hand-drawn.
   calls the page's own `lunationFraction()`, `moonSvg()` and `phaseWord()`, so
   the card cannot drift from the calendar it advertises. It commits only when
   the image actually changes.
+
+## The parkway line
+
+`PARKWAY` in `index.html` is a simplified centreline, generated rather than
+typed, and it ships empty. To fill it in (needs network, and only when the
+route changes, which is close to never):
+
+```sh
+node tools/build-parkway.mjs             # rewrites the block in index.html
+node tools/build-parkway.mjs --dry-run   # print the stats, change nothing
+```
+
+It asks OpenStreetMap, via Overpass, for the ways in the Blue Ridge Parkway
+route relation, clips them to western North Carolina, simplifies each to about
+120 metres and writes the result between the `parkway:start` and `parkway:end`
+markers. The road travels in the page rather than being fetched at runtime, so
+it still draws from `file://` and offline, and cannot break because somebody
+else's API moved. With the block empty the map just doesn't draw it.
 
 The npm dependencies exist for that generator alone — the site itself ships
 nothing from `node_modules`. To rebuild the card by hand:
@@ -96,4 +121,7 @@ often on gravel, usually with no signal.
   [NPS road status](https://www.nps.gov/blri/planyourvisit/roadclosures.htm)
   before committing to a gate.
 - Tiles: [OpenTopoMap](https://opentopomap.org/) (CC-BY-SA) and USGS
-  imagery via The National Map.
+  imagery via The National Map. The sky-brightness overlay is David Lorenz's
+  [light pollution atlas](https://djlorenz.github.io/astronomy/lp2022/), built
+  from the World Atlas and VIIRS; the parkway geometry is
+  [OpenStreetMap](https://www.openstreetmap.org/copyright) (ODbL).
