@@ -8,43 +8,57 @@
 // and finds the url that works now, so the fix is a command rather than a
 // guess at a path.
 //
-//   node tools/find-lp-tiles.mjs                     # search, report, change nothing
+//   node tools/find-lp-tiles.mjs                     # look, report, change nothing
 //   node tools/find-lp-tiles.mjs --fix               # ... and write the winner in
 //   node tools/find-lp-tiles.mjs --url '<tpl>' --fix # skip the search, use this one
 //
-// two passes. first it reads the overlay's own page and the scripts that page
-// loads, and pulls out the code that builds a tile url — that is the answer
-// rather than a guess at it. only when nothing turns up does it fall back to
-// trying the shapes tile sets of this kind usually take.
+// three passes, cheapest and most certain first.
+//
+//   1. a github pages site is served straight out of a public repo, so the
+//      file layout can be *read* through the contents api instead of guessed
+//      at. one real tile filename is all this needs.
+//   2. failing that, read the site's own pages — dumping the small ones whole,
+//      because a 300-byte page is a signpost to somewhere else, not content —
+//      and follow where they point.
+//   3. only then try the shapes tile sets of this kind usually take.
+//
+// a filename says which numbers are in it but not which is z, which is x and
+// which is y, so the last step is always the same: put them in every way
+// round and let the network say which one is right.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FILE = path.join(ROOT, 'index.html');
-const HOST = 'https://djlorenz.github.io';
 
-// newest first, so a live older folder never wins over the current one
-const FOLDERS = ['lp2024', 'lp2023', 'lp2022', 'lp2021', 'lp2020', 'lp2016'];
+// overridable only so the tests can point these at a local stand-in
+const HOST = process.env.LP_HOST || 'https://djlorenz.github.io';
+const GH_API = process.env.LP_GH_API || 'https://api.github.com';
 
-// asheville: somewhere with enough sky glow that a missing tile means the url
-// is wrong rather than that the tile was never drawn. these sets often ship
-// nothing at all for empty ocean, so probing the atlantic would prove nothing.
-const PROBE = { lat: 35.5951, lon: -82.5515 };
-const SCREEN_Z = 4;              // cheap first pass: every set has low zooms
-const SWEEP = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+// a user's github pages site is the repo <user>.github.io in their account
+const REPO = new URL(HOST).hostname.replace(/\.github\.io$/, '') + '/' + new URL(HOST).hostname;
+const BASE = 'astronomy';   // where the atlases live on the site
+
+// two places far apart, both with enough sky glow that a missing tile means
+// the url is wrong rather than that the tile was never drawn — these sets
+// often ship nothing at all for empty ocean. a template has to work for both,
+// which is what rules out x and y being the right numbers the wrong way round.
+const PROBES = [
+  { name: 'asheville', lat: 35.5951, lon: -82.5515 },
+  { name: 'phoenix', lat: 33.4484, lon: -112.0740 },
+];
+const SWEEP = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+const MIN_HITS = 3;          // per probe, before a template is believed
+const DUMP_UNDER = 4096;     // a page this small is a signpost; print it whole
+const MAX_PAGES = 30;
 const HEADERS = { 'user-agent': 'dark-sky-calendar tools (+https://github.com/spskelly/dark-sky)' };
 
-// --- the shapes to try, when reading the source turns nothing up ------------
-const PATHS = ['overlay/tiles/', 'tiles/', 'overlay/', ''];
+// --- the shapes to try, when reading turns nothing up -----------------------
+const PATHS = ['overlay/tiles/', 'tiles/', 'overlay/', 'map/tiles/', ''];
 const NAMES = [
-  'tile_{z}_{x}_{y}.png',
-  'tile_{z}_{x}_{-y}.png',
-  'tile_{z}_{y}_{x}.png',
-  '{z}/{x}/{y}.png',
-  '{z}/{x}/{-y}.png',
-  '{z}_{x}_{y}.png',
-  'tile_{z}_{x}_{y}.jpg',
+  'tile_{z}_{x}_{y}.png', 'tile_{z}_{x}_{-y}.png', 'tile_{z}_{y}_{x}.png',
+  '{z}/{x}/{y}.png', '{z}/{x}/{-y}.png', '{z}_{x}_{y}.png', 'tile_{z}_{x}_{y}.jpg',
 ];
 
 const argv = process.argv.slice(2);
@@ -64,15 +78,15 @@ function tile(lat, lon, z) {
 
 // leaflet's own placeholders, so whatever wins pastes straight into the page.
 // {-y} is the tms flip, which leaflet expands by itself.
-function expand(tpl, z) {
-  const { x, y, n } = tile(PROBE.lat, PROBE.lon, z);
+function expand(tpl, z, at = PROBES[0]) {
+  const { x, y, n } = tile(at.lat, at.lon, z);
   return tpl.replace(/\{z\}/g, z).replace(/\{x\}/g, x)
     .replace(/\{-y\}/g, n - 1 - y).replace(/\{y\}/g, y);
 }
 
-async function get(url) {
+async function get(url, extra) {
   try {
-    const res = await fetch(url, { headers: HEADERS, redirect: 'follow' });
+    const res = await fetch(url, { headers: { ...HEADERS, ...extra }, redirect: 'follow' });
     return { ok: res.ok, status: res.status, type: res.headers.get('content-type') || '', res };
   } catch (e) {
     return { ok: false, status: 0, type: '', why: e.message };
@@ -83,47 +97,159 @@ async function get(url) {
 // enough on its own — it has to actually be an image
 const isTile = r => r.ok && /^image\//.test(r.type);
 
-// --- pass one: read the overlay's own code ----------------------------------
+// a template is believed only when it holds at several zooms in both places
+async function verify(tpl) {
+  const hits = {};
+  for (const at of PROBES) {
+    hits[at.name] = [];
+    for (const z of SWEEP) if (isTile(await get(expand(tpl, z, at)))) hits[at.name].push(z);
+    if (hits[at.name].length < MIN_HITS) return null;
+  }
+  return hits;
+}
+
+// --- pass one: read the repo the site is served from ------------------------
+let apiCalls = 0;
+async function ls(p) {
+  if (apiCalls++ > 24) return null;          // unauthenticated api allows 60/hour
+  const r = await get(`${GH_API}/repos/${REPO}/contents/${p}`, { accept: 'application/vnd.github+json' });
+  if (r.status === 403) { console.log('  github api is rate limiting; try again in an hour'); return null; }
+  if (!r.ok) return null;
+  const j = await r.res.json().catch(() => null);
+  return Array.isArray(j) ? j : null;
+}
+
+const TILEISH = /\d+\D+\d+\D+\d+\.(?:png|jpe?g|webp)$/i;
+const NUMERIC = /^\d+$/;
+
+// walk down until a file with three numbers in its name turns up, following
+// numbered folders as readily as named ones: {z}/{x}/{y}.png is a directory
+// tree, tile_z_x_y.png is a flat one, and this finds either.
+async function findSample(dir, depth = 0) {
+  if (depth > 4) return null;
+  const entries = await ls(dir);
+  if (!entries) return null;
+  const files = entries.filter(e => e.type === 'file');
+  const dirs = entries.filter(e => e.type === 'dir');
+  console.log(`  ${dir}/ — ${dirs.length} folder(s), ${files.length} file(s)` +
+    (depth === 0 || entries.length <= 12 ? `: ${entries.map(e => e.name).slice(0, 12).join(', ')}` : ''));
+
+  const hit = files.find(f => TILEISH.test(f.name));
+  if (hit) return { dir, name: hit.name };
+
+  // a numbered folder is a zoom level; a lone image under one is the tile
+  const numeric = dirs.filter(d => NUMERIC.test(d.name));
+  for (const d of numeric.slice(0, 2)) {
+    const deeper = await findSample(`${dir}/${d.name}`, depth + 1);
+    if (deeper) return deeper;
+    // the leaf may be a bare number: 6.png under {z}/{x}/
+    const inner = await ls(`${dir}/${d.name}`);
+    const img = inner && inner.find(e => e.type === 'file' && /\.(png|jpe?g|webp)$/i.test(e.name));
+    if (img) return { dir: `${dir}/${d.name}`, name: img.name };
+  }
+  for (const d of dirs.filter(d => !NUMERIC.test(d.name)).slice(0, 4)) {
+    const deeper = await findSample(`${dir}/${d.name}`, depth + 1);
+    if (deeper) return deeper;
+  }
+  return null;
+}
+
+// the filename says which numbers are there, not what they mean. put z, x and
+// y into the slots every way round and hand the lot to the network.
+function templatesFrom(dir, name) {
+  const rel = `${dir}/${name}`.replace(/^\/+/, '');
+  const parts = rel.split(/(\d+)/);
+  const slots = parts.reduce((a, p, i) => (/^\d+$/.test(p) ? [...a, i] : a), []);
+  if (slots.length < 3) return [];
+  // when a path carries more than three numbers, the last three are the tile
+  const use = slots.slice(-3);
+  const perms = [['z', 'x', 'y'], ['z', 'y', 'x'], ['x', 'y', 'z'], ['y', 'x', 'z'], ['x', 'z', 'y'], ['y', 'z', 'x']];
+  const out = new Set();
+  for (const perm of perms) for (const flip of [false, true]) {
+    const c = parts.slice();
+    perm.forEach((k, n) => { c[use[n]] = k === 'y' && flip ? '{-y}' : `{${k}}`; });
+    out.add(`${HOST}/${c.join('')}`);
+  }
+  return [...out];
+}
+
+// --- pass two: read the site's own pages ------------------------------------
 const HINTS = [
   /getTileUrl[\s\S]{0,400}?\n\s*\}/g,
   /["'`][^"'`\n]{0,140}tiles?[^"'`\n]{0,140}\.(?:png|jpe?g|webp)[^"'`\n]{0,40}["'`]/gi,
 ];
 
-async function readSource() {
-  const pages = [];
-  for (const f of FOLDERS) pages.push(`${HOST}/astronomy/${f}/overlay/`, `${HOST}/astronomy/${f}/`);
-  pages.push(`${HOST}/astronomy/`);
+// a page can point somewhere without linking a tile: a meta refresh, a frame,
+// or just a link to the real map. follow all three.
+function pointsTo(html, from) {
+  const out = [];
+  const add = h => { try { const u = new URL(h, from).href; if (u.startsWith(HOST)) out.push(u); } catch {} };
+  for (const m of html.matchAll(/<meta[^>]+http-equiv=["']?refresh[^>]*content=["'][^"']*url=([^"';\s]+)/gi)) add(m[1]);
+  for (const m of html.matchAll(/<(?:script|iframe|frame)[^>]+src=["']([^"']+)["']/gi)) add(m[1]);
+  for (const m of html.matchAll(/<a[^>]+href=["']([^"']+)["']/gi)) if (/\.html?$|\/$/i.test(m[1])) add(m[1]);
+  return [...new Set(out)];
+}
 
+async function readSite(fromCode) {
   const seen = new Set();
+  const queue = [`${HOST}/${BASE}/`];
+  for (const f of ['lp2024', 'lp2023', 'lp2022', 'lp2021', 'lp2020', 'lp2016'])
+    queue.push(`${HOST}/${BASE}/${f}/`);
+
   const found = [];
-  for (const url of pages) {
+  while (queue.length && seen.size < MAX_PAGES) {
+    const url = queue.shift();
     if (seen.has(url)) continue;
     seen.add(url);
     const r = await get(url);
     if (!r.ok) continue;
-    const html = await r.res.text();
-    console.log(`  read ${url} — ${(html.length / 1024).toFixed(1)} kB`);
-    const bodies = [html];
-    // the url builder lives in a loaded script about as often as in the page
-    for (const m of html.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)) {
-      let src;
-      try { src = new URL(m[1], url).href; } catch { continue; }
-      if (!src.startsWith(HOST) || seen.has(src)) continue;
-      seen.add(src);
-      const s = await get(src);
-      if (!s.ok) continue;
-      bodies.push(await s.res.text());
-      console.log(`  read ${src}`);
-    }
-    for (const body of bodies)
-      for (const re of HINTS)
-        for (const m of body.matchAll(re))
-          found.push({ url, text: m[0].replace(/\s+/g, ' ').trim().slice(0, 300) });
+    if (/^image\//.test(r.type)) continue;
+    const body = await r.res.text();
+    console.log(`  read ${url} — ${(body.length / 1024).toFixed(1)} kB`);
+    // a page this small is a signpost, not content. print it whole: that is
+    // the thing the first version of this script threw away.
+    if (body.length < DUMP_UNDER)
+      console.log(body.split('\n').map(l => '    | ' + l).join('\n'));
+    for (const re of HINTS)
+      for (const m of body.matchAll(re))
+        found.push({ url, text: m[0].replace(/\s+/g, ' ').trim().slice(0, 300) });
+    for (const t of templatesFromCode(body, url)) fromCode.push(t);
+    if (/\.html?$|\/$/i.test(url)) for (const next of pointsTo(body, url)) queue.push(next);
   }
   return found;
 }
 
-// --- pass two: try the usual shapes -----------------------------------------
+// a page that builds its tile url in javascript has already told us the
+// answer; turn the concatenation into a template rather than printing it for
+// somebody to read. "dat/" + z + "_" + c.x + "_" + c.y + ".png" becomes
+// dat/{z}_{x}_{y}.png, and verify() is what decides whether the reading was
+// right, so a misparse costs nothing.
+function templatesFromCode(code, from) {
+  const out = new Set();
+  for (const m of code.matchAll(/(["'])[^"'\n]*\1(?:\s*\+\s*[^+;\n]+)+/g)) {
+    const expr = m[0];
+    if (!/\.(?:png|jpe?g|webp)/i.test(expr)) continue;
+    let rel = '', ok = true;
+    for (let part of expr.split('+')) {
+      part = part.trim();
+      const lit = /^(["'])([^"']*)\1$/.exec(part);
+      if (lit) { rel += lit[2]; continue; }
+      // a y built by subtracting from the row count is the tms flip
+      if (/\by\b/i.test(part) && /-/.test(part)) { rel += '{-y}'; continue; }
+      const id = (part.match(/([A-Za-z_$][\w$]*)\s*$/) || [])[1] || '';
+      if (/^zoom$|^z$/i.test(id)) rel += '{z}';
+      else if (/^x$/i.test(id)) rel += '{x}';
+      else if (/^y$/i.test(id)) rel += '{y}';
+      else { ok = false; break; }
+    }
+    if (!ok || !/\{z\}/.test(rel) || !/\{x\}/.test(rel) || !/\{-?y\}/.test(rel)) continue;
+    // new URL() percent-encodes the braces; leaflet needs them back
+    try { out.add(new URL(rel, from).href.replace(/%7B/gi, '{').replace(/%7D/gi, '}')); } catch {}
+  }
+  return [...out];
+}
+
+// --- pass three: the usual shapes -------------------------------------------
 async function pool(items, width, fn) {
   const out = new Array(items.length);
   let next = 0;
@@ -133,23 +259,13 @@ async function pool(items, width, fn) {
   return out;
 }
 
-async function search() {
+async function blindSearch(dirs) {
   const tpls = [];
-  for (const f of FOLDERS) for (const p of PATHS) for (const n of NAMES)
-    tpls.push(`${HOST}/astronomy/${f}/${p}${n}`);
-
-  console.log(`trying ${tpls.length} shapes at zoom ${SCREEN_Z}…`);
-  const screened = await pool(tpls, 6, async tpl => isTile(await get(expand(tpl, SCREEN_Z))) ? tpl : null);
+  for (const d of dirs) for (const p of PATHS) for (const n of NAMES)
+    tpls.push(`${HOST}/${BASE}/${d}/${p}${n}`.replace(/([^:])\/\/+/g, '$1/'));
+  console.log(`trying ${tpls.length} shapes at zoom 4…`);
+  const screened = await pool(tpls, 6, async t => isTile(await get(expand(t, 4))) ? t : null);
   return screened.filter(Boolean);
-}
-
-// how deep the set goes is worth knowing for its own sake: maxNativeZoom has
-// to match it, or leaflet asks for tiles that were never drawn and the layer
-// looks broken at exactly the zoom someone uses to pick a spot.
-async function depth(tpl) {
-  const hits = [];
-  for (const z of SWEEP) if (isTile(await get(expand(tpl, z)))) hits.push(z);
-  return hits;
 }
 
 // --- writing it back --------------------------------------------------------
@@ -163,7 +279,7 @@ function applyFix(tpl, maxNative) {
 
   // the credit has to point at the folder the tiles came from, not the one
   // that moved out from under it
-  const home = tpl.match(/^(https:\/\/djlorenz\.github\.io\/astronomy\/[^/]+\/)/);
+  const home = tpl.match(/^(https?:\/\/[^/]+\/astronomy\/[^/]+\/)/);
   if (home) next = next.replace(
     /(href=")https:\/\/djlorenz\.github\.io\/astronomy\/[^"]*(" target="_blank" rel="noopener">D\. Lorenz)/,
     `$1${home[1]}$2`);
@@ -175,57 +291,77 @@ function applyFix(tpl, maxNative) {
   console.log('index.html updated');
 }
 
-// --- go ---------------------------------------------------------------------
-const given = opt('--url');
-let winner = null, zooms = null;
-
-if (given) {
-  console.log(`checking the url you gave…`);
-  zooms = await depth(given);
-  if (!zooms.length) {
-    console.log(`\nno tile came back from ${given}`);
-    console.log(`tried: ${SWEEP.map(z => expand(given, z)).slice(0, 3).join('\n       ')}`);
-    process.exit(1);
+async function believe(tpls, label) {
+  for (const t of tpls) {
+    const hits = await verify(t);
+    if (hits) return { tpl: t, hits, label };
   }
-  winner = given;
-} else {
-  console.log('reading the overlay\'s own pages…');
-  const found = await readSource();
-  if (found.length) {
-    console.log(`\nthe overlay builds its tile urls like this:`);
-    const seen = new Set();
-    for (const f of found) {
-      if (seen.has(f.text)) continue;
-      seen.add(f.text);
-      console.log(`\n  from ${f.url}\n  ${f.text}`);
-    }
-    console.log('\nif that names a path this script did not try, re-run with');
-    console.log("  node tools/find-lp-tiles.mjs --url '<the url, with {z} {x} {y} in it>' --fix");
-  } else {
-    console.log('  nothing in the pages named a tile file');
-  }
-
-  console.log('');
-  const hits = await search();
-  if (!hits.length) {
-    console.log('\nnone of the usual shapes answered with an image.');
-    console.log('open the overlay in a browser, watch the network tab, and pass');
-    console.log('one working tile url back with --url (put {z} {x} {y} in place');
-    console.log('of the numbers).');
-    process.exit(1);
-  }
-  winner = hits[0];
-  if (hits.length > 1) {
-    console.log(`\n${hits.length} shapes answered; taking the newest folder:`);
-    for (const h of hits) console.log(`  ${h}`);
-  }
-  zooms = await depth(winner);
+  return null;
 }
 
-const maxNative = zooms.length ? Math.max(...zooms) : null;
-console.log(`\nworks: ${winner}`);
-console.log(`zooms with tiles: ${zooms.join(', ')}  → maxNativeZoom: ${maxNative}`);
-console.log(`sample: ${expand(winner, Math.min(8, maxNative ?? 8))}`);
+// --- go ---------------------------------------------------------------------
+let win = null;
+
+const given = opt('--url');
+if (given) {
+  console.log('checking the url you gave…');
+  win = await believe([given], 'you');
+  if (!win) {
+    console.log(`\nno tile came back from ${given}`);
+    for (const z of [4, 6, 8]) console.log(`  tried ${expand(given, z)}`);
+    process.exit(1);
+  }
+} else {
+  console.log(`reading the layout of ${REPO}…`);
+  const sample = await findSample(BASE);
+  if (sample) {
+    console.log(`\n  a real tile: ${sample.dir}/${sample.name}`);
+    win = await believe(templatesFrom(sample.dir, sample.name), 'the repo listing');
+  } else {
+    console.log('  could not read the layout');
+  }
+
+  if (!win) {
+    console.log('\nreading the site\'s own pages…');
+    const fromCode = [];
+    const found = await readSite(fromCode);
+    if (found.length) {
+      console.log('\nthe site names these tile files:');
+      const seen = new Set();
+      for (const f of found) {
+        if (seen.has(f.text)) continue;
+        seen.add(f.text);
+        console.log(`  ${f.text}\n    (on ${f.url})`);
+      }
+    }
+    if (fromCode.length) {
+      console.log(`\nthe site's own code builds tile urls like this:`);
+      for (const t of fromCode) console.log(`  ${t}`);
+      win = await believe(fromCode, "the site's own code");
+    }
+
+    if (win) { /* read, not guessed */ } else {
+    console.log('');
+    const hits = await blindSearch(['lp2024', 'lp2023', 'lp2022', 'lp2021', 'lp2020', 'lp2016']);
+    win = await believe(hits, 'the shape search');
+    }
+  }
+}
+
+if (!win) {
+  console.log('\nnothing answered with an image at both probe points.');
+  console.log('open the overlay in a browser, watch the network tab, and pass one');
+  console.log('working tile url back with the numbers replaced:');
+  console.log("  node tools/find-lp-tiles.mjs --url 'https://…/{z}/{x}/{y}.png' --fix");
+  process.exit(1);
+}
+
+const zooms = [...new Set(Object.values(win.hits).flat())].sort((a, b) => a - b);
+const maxNative = Math.max(...zooms);
+console.log(`\nfound by ${win.label}: ${win.tpl}`);
+for (const [where, zs] of Object.entries(win.hits)) console.log(`  ${where}: zooms ${zs.join(', ')}`);
+console.log(`maxNativeZoom: ${maxNative}`);
+console.log(`sample: ${expand(win.tpl, Math.min(8, maxNative))}`);
 
 if (!flag('--fix')) { console.log('\nnothing written. add --fix to put it in index.html'); process.exit(0); }
-applyFix(winner, maxNative);
+applyFix(win.tpl, maxNative);
