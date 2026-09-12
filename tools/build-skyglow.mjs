@@ -26,6 +26,12 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FILE = path.join(ROOT, 'index.html');
 const html = fs.readFileSync(FILE, 'utf8');
 const opt = n => { const i = process.argv.indexOf(n); return i < 0 ? null : process.argv[i + 1]; };
+const has = n => process.argv.includes(n);
+// a run can be replayed from saved samples instead of fetched. the wording
+// below is the part most likely to need another pass, and re-reading ten tiles
+// off somebody else's server to re-punctuate a sentence is rude as well as
+// slow. it is also the only way any of this is testable offline.
+const replay = opt('--replay') ? JSON.parse(fs.readFileSync(opt('--replay'), 'utf8')).samples : null;
 
 // --- what the page already knows --------------------------------------------
 const TILES = (html.match(/const LP_TILES = '([^']+)'/) || [])[1];
@@ -166,7 +172,7 @@ console.log(`${spots.length} spots, ${want.length} samples, ${Object.keys(tiles)
 // --- fetch and read the tiles ----------------------------------------------
 const UA = { 'user-agent': 'dark-sky-calendar tools (+https://github.com/spskelly/dark-sky)' };
 const planes = {};
-for (const [k, url] of Object.entries(tiles)) {
+for (const [k, url] of replay ? [] : Object.entries(tiles)) {
   let img = null, why = '';
   try {
     const r = await fetch(url, { headers: UA });
@@ -176,6 +182,7 @@ for (const [k, url] of Object.entries(tiles)) {
   planes[k] = img;
   console.log(`  ${img ? `got  ${img.width}x${img.height}, colour type ${img.color}, depth ${img.depth}` : `MISS ${why}`}  ${url}`);
 }
+if (replay) console.log(`  (replaying ${Object.keys(replay).length} saved samples, nothing fetched)`);
 const missing = Object.values(planes).filter(p => !p).length;
 if (missing) console.log(`  (${missing} tile(s) absent. the atlas ships none over open water or empty ice, ` +
   `so a missing tile is the floor of the scale, not a fault)`);
@@ -196,7 +203,8 @@ const read = want.map(w => {
   return hex(img.rgba(px, py));
 });
 const got = new Map();
-want.forEach((w, i) => got.set(w.tag, read[i]));
+if (replay) for (const [tag, h] of Object.entries(replay)) got.set(tag, h);
+else want.forEach((w, i) => got.set(w.tag, read[i]));
 
 // a rank on the scale, 1 darkest. a tile that does not exist is darker than
 // anything the atlas bothered to draw, so it ranks 0 rather than going missing.
@@ -209,14 +217,14 @@ const pad = v => (v == null ? ' ?' : String(v).padStart(2));
 
 // --- anything the scale does not account for --------------------------------
 const census = new Map();
-for (const h of read) if (h) census.set(h, (census.get(h) || 0) + 1);
+for (const h of got.values()) if (h) census.set(h, (census.get(h) || 0) + 1);
 const unknown = [...census.keys()].filter(h => !RANK.has(h));
 if (unknown.length) {
   console.log(`\n!! ${unknown.length} colour(s) turned up that the scale does not list: ${unknown.join(' ')}`);
   console.log('   the scale above is incomplete; do not trust a rank until they are placed.');
 }
 
-console.log('\ncolours that actually turned up, darkest first:');
+console.log(`\ncolours that actually turned up, darkest first (${[...census.values()].reduce((a, b) => a + b, 0)} samples):`);
 for (const [h, n] of SCALE.map(([h], i) => [h, census.get(h) || 0]))
   if (n) console.log(`  ${String(RANK.get(h)).padStart(2)}  ${h}  ${NAME.get(h).padEnd(11)} ${n} sample(s)`);
 
@@ -231,16 +239,21 @@ for (const [name, , , why] of REFERENCE) {
   const shown = h === null ? '(no tile)' : h === undefined ? '(not sampled)' : `${h} ${NAME.get(h) || '?'}`;
   console.log(`  ${pad(r)}  ${name.padEnd(28)} ${shown.padEnd(22)} ${why}${back ? '   <-- STEPS BACK' : ''}`);
 }
-console.log(breaks
-  ? `\n  ${breaks} reference point(s) contradict the scale. it is wrong somewhere.`
+const checked = REFERENCE.filter(([n]) => rank(`ref|${n}`) != null).length;
+console.log(breaks ? `\n  ${breaks} reference point(s) contradict the scale. it is wrong somewhere.`
+  : checked < 3 ? `\n  only ${checked} reference point(s) were read; that settles nothing.`
   : '\n  no reference point steps backwards, so the scale holds from the sahara to manhattan.');
 
 // --- and the transect -------------------------------------------------------
 const walk = Array.from({ length: STEPS + 1 }, (_, i) => rank(`transect|${i}`));
 console.log(`\n${anchor.name} to ${CITY.name}, ${hav(anchor, CITY).toFixed(0)} km in ${STEPS} steps:`);
 console.log('  ' + walk.map(pad).join(' '));
+const seenWalk = walk.filter(v => v != null);
 const rising = walk.every((v, i) => i === 0 || v == null || walk[i - 1] == null || v >= walk[i - 1]);
-console.log(rising ? '  -> rises the whole way into town, as it must' : '  -> NOT monotone; something is off');
+console.log(seenWalk.length < 3 ? '  -> not enough of the walk was read to say anything'
+  : !rising ? '  -> NOT monotone; something is off'
+  : seenWalk[0] === seenWalk[seenWalk.length - 1] ? '  -> flat the whole way, which settles nothing'
+  : '  -> rises the whole way into town, as it must');
 
 // --- the spots --------------------------------------------------------------
 // what a spot's own pixel says, and where the glow around it comes from. the
@@ -300,8 +313,8 @@ const text = h => h
   .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
   .replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n').trim();
 
-console.log('\nwhat the atlas says its colours mean:');
-for (const url of LEGEND) {
+if (!replay) console.log('\nwhat the atlas says its colours mean:');
+for (const url of replay ? [] : LEGEND) {
   const body = await fetch(url, { headers: UA }).then(r => r.ok ? r.text() : '').catch(() => '');
   if (!body) { console.log(`  ${url} -- could not read`); continue; }
   console.log(`\n  ${url} (${(body.length / 1024).toFixed(1)} kB)`);
@@ -311,6 +324,83 @@ for (const url of LEGEND) {
   if (cols.length) console.log('    colours named on the page: ' + cols.join(' '));
   const imgs = [...body.matchAll(/<img[^>]+src=["']([^"']+)["']/gi)].map(m => new URL(m[1], url).href);
   if (imgs.length) console.log('    legend image(s): ' + imgs.join(' '));
+}
+
+// --- and what a card gets to say about it -----------------------------------
+// the wording is generated rather than written by hand for forty spots, and it
+// is deliberately comparative. the atlas has not been read for magnitudes yet,
+// so a band is described against things on this page -- the darkest colour that
+// appears anywhere in these mountains, and downtown asheville -- rather than
+// against a number nobody here has measured.
+const LONG = { n: 'north', ne: 'northeast', e: 'east', se: 'southeast',
+               s: 'south', sw: 'southwest', w: 'west', nw: 'northwest' };
+// eight bearings that happen to be next to each other read as an arc, not a
+// list. almost every spot out here has one bad side and a quiet remainder.
+const arc = dirs => {
+  const have = new Set(dirs);
+  if (dirs.length === 1) return LONG[dirs[0]];
+  for (let i = 0; i < 8; i++)
+    if (COMPASS.every((_, k) => have.has(COMPASS[(i + k) % 8]) === (k < dirs.length)))
+      return `${LONG[COMPASS[i]]} through ${LONG[COMPASS[(i + dirs.length - 1) % 8]]}`;
+  const w = COMPASS.filter(d => have.has(d)).map(d => LONG[d]);
+  return w.slice(0, -1).join(', ') + ' and ' + w[w.length - 1];
+};
+const BAND = {
+  6: 'the darkest band anywhere on this page',
+  7: 'the usual reading along the high ridges',
+  8: 'a band off the best in these mountains',
+  9: 'washed by town glow',
+  10: 'bright for somewhere you would drive to for the sky',
+  11: 'bright for somewhere you would drive to for the sky',
+  12: 'as bright as downtown asheville',
+};
+const band = r => BAND[r] || (r < 6 ? 'darker than anywhere else in these mountains'
+  : 'brighter than downtown asheville');
+// "every side" takes a singular verb, so it counts as one for agreement
+const where = dirs => (dirs.length >= 7 ? 'every side' : arc(dirs));
+const toward = dirs => (dirs.length >= 7 ? 'on every side' : `to the ${arc(dirs)}`);
+const many = dirs => dirs.length > 1 && dirs.length < 7;
+
+const notes = [];
+for (const { s, here, ring, worst, best } of summary) {
+  if (here == null) continue;
+  const colour = NAME.get(got.get(key(s.name, 'self')));
+  const said = [];
+  if (worst && worst.r > here) {
+    said.push(`brightest ${toward(worst.dirs)} at ${worst.km} km`);
+    // the far ring finds the cities, but a town just down the mountain is the
+    // one that ruins an exposure, and picking a single maximum hides it
+    const near = ring.filter(x => x.km === RINGS[0]);
+    const top = near.length ? Math.max(...near.map(x => x.r)) : here;
+    const dirs = near.filter(x => x.r === top).map(x => x.d);
+    if (top > here && String(dirs) !== String(worst.dirs))
+      said[0] += `, and already brighter ${RINGS[0]} km ${toward(dirs)}`;
+  } else said.push('nothing within 50 km reads brighter than the spot itself');
+  if (best) said.push(best.r < here
+    ? `${where(best.dirs)} ${many(best.dirs) ? 'are' : 'is'} darker still at ${best.km} km`
+    : best.r === here
+    ? `${where(best.dirs)} ${many(best.dirs) ? 'stay' : 'stays'} as dark as the spot out to ${best.km} km`
+    : `even the quietest side, ${where(best.dirs)}, sits a band up`);
+  notes.push([s.name, `${colour} on the overlay, ${band(here)}. ${said.join('; ')}.`]);
+}
+
+const START = '// --- skyglow:start (generated, do not edit by hand) ---';
+const END = '// --- skyglow:end ---';
+const block = [START, 'const SKY = {',
+  ...notes.map(([n, t]) => `  ${JSON.stringify(n)}:\n    ${JSON.stringify(t)},`),
+  '};', END].join('\n');
+
+if (has('--fix')) {
+  const a = html.indexOf(START), b = html.indexOf(END);
+  if (a < 0 || b < 0) throw new Error('the skyglow markers are missing from index.html');
+  // a colour the scale cannot place would put a wrong band on a card, and the
+  // cards are the whole point, so refuse rather than write something plausible
+  if (unknown.length) throw new Error(`refusing to write: ${unknown.length} colour(s) are not on the scale`);
+  fs.writeFileSync(FILE, html.slice(0, a) + block + html.slice(b + END.length));
+  console.log(`\nwrote ${notes.length} sky lines into index.html`);
+} else {
+  console.log('\nwhat each card would say (pass --fix to write it in):\n');
+  for (const [n, t] of notes) console.log(`  ${n}\n    ${t}`);
 }
 
 const out = opt('--json');
@@ -328,4 +418,4 @@ if (out) {
   }, null, 2));
   console.log(`\nwrote ${out}`);
 }
-console.log('\nnothing written into index.html yet.');
+if (!has('--fix')) console.log('\nnothing was written into index.html.');

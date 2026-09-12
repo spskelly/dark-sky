@@ -165,6 +165,23 @@ is how we know its blues mean a dark sky rather than missing data.
 What a band is worth in mag/arcsec² is the atlas author's business, so the run
 also prints his own two legend pages verbatim.
 
+```sh
+node tools/build-skyglow.mjs --fix           # write the sky line on each card
+node tools/build-skyglow.mjs --replay s.json # replay saved samples, no network
+```
+
+`--fix` rewrites the `SKY` block in `index.html`, which the spot cards render
+under the hand-written note and visibly apart from it: one is measured, the
+other is remembered, and they age differently. The hand-written notes are never
+touched, so re-running this cannot eat somebody's local knowledge. It refuses to
+write at all if any colour turned up that the scale cannot place, because a
+wrong band on a card is worse than no card.
+
+`--replay` takes the samples back out of a `--json` run instead of fetching, so
+the wording — the part most likely to need another pass — can be worked on, and
+tested, without re-reading ten tiles off somebody else's server to repunctuate a
+sentence.
+
 It writes nothing into `index.html`. What a colour *means* is the atlas
 author's business and not something to invent, so the run also prints a census
 of every colour that actually turned up and whatever the site's own source says
