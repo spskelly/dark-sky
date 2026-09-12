@@ -34,7 +34,19 @@ const TOLERANCE = 0.0013;
 const PRECISION = 4;      // ~11 m, and four decimals keep the file readable
 const MIN_POINTS = 4;     // drop stubs: pull-offs, ramps, severed fragments
 
-const OVERPASS = 'https://overpass-api.de/api/interpreter';
+// overpass-api.de answers 406 Not Acceptable to node's default user agent, so
+// say who we are; the mirrors are tried in turn when one is down, busy, or in
+// a mood, which for overpass is a normal tuesday.
+const ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+];
+const HEADERS = {
+  'content-type': 'application/x-www-form-urlencoded',
+  'accept': 'application/json',
+  'user-agent': 'dark-sky-calendar parkway builder (+https://github.com/spskelly/dark-sky)',
+};
 const QUERY = `[out:json][timeout:180];
 rel["type"="route"]["route"="road"]["name"="Blue Ridge Parkway"];
 way(r)["highway"](${BBOX.s},${BBOX.w},${BBOX.n},${BBOX.e});
@@ -65,11 +77,34 @@ function simplify(pts, tol) {
 
 const inBox = p => p[0] >= BBOX.s && p[0] <= BBOX.n && p[1] >= BBOX.w && p[1] <= BBOX.e;
 
-console.log('asking overpass for the parkway…');
-const res = await fetch(OVERPASS, { method: 'POST', body: 'data=' + encodeURIComponent(QUERY),
-  headers: { 'content-type': 'application/x-www-form-urlencoded' } });
-if (!res.ok) throw new Error(`overpass ${res.status} ${res.statusText}`);
-const data = await res.json();
+// overpass says why it said no in the body, and that is usually the useful half
+const reason = async res => (await res.text().catch(() => ''))
+  .replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
+const wait = ms => new Promise(r => setTimeout(r, ms));
+
+async function ask(query) {
+  const tried = [];
+  for (const url of ENDPOINTS) {
+    const host = new URL(url).host;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      console.log(`asking ${host} for the parkway…`);
+      let res;
+      try {
+        res = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(query), headers: HEADERS });
+      } catch (e) { tried.push(`${host}: ${e.message}`); break; }
+      if (res.ok) return res.json();
+      const why = await reason(res);
+      tried.push(`${host}: ${res.status} ${res.statusText}${why ? ' — ' + why : ''}`);
+      // busy or rate limited rather than broken: one more go before moving on
+      if (res.status !== 429 && res.status !== 504) break;
+      console.log('  busy, waiting five seconds…');
+      await wait(5000);
+    }
+  }
+  throw new Error('no overpass endpoint would answer:\n  ' + tried.join('\n  '));
+}
+
+const data = await ask(QUERY);
 
 const ways = (data.elements || []).filter(e => e.type === 'way' && Array.isArray(e.geometry));
 if (!ways.length) throw new Error('overpass returned no ways — the relation may have been renamed');
