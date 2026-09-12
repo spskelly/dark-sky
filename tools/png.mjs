@@ -79,8 +79,21 @@ export function decodePng(buf) {
     return hdr.color === 3 ? v : Math.round(v * 255 / max);   // an index is not a level
   };
 
+  // an indexed image carries its own scale: the palette is a list, and for a
+  // map like this the list is ordered. reading the index is reading a rank,
+  // which beats matching colours by eye.
+  const palette = hdr.color === 3
+    ? Array.from({ length: plte.length / 3 }, (_, i) =>
+        [plte[i * 3], plte[i * 3 + 1], plte[i * 3 + 2], trns && i < trns.length ? trns[i] : 255])
+    : null;
+
   return {
-    width: hdr.w, height: hdr.h, depth: hdr.depth, color: hdr.color,
+    width: hdr.w, height: hdr.h, depth: hdr.depth, color: hdr.color, palette,
+    // which palette entry a pixel uses, or null when there is no palette
+    index(x, y) {
+      if (hdr.color !== 3 || x < 0 || y < 0 || x >= hdr.w || y >= hdr.h) return null;
+      return sample(y * stride, x * ch);
+    },
     // red, green, blue, alpha at a pixel, 0-255
     rgba(x, y) {
       if (x < 0 || y < 0 || x >= hdr.w || y >= hdr.h) return null;
