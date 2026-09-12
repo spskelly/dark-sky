@@ -290,7 +290,7 @@
 
 <section class="spots">
   <h3>where to look up</h3>
-  <p class="lede">forty high, open, dark places across western north carolina, from the cherohala skyway to doughton park. teal pins allow overnight camping, ivory pins are drive-up or short-hike viewing only, gold pins have a catch, and <a href="#check-before-you-go">all of it needs checking before you drive</a>. set your home town and the list reorders around it; drive times are rough, measured from Waynesville, and assume the parkway is open, so they only set the order while home is there.</p>
+  <p class="lede">forty high, open, dark places across western north carolina, from the cherohala skyway to doughton park. teal pins allow overnight camping, ivory pins are drive-up or short-hike viewing only, gold pins have a catch, and <a href="#check-before-you-go">all of it needs checking before you drive</a>. set your home town and everything below reorders around it. drive times are estimates from that point, not routing, and assume the parkway is open.</p>
   <div class="spot-controls">
     <div class="group" role="group" aria-label="filter spots">
       <button data-filter="all" aria-pressed="true">all</button>
@@ -299,8 +299,8 @@
     </div>
     <div class="group" role="group" aria-label="sort spots">
       <span>sort</span>
-      <button data-sort="mins" aria-pressed="true">drive time</button>
-      <button data-sort="dist" aria-pressed="false">distance</button>
+      <button data-sort="mins" aria-pressed="true" title="estimated driving time from your home point">drive time</button>
+      <button data-sort="dist" aria-pressed="false" title="straight-line distance from your home point">distance</button>
     </div>
     <div class="group" role="group" aria-label="home location">
       <span>home</span>
@@ -333,8 +333,9 @@
     <h4>check before you go</h4>
     <p>
       this list is one person's notes, not an official source, and it is not kept in sync with anybody's
-      rulebook. <b>coordinates are approximate parking or summit points</b>, elevations and drive times are
-      rounded, and the camping, fire and access notes were true when they were written and may not be true
+      rulebook. <b>coordinates are approximate parking or summit points</b>, <b>drive times are estimated
+      from a straight line rather than routed</b> and read low wherever the road has to go around a ridge,
+      and the camping, fire and access notes were true when they were written and may not be true
       tonight. gates close for ice, forest orders change, permits get introduced, roads wash out, and
       campgrounds run seasonally.
     </p>
@@ -361,7 +362,7 @@
     <li><b>milky way core.</b> at this latitude the galactic center sits in the southern sky. it clears the ridge before dawn from late February, is up most of the night by June, and is an evening object August through October. each window in the list above says which.</li>
     <li><b>south-facing matters.</b> the core rises in the southeast and sets in the southwest, low. overlooks that face south or west across a big valley (Cowee, Devil's Courthouse, Cherohala) beat 360-degree summits with a nearby ridge to the south.</li>
     <li><b>fog and dew.</b> valleys fog in after midnight most of the year; ridgetops above 5,500 feet usually stay clear of it but everything gets wet. bring a lens warmer and expect the tent fly to be soaked.</li>
-    <li><b>temperature.</b> subtract about 15 degrees from the Waynesville forecast for the 6,000-foot balds, and add wind. July nights on Black Balsam run in the 50s.</li>
+    <li><b>temperature.</b> subtract about 15 degrees from whatever your valley forecast says for the 6,000-foot balds, and add wind. July nights on Black Balsam run in the 50s.</li>
     <li><b>leaf season.</b> October new moons are the best of the year for sky, and the worst for finding a parking spot at Graveyard Fields. arrive before sunset or go somewhere less famous.</li>
     <li><b>forecasting.</b> every spot links to its clear outside forecast: cloud cover by hour, plus transparency and seeing, which matter more than the daytime forecast suggests.</li>
   </ul>
@@ -717,104 +718,108 @@ function renderWindows() {
 // ---------- dark-sky spots ----------
 
 // kind: camp = overnight allowed, view = viewing only, warn = restricted
-// mins = rough drive from waynesville with the parkway open. coordinates are approximate parking or summit points
+// approach = minutes of slow going once you are off the highway: gravel, the
+// parkway detour, the walk in from the lot. it belongs to the spot, not to
+// wherever you start, so drive times work out from any home point.
+// coordinates are approximate parking or summit points
 const SPOTS = [
-  { name: 'Waterrock Knob', lat: 35.4605, lon: -83.1400, elev: 5820, kind: 'view', mins: 30, tags: ['parkway mp 451', 'east and west views'],
-    note: 'highest parkway visitor area, big parking lot, no camping. closest real dark sky to town and the fastest bail-out when a forecast turns. summit trail adds 360 degrees but scout it in daylight first. sylva and the cherokee casino glow to the south and west, so it is better for meteors and overhead than for the core.' },
-  { name: 'Thunder Struck Ridge Overlook', lat: 35.4738, lon: -83.1682, elev: 4780, kind: 'view', mins: 35, tags: ['parkway mp 454.4', 'drive-up', 'waterrock backup'],
+  { name: 'Waterrock Knob', lat: 35.4605, lon: -83.1400, elev: 5820, kind: 'view', approach: 9, tags: ['parkway mp 451', 'east and west views'],
+    note: 'highest parkway visitor area, big parking lot, no camping. the quickest genuinely dark pull-off on this stretch and the fastest bail-out when a forecast turns. summit trail adds 360 degrees but scout it in daylight first. sylva and the cherokee casino glow to the south and west, so it is better for meteors and overhead than for the core.' },
+  { name: 'Thunder Struck Ridge Overlook', lat: 35.4738, lon: -83.1682, elev: 4780, kind: 'view', approach: 12, tags: ['parkway mp 454.4', 'drive-up', 'waterrock backup'],
     note: 'three minutes past waterrock, wide valley view, a fraction of the traffic. the move when the waterrock lot is full of sunset crowds. lower and more directional than the knob.' },
-  { name: 'Cove Field Ridge Overlook', lat: 35.4407, lon: -83.0197, elev: 4620, kind: 'view', mins: 15, tags: ['parkway mp 439.4', 'closest to town', 'moon and planets'],
-    note: 'the local test run: fifteen minutes from waynesville, good enough for the moon, planets, and gear shakedowns. town glow and the lower elevation make it weak for faint stuff; do not judge a new-moon night here.' },
-  { name: 'Black Balsam Knob', lat: 35.3276, lon: -82.8757, elev: 6214, kind: 'camp', mins: 50, tags: ['parkway mp 420, fr 816', 'grass bald', 'no fires'],
+  { name: 'Cove Field Ridge Overlook', lat: 35.4407, lon: -83.0197, elev: 4620, kind: 'view', approach: 2, tags: ['parkway mp 439.4', 'low and close', 'moon and planets'],
+    note: 'a gear-shakedown overlook rather than a destination: the quickest way onto the parkway from the haywood county towns, good enough for the moon, planets and focusing a scope. valley glow and the lower elevation make it weak for faint stuff, so do not judge a new-moon night here.' },
+  { name: 'Black Balsam Knob', lat: 35.3276, lon: -82.8757, elev: 6214, kind: 'camp', approach: 23, tags: ['parkway mp 420, fr 816', 'grass bald', 'no fires'],
     note: 'the standard answer. treeless summit with a full horizon, dispersed camping on the bald and along the art loeb trail. gets crowded on good weekends; walk past the first ridge for quiet. fires are banned across the shining rock area.' },
-  { name: 'Sam Knob / Flat Laurel Creek', lat: 35.3298, lon: -82.8920, elev: 5800, kind: 'camp', mins: 50, tags: ['fr 816 end', 'quieter than black balsam'],
+  { name: 'Sam Knob / Flat Laurel Creek', lat: 35.3298, lon: -82.8920, elev: 5800, kind: 'camp', approach: 24, tags: ['fr 816 end', 'quieter than black balsam'],
     note: 'same parking as black balsam, opposite direction. flat laurel creek trail has sheltered tent sites in the valley and sam knob summit is a short climb for the view. better wind protection for sleeping.' },
-  { name: 'Graveyard Fields', lat: 35.3204, lon: -82.8469, elev: 5120, kind: 'camp', mins: 45, tags: ['parkway mp 418.8', 'no fires', 'busy'],
+  { name: 'Graveyard Fields', lat: 35.3204, lon: -82.8469, elev: 5120, kind: 'camp', approach: 17, tags: ['parkway mp 418.8', 'no fires', 'busy'],
     note: 'open high valley with a wide south-facing sky, the reason it shows up in every milky way photo of nc. backcountry camping allowed, no fires. the parking lot fills by early afternoon in fall.' },
-  { name: "Devil's Courthouse", lat: 35.3037, lon: -82.8991, elev: 5720, kind: 'view', mins: 50, tags: ['parkway mp 422.4', 'short steep hike', 'south facing'],
+  { name: "Devil's Courthouse", lat: 35.3037, lon: -82.8991, elev: 5720, kind: 'view', approach: 22, tags: ['parkway mp 422.4', 'short steep hike', 'south facing'],
     note: 'a rock outcrop looking straight south over the valley toward south carolina. probably the best core view on this stretch. half-mile paved climb from the overlook, no camping.' },
-  { name: 'Cowee Mountains Overlook', lat: 35.3701, lon: -82.9836, elev: 5950, kind: 'view', mins: 40, tags: ['parkway mp 430.7', 'west facing', 'drive-up'],
+  { name: 'Cowee Mountains Overlook', lat: 35.3701, lon: -82.9836, elev: 5950, kind: 'view', approach: 20, tags: ['parkway mp 430.7', 'west facing', 'drive-up'],
     note: 'huge pull-off with an unobstructed western horizon, the classic sunset overlook on the parkway. no hiking needed, set up a scope off the tailgate. richland balsam, the highest point on the road, is a half mile on.' },
-  { name: 'Wolf Mountain Overlook', lat: 35.3123, lon: -82.9296, elev: 5460, kind: 'view', mins: 50, tags: ['parkway mp 424.8', 'drive-up', 'quiet'],
+  { name: 'Wolf Mountain Overlook', lat: 35.3123, lon: -82.9296, elev: 5460, kind: 'view', approach: 24, tags: ['parkway mp 424.8', 'drive-up', 'quiet'],
     note: 'less traffic than the overlooks nearer 276, wide view across nantahala. good fallback when graveyard fields and black balsam are packed.' },
-  { name: 'Fryingpan Mountain tower', lat: 35.3809, lon: -82.7920, elev: 5340, kind: 'view', mins: 45, tags: ['parkway mp 409.6', '1.5 mi round trip', 'fire tower'],
+  { name: 'Fryingpan Mountain tower', lat: 35.3809, lon: -82.7920, elev: 5340, kind: 'view', approach: 18, tags: ['parkway mp 409.6', '1.5 mi round trip', 'fire tower'],
     note: 'gravel road walk from the parkway to a 70-foot lookout tower with a full horizon. the tower stairs are open. closer to the asheville glow to the northeast than the 215 area but still dark.' },
-  { name: 'Mount Pisgah campground', lat: 35.4142, lon: -82.7522, elev: 4960, kind: 'camp', mins: 40, tags: ['parkway mp 408.6', 'reservable', 'seasonal'],
+  { name: 'Mount Pisgah campground', lat: 35.4142, lon: -82.7522, elev: 4960, kind: 'camp', approach: 11, tags: ['parkway mp 408.6', 'reservable', 'seasonal'],
     note: 'developed nps campground, the easiest legal overnight on the parkway. mostly under trees, so it is a base camp: sleep here and walk or drive to fryingpan or the pisgah inn lot for the sky. open roughly may through october.' },
-  { name: 'Cataloochee Valley', lat: 35.6392, lon: -83.0947, elev: 2650, kind: 'camp', mins: 55, tags: ['great smoky mountains np', 'campground', 'gravel road', 'elk'],
+  { name: 'Cataloochee Valley', lat: 35.6392, lon: -83.0947, elev: 2650, kind: 'camp', approach: 30, tags: ['great smoky mountains np', 'campground', 'gravel road', 'elk'],
     note: 'remote valley in the park, very dark, with a small reservable campground. ridges cut off the low horizon so it favors overhead and meteor watching over the core. check nps for road and campground status, it has been closed for repairs since helene.' },
-  { name: 'Mount Sterling summit', lat: 35.7004, lon: -83.1116, elev: 5842, kind: 'camp', mins: 75, tags: ['great smoky mountains np', 'backcountry site 38', 'fire tower', 'permit'],
+  { name: 'Mount Sterling summit', lat: 35.7004, lon: -83.1116, elev: 5842, kind: 'camp', approach: 44, tags: ['great smoky mountains np', 'backcountry site 38', 'fire tower', 'permit'],
     note: 'fire tower on a 5,800-foot summit with a campsite right at the top. best-in-class sky with the whole smokies dark to the south and west. 2.7 miles and 2,000 feet up from mt sterling gap, backcountry permit through the park.' },
-  { name: 'Kuwohi (Clingmans Dome)', lat: 35.5628, lon: -83.4986, elev: 6643, kind: 'view', mins: 90, tags: ['great smoky mountains np', 'road closed dec to mar', 'observation tower'],
+  { name: 'Kuwohi (Clingmans Dome)', lat: 35.5628, lon: -83.4986, elev: 6643, kind: 'view', approach: 40, tags: ['great smoky mountains np', 'road closed dec to mar', 'observation tower'],
     note: 'highest point in the park, half-mile paved walk to the tower. gatlinburg glows to the north but south and west are black. no camping; the lot is open at night when the road is.' },
-  { name: 'Cherohala Skyway, Hooper Bald', lat: 35.3278, lon: -84.0203, elev: 5290, kind: 'view', mins: 110, tags: ['cherohala skyway', 'darkest westward sky', 'drive-up'],
+  { name: 'Cherohala Skyway, Hooper Bald', lat: 35.3278, lon: -84.0203, elev: 5290, kind: 'view', approach: 16, tags: ['cherohala skyway', 'darkest westward sky', 'drive-up'],
     note: 'the skyway overlooks between santeetlah gap and the tennessee line are the darkest drive-up sky in the region, with nothing to the west for a hundred miles. hooper bald is a short walk from its lot. dispersed camping is nearby off the forest roads but not at the overlooks.' },
-  { name: 'Panthertown Valley', lat: 35.1650, lon: -83.0227, elev: 3900, kind: 'camp', mins: 75, tags: ['nantahala nf', 'backcountry', 'granite domes'],
+  { name: 'Panthertown Valley', lat: 35.1650, lon: -83.0227, elev: 3900, kind: 'camp', approach: 34, tags: ['nantahala nf', 'backcountry', 'granite domes'],
     note: 'high valley with bare granite domes (salt rock, big green) that open up the sky above the trees. free dispersed camping, no permits. domes are wet and slick after dark, know your route.' },
-  { name: 'Roan Highlands, Carvers Gap', lat: 36.1064, lon: -82.1105, elev: 5512, kind: 'camp', mins: 150, tags: ['appalachian trail', 'grass balds', 'far'],
+  { name: 'Roan Highlands, Carvers Gap', lat: 36.1064, lon: -82.1105, elev: 5512, kind: 'camp', approach: 48, tags: ['appalachian trail', 'grass balds', 'far'],
     note: 'miles of open bald along the at; grassy ridge bald is the classic overnight. a long drive for a weekend, but the most black balsam-like sky north of it, and the rhododendron in june is a bonus.' },
-  { name: 'Mayland Earth to Sky Park', lat: 35.9247, lon: -82.1868, elev: 2700, kind: 'view', mins: 125, tags: ['darksky certified park', 'observatory', 'public nights'],
+  { name: 'Mayland Earth to Sky Park', lat: 35.9247, lon: -82.1868, elev: 2700, kind: 'view', approach: 38, tags: ['darksky certified park', 'observatory', 'public nights'],
     note: 'the only darksky international certified park in the state, with the bare dark sky observatory. public viewing nights on a schedule, scopes provided. not a camping spot, but the right place to take someone new to this.' },
-  { name: 'PARI', lat: 35.1996, lon: -82.8720, elev: 2900, kind: 'view', mins: 70, tags: ['pisgah astronomical research institute', 'events only'],
+  { name: 'PARI', lat: 35.1996, lon: -82.8720, elev: 2900, kind: 'view', approach: 32, tags: ['pisgah astronomical research institute', 'events only'],
     note: 'former nasa tracking station turned observatory campus in the pisgah forest. access is through scheduled public events, not walk-up. worth watching their calendar for new moon nights.' },
-  { name: 'Max Patch', lat: 35.7963, lon: -82.9622, elev: 4629, kind: 'warn', mins: 65, tags: ['closed after dark', 'no camping through 2029'],
+  { name: 'Max Patch', lat: 35.7963, lon: -82.9622, elev: 4629, kind: 'warn', approach: 26, tags: ['closed after dark', 'no camping through 2029'],
     note: 'the famous bald, but a forest order closes it from an hour after sunset to an hour before sunrise and bans camping and fires, currently extended into 2029. listed so you do not plan around it.' },
 
   // ---- black mountains and the north ----
-  { name: 'Mount Mitchell State Park', lat: 35.7650, lon: -82.2652, elev: 6684, kind: 'camp', mins: 95, tags: ['highest point east of the mississippi', 'tent-only campground', 'seasonal'],
+  { name: 'Mount Mitchell State Park', lat: 35.7650, lon: -82.2652, elev: 6684, kind: 'camp', approach: 22, tags: ['highest point east of the mississippi', 'tent-only campground', 'seasonal'],
     note: 'the summit deck at 6,684 feet, with a nine-site tent campground below it. the park gate and the parkway approach both close for ice, and the campground runs roughly may through october, so check the park before driving up. asheville glows hard to the south; north and east are excellent.' },
-  { name: 'Craggy Pinnacle', lat: 35.7017, lon: -82.3797, elev: 5892, kind: 'view', mins: 80, tags: ['parkway mp 364.1', 'short hike', '360 degrees'],
+  { name: 'Craggy Pinnacle', lat: 35.7017, lon: -82.3797, elev: 5892, kind: 'view', approach: 18, tags: ['parkway mp 364.1', 'short hike', '360 degrees'],
     note: 'half-mile climb from the craggy dome lot to a bald summit with a full horizon. closer to asheville than mitchell, so the southern sky pays for it, but it is the easiest big view on this stretch of parkway. no camping.' },
-  { name: 'Black Mountain Campground', lat: 35.7515, lon: -82.2216, elev: 3000, kind: 'camp', mins: 100, tags: ['pisgah nf', 'reservable', 'valley site'],
+  { name: 'Black Mountain Campground', lat: 35.7515, lon: -82.2216, elev: 3000, kind: 'camp', approach: 24, tags: ['pisgah nf', 'reservable', 'valley site'],
     note: 'developed forest service campground on the south toe river, at the foot of the mount mitchell trail. it is down in the trees, so treat it as a base: sleep here, drive or climb for sky. good fallback when the mitchell gate is shut.' },
-  { name: 'Big Bald', lat: 36.0022, lon: -82.4922, elev: 5516, kind: 'camp', mins: 105, tags: ['appalachian trail', 'grass bald', 'dispersed camping'],
+  { name: 'Big Bald', lat: 36.0022, lon: -82.4922, elev: 5516, kind: 'camp', approach: 32, tags: ['appalachian trail', 'grass bald', 'dispersed camping'],
     note: 'a genuinely big open bald on the tennessee line with very little to the north of it. reached from the at at sams gap or through wolf laurel; the wolf laurel approach crosses private roads, so read the current access notes before committing. dispersed camping along the trail.' },
 
   // ---- linville gorge and the northeast ----
-  { name: "Wiseman's View", lat: 35.9247, lon: -81.9036, elev: 3400, kind: 'view', mins: 110, tags: ['linville gorge', 'drive-up gravel', 'west facing'],
+  { name: "Wiseman's View", lat: 35.9247, lon: -81.9036, elev: 3400, kind: 'view', approach: 4, tags: ['linville gorge', 'drive-up gravel', 'west facing'],
     note: 'paved overlook decks a short walk from the lot, looking straight across the gorge at table rock and hawksbill. old nc 105 in is rough gravel but passable in a car. no camping at the overlook; the wilderness behind it needs a permit on weekends may through october.' },
-  { name: 'Table Rock picnic area', lat: 35.8867, lon: -81.8853, elev: 3400, kind: 'view', mins: 120, tags: ['linville gorge', 'steep gravel access', 'summit hike'],
+  { name: 'Table Rock picnic area', lat: 35.8867, lon: -81.8853, elev: 3400, kind: 'view', approach: 14, tags: ['linville gorge', 'steep gravel access', 'summit hike'],
     note: 'the lot sits at 3,400 feet with the summit a steep mile above it. the access road is long, narrow gravel and gated seasonally. spectacular dark east over the gorge, with morganton and hickory glowing further out. day use only at the picnic area.' },
-  { name: 'Beacon Heights', lat: 36.0872, lon: -81.8125, elev: 4220, kind: 'view', mins: 125, tags: ['parkway mp 305.2', 'short hike', 'quieter than rough ridge'],
+  { name: 'Beacon Heights', lat: 36.0872, lon: -81.8125, elev: 4220, kind: 'view', approach: 4, tags: ['parkway mp 305.2', 'short hike', 'quieter than rough ridge'],
     note: 'quarter-mile walk to open rock slabs under grandfather mountain, with a wide southern and eastern view. the obvious alternative to rough ridge a few miles north, which draws crowds and has no room to set up. no camping.' },
-  { name: 'Grandfather Mountain State Park', lat: 36.1058, lon: -81.8317, elev: 5946, kind: 'camp', mins: 130, tags: ['backcountry permit', 'ridge campsites', 'strenuous'],
+  { name: 'Grandfather Mountain State Park', lat: 36.1058, lon: -81.8317, elev: 5946, kind: 'camp', approach: 9, tags: ['backcountry permit', 'ridge campsites', 'strenuous'],
     note: 'the state park side, not the private attraction with the swinging bridge. backcountry sites along the profile and daniel boone scout trails sit high on the ridge with real horizon. permits are required and sites book up; the trails are ladder-and-cable steep, so this is a commitment, not a drive-up.' },
-  { name: 'Elk Knob State Park', lat: 36.3350, lon: -81.6900, elev: 5520, kind: 'view', mins: 145, tags: ['summit hike', 'astronomy programs', 'no camping on summit'],
+  { name: 'Elk Knob State Park', lat: 36.3350, lon: -81.6900, elev: 5520, kind: 'view', approach: 2, tags: ['summit hike', 'astronomy programs', 'no camping on summit'],
     note: 'a moderate 1.9-mile climb to a north-facing summit well away from any city, and one of the darkest skies in the northern mountains. the park runs occasional night programs. gates close at standard park hours, so check before planning a late night.' },
-  { name: 'Doughton Park', lat: 36.4200, lon: -81.1800, elev: 3600, kind: 'camp', mins: 180, tags: ['parkway mp 241', 'campground', 'open meadows'],
+  { name: 'Doughton Park', lat: 36.4200, lon: -81.1800, elev: 3600, kind: 'camp', approach: 0, tags: ['parkway mp 241', 'campground', 'open meadows'],
     note: 'big grassy bluffs and a parkway campground at the far northeast end of the range, with the piedmont dropping away to the east. a long drive from haywood county, but the meadows give you horizon in every direction and it is never as busy as the grandfather stretch.' },
 
   // ---- east and southeast ----
-  { name: 'Lake James State Park', lat: 35.7300, lon: -81.8950, elev: 1200, kind: 'camp', mins: 105, tags: ['lakeshore', 'campground', 'low elevation'],
+  { name: 'Lake James State Park', lat: 35.7300, lon: -81.8950, elev: 1200, kind: 'camp', approach: 5, tags: ['lakeshore', 'campground', 'low elevation'],
     note: 'low and warm compared with the balds, but the water gives you an open northern horizon toward the linville face with nothing in the way. reservable campground and easy access. marion and morganton glow east and south; come here for the moon, planets and meteors rather than the core.' },
-  { name: 'Bearwallow Mountain', lat: 35.4550, lon: -82.3800, elev: 4232, kind: 'view', mins: 65, tags: ['grassy bald', 'conservation easement', 'short hike'],
+  { name: 'Bearwallow Mountain', lat: 35.4550, lon: -82.3800, elev: 4232, kind: 'view', approach: 7, tags: ['grassy bald', 'conservation easement', 'short hike'],
     note: 'a mile up an old road to a grazed bald with a tower and a wide southern view over hickory nut gorge. open to the public through a conservation easement, so tread lightly and do not camp. the closest true bald to the hendersonville side.' },
-  { name: 'DuPont State Recreational Forest', lat: 35.2000, lon: -82.6200, elev: 2900, kind: 'warn', mins: 70, tags: ['gates close at night', 'day use only'],
+  { name: 'DuPont State Recreational Forest', lat: 35.2000, lon: -82.6200, elev: 2900, kind: 'warn', approach: 20, tags: ['gates close at night', 'day use only'],
     note: 'lovely open granite around the waterfalls, but the access areas close thirty minutes after sunset and there is no camping. listed so you know not to build a night around it; gorges state park to the southwest is the version of this you can actually stay at.' },
 
   // ---- south ----
-  { name: 'Gorges State Park', lat: 35.0900, lon: -82.9500, elev: 3000, kind: 'camp', mins: 80, tags: ['backcountry and drive-in sites', 'south facing', 'jocassee gorges'],
+  { name: 'Gorges State Park', lat: 35.0900, lon: -82.9500, elev: 3000, kind: 'camp', approach: 32, tags: ['backcountry and drive-in sites', 'south facing', 'jocassee gorges'],
     note: 'the escarpment drops two thousand feet into the jocassee gorges right in front of you, and there is almost nothing on the south carolina side to light it. backcountry sites plus a small drive-in campground. one of the best southern horizons in the state for the core.' },
 
   // ---- southwest, highlands and cashiers ----
-  { name: 'Whiteside Mountain', lat: 35.0820, lon: -83.1430, elev: 4930, kind: 'view', mins: 75, tags: ['cliff top', 'loop trail', 'no camping'],
+  { name: 'Whiteside Mountain', lat: 35.0820, lon: -83.1430, elev: 4930, kind: 'view', approach: 24, tags: ['cliff top', 'loop trail', 'no camping'],
     note: 'a two-mile loop onto the top of the highest cliffs in the east, looking south and east off the escarpment. no camping and the lot is small, so arrive before dark and mind the unfenced edges. exceptional south-facing view when the escarpment is not fogged in.' },
 
   // ---- west, nantahala ----
-  { name: 'Wayah Bald', lat: 35.1800, lon: -83.5620, elev: 5342, kind: 'view', mins: 90, tags: ['stone tower', 'drive-up gravel', 'road closed in winter'],
+  { name: 'Wayah Bald', lat: 35.1800, lon: -83.5620, elev: 5342, kind: 'view', approach: 26, tags: ['stone tower', 'drive-up gravel', 'road closed in winter'],
     note: 'a stone observation tower you can drive most of the way to, with a hundred miles of nantahala and the smokies to the west and nothing much in between. fr 69 is gravel and gated from roughly january into march. no camping at the tower; dispersed sites along the forest road.' },
-  { name: 'Standing Indian Campground', lat: 35.0700, lon: -83.5250, elev: 3400, kind: 'camp', mins: 105, tags: ['nantahala nf', 'reservable', 'at access'],
+  { name: 'Standing Indian Campground', lat: 35.0700, lon: -83.5250, elev: 3400, kind: 'camp', approach: 36, tags: ['nantahala nf', 'reservable', 'at access'],
     note: 'a large forest service campground in the upper nantahala basin, ringed by five-thousand-foot ridges. the sites are wooded, but the campground field and the road out give you sky, and the at ridges above are a short climb. seasonal, roughly april through november.' },
-  { name: 'Jackrabbit Mountain', lat: 35.0100, lon: -83.7700, elev: 2000, kind: 'camp', mins: 120, tags: ['lake chatuge', 'campground', 'far southwest'],
+  { name: 'Jackrabbit Mountain', lat: 35.0100, lon: -83.7700, elev: 2000, kind: 'camp', approach: 32, tags: ['lake chatuge', 'campground', 'far southwest'],
     note: 'peninsula campground on lake chatuge at the georgia line, with open water south and west. low, so it is humid and hazier than the balds, but it covers the far southwestern corner and the lakeshore sites have a clean horizon.' },
 
   // ---- far west, graham and swain ----
-  { name: 'Huckleberry Knob', lat: 35.3350, lon: -83.9880, elev: 5560, kind: 'camp', mins: 115, tags: ['cherohala skyway', 'grass bald', 'dispersed camping'],
+  { name: 'Huckleberry Knob', lat: 35.3350, lon: -83.9880, elev: 5560, kind: 'camp', approach: 24, tags: ['cherohala skyway', 'grass bald', 'dispersed camping'],
     note: 'the highest point in graham county, a mile of easy old roadbed from the skyway to a treeless summit. dispersed camping is allowed on the bald and there is essentially nothing west of here until tennessee. the best dark sky on this list that you can still walk to in twenty minutes.' },
-  { name: 'Tsali Recreation Area', lat: 35.4000, lon: -83.6000, elev: 1800, kind: 'camp', mins: 60, tags: ['fontana lake', 'campground', 'low but close'],
+  { name: 'Tsali Recreation Area', lat: 35.4000, lon: -83.6000, elev: 1800, kind: 'camp', approach: 1, tags: ['fontana lake', 'campground', 'low but close'],
     note: 'forest service campground on a fontana lake peninsula, best known for mountain biking. low elevation and tree cover, but it is dark, close to town, and the lakeshore opens up north toward the park. a soft option when the high country is iced in.' },
 ];
 
+// just where the picker starts on a first visit; localStorage takes over after that
 const HOME_DEFAULT = { lat: 35.4887, lon: -82.9887, name: 'Waynesville' };
 
 // somewhere to start from without typing coordinates. spread across the whole
@@ -863,6 +868,13 @@ function bearing(a, b) {
 }
 const fmtDur = m => m < 60 ? `${m} min` : `${Math.floor(m / 60)}h${m % 60 ? ' ' + (m % 60) : ''}`;
 
+// rough drive time from wherever home is: time to get going and parked, the
+// spot's own slow approach, and the straight-line miles between at a mountain
+// highway average. it is an estimate off a straight line, not routing, so it
+// reads low where the road has to go around a ridge.
+const DRIVE_BASE = 8, DRIVE_MPM = 1.45;
+const driveMins = (dist, spot) => Math.round((DRIVE_BASE + spot.approach + dist * DRIVE_MPM) / 5) * 5;
+
 function spotLinks(s) {
   const co = `https://clearoutside.com/forecast/${s.lat.toFixed(2)}/${s.lon.toFixed(2)}`;
   const lp = `https://www.lightpollutionmap.info/#zoom=11&lat=${s.lat}&lon=${s.lon}`;
@@ -870,46 +882,26 @@ function spotLinks(s) {
   return `<a href="${co}" target="_blank" rel="noopener">forecast</a><a href="${lp}" target="_blank" rel="noopener">light map</a><a href="${gm}" target="_blank" rel="noopener">directions</a>`;
 }
 
-const homeIsDefault = () =>
-  Math.abs(spotState.home.lat - HOME_DEFAULT.lat) < 0.01 && Math.abs(spotState.home.lon - HOME_DEFAULT.lon) < 0.01;
-
-// mins is curated road knowledge measured from waynesville. it cannot be
-// recomputed for an arbitrary home, so once home moves it stops being a sort key
-// and distance takes over; otherwise someone in boone gets haywood county first.
-const sortingByDrive = () => spotState.sort === 'mins' && homeIsDefault();
-
 function visibleSpots() {
   const f = spotState.filter;
-  const byDrive = sortingByDrive();
+  const byDrive = spotState.sort === 'mins';
   return SPOTS
     .filter(s => f === 'all' || (f === 'camp' ? s.kind === 'camp' : s.kind === 'view'))
-    .map(s => ({ ...s, dist: haversine(spotState.home, s), dir: bearing(spotState.home, s) }))
-    .sort((a, b) => byDrive ? a.mins - b.mins || a.dist - b.dist : a.dist - b.dist);
-}
-
-// reflect that in the controls rather than silently ignoring the button
-function syncSortControls() {
-  const dflt = homeIsDefault();
-  const drive = document.querySelector('[data-sort="mins"]');
-  const dist = document.querySelector('[data-sort="dist"]');
-  if (!drive || !dist) return;
-  drive.disabled = !dflt;
-  drive.title = dflt ? 'drive time from Waynesville' : 'drive times are only known from Waynesville, so distance is used while home is elsewhere';
-  drive.setAttribute('aria-pressed', String(sortingByDrive()));
-  dist.setAttribute('aria-pressed', String(!sortingByDrive()));
+    .map(s => {
+      const dist = haversine(spotState.home, s);
+      return { ...s, dist, dir: bearing(spotState.home, s), drive: driveMins(dist, s) };
+    })
+    .sort((a, b) => byDrive ? a.drive - b.drive || a.dist - b.dist : a.dist - b.dist);
 }
 
 function renderSpotList() {
   const list = document.getElementById('spot-list');
   const rows = visibleSpots();
-  const dflt = homeIsDefault();
-  syncSortControls();
   list.innerHTML = rows.map(s => `<div class="spot ${spotState.active === s.name ? 'active' : ''}" data-name="${s.name}" tabindex="0" role="button" aria-pressed="${spotState.active === s.name}">
-    <div class="top"><span class="name">${s.name}</span><span class="dist">${s.dist.toFixed(0)} mi ${s.dir}${dflt ? ` &middot; ~${fmtDur(s.mins)}` : ''}</span></div>
+    <div class="top"><span class="name">${s.name}</span><span class="dist">${s.dist.toFixed(0)} mi ${s.dir} &middot; ~${fmtDur(s.drive)}</span></div>
     <div class="tags">
       <span class="tag ${s.kind === 'camp' ? 'camp' : s.kind === 'warn' ? 'warn' : ''}">${s.kind === 'camp' ? 'camp overnight' : s.kind === 'warn' ? 'restricted' : 'viewing only'}</span>
       <span class="tag">${s.elev.toLocaleString()} ft</span>
-      ${dflt ? '' : `<span class="tag">~${fmtDur(s.mins)} from Waynesville</span>`}
       ${s.tags.map(t => `<span class="tag">${t}</span>`).join('')}
     </div>
     <div class="note">${s.note}</div>
@@ -974,7 +966,7 @@ function initMap() {
   spotState.map = map;
   for (const s of SPOTS) {
     const mk = L.marker([s.lat, s.lon], { icon: pinIcon(s.kind), title: s.name })
-      .bindPopup(`<b>${s.name}</b><br>${s.elev.toLocaleString()} ft &middot; ~${fmtDur(s.mins)} from Waynesville<br>${s.tags.join(', ')}`);
+      .bindPopup(`<b>${s.name}</b><br>${s.elev.toLocaleString()} ft &middot; ~${fmtDur(driveMins(haversine(spotState.home, s), s))} from home<br>${s.tags.join(', ')}`);
     mk.on('click', () => {
       spotState.active = s.name;
       loadSpotForecast(s);
