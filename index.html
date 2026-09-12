@@ -278,11 +278,23 @@
   .pin.view { background: var(--moon); }
   .pin.warn { background: var(--today); }
   .pin.home { background: transparent; border: 2px solid var(--today); width: 18px; height: 18px; }
+  /* what the map draws, as opposed to which spots it draws: kept next to the
+     map rather than up in the spot toolbar, and reachable on a phone without
+     opening leaflet's own layer control */
+  .map-tools { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-bottom: 10px; color: var(--ink-dim); font-size: 14px; }
+  .map-tools[hidden] { display: none; }
+  .map-tools button { padding: 4px 11px; font-size: 13px; }
   /* only occupies space when it has something to say */
   .spot-msg { margin: 0 0 10px; font-size: 13px; line-height: 1.45; color: var(--today); }
   .spot-msg:empty { display: none; }
   .legend { display: flex; gap: 8px 14px; flex-wrap: wrap; margin: 0 0 12px; font-size: 13px; color: var(--ink-dim); align-items: center; }
   .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  /* a line, not a dot, so the road reads as a route beside the pins */
+  .legend .line { width: 20px; height: 3px; border-radius: 2px; background: var(--moon); box-shadow: 0 0 0 1px rgba(15,26,52,0.85); }
+  /* the overlay's own ramp, roughly: night sky through green rural to a city core */
+  .legend .ramp { width: 84px; height: 10px; border-radius: 999px; background: linear-gradient(90deg, #1b2a4d, #2f6f5a, #6fbf3f, #d8d84a, #e8a33d, #d8443a, #f2e9df); }
+  /* .legend span above would otherwise beat the ua rule for [hidden] */
+  .legend span[hidden] { display: none; }
 
   /* the spot notes are hand-written and go stale; say so where it is read */
   .disclaimer { margin-top: 22px; border-left: 3px solid var(--today); background: var(--night-2); border-radius: 0 10px 10px 0; padding: 14px 18px; max-width: 78ch; }
@@ -520,11 +532,17 @@
     </details>
   </div>
   <p class="spot-msg" id="spot-msg" role="status"></p>
+  <div class="map-tools">
+    <span>map</span>
+    <button id="lp-toggle" aria-pressed="false">light pollution</button>
+  </div>
   <div class="legend">
     <span><i class="pin camp"></i> overnight camping allowed</span>
     <span><i class="pin view"></i> viewing only</span>
     <span><i class="pin warn"></i> restricted, read the note</span>
     <span><i class="pin home"></i> home</span>
+    <span class="road-key" hidden><i class="line"></i> blue ridge parkway</span>
+    <span class="lp-key" hidden><i class="ramp"></i> sky glow, darkest to city</span>
   </div>
   <div class="tonight spot-tonight" id="spot-tonight" aria-live="polite"></div>
   <div class="spot-layout">
@@ -1213,6 +1231,74 @@ function focusSpot(name) {
   }
 }
 
+// ---------- light pollution overlay ----------
+
+// world atlas / viirs sky-brightness tiles, rendered by david lorenz and served
+// from his github pages site, which is the one source of these that is free to
+// hotlink: lightpollutionmap.info's own tiles need an api key. if the layer
+// stops drawing, this url is the line to change — he publishes a new atlas
+// every few years under a new folder (lp2020, lp2022, …).
+const LP_TILES = 'https://djlorenz.github.io/astronomy/lp2022/overlay/tiles/tile_{z}_{x}_{y}.png';
+const LP_ATTR = 'sky glow &copy; <a href="https://djlorenz.github.io/astronomy/lp2022/" target="_blank" rel="noopener">D. Lorenz</a>, world atlas / VIIRS';
+const LP_KEY = 'darksky.lightpollution';
+
+function initLightPollution(map) {
+  const btn = document.getElementById('lp-toggle');
+  const key = document.querySelector('.lp-key');
+  const lp = L.tileLayer(LP_TILES, {
+    attribution: LP_ATTR,
+    // half strength: the point of the topo underneath is the ridge line
+    // between you and a town, and the overlay should not bury it
+    opacity: 0.5,
+    // the data is coarse, so past its own zoom the tiles are stretched rather
+    // than requested and 404ing
+    maxNativeZoom: 8, maxZoom: 17,
+    // the layer control auto-numbers the base layers from 1; this has to sit
+    // above them
+    zIndex: 10,
+  });
+  const show = on => {
+    if (on) lp.addTo(map); else lp.remove();
+    btn.setAttribute('aria-pressed', String(on));
+    key.hidden = !on;
+    try { localStorage.setItem(LP_KEY, on ? '1' : '0'); } catch (e) {}
+  };
+  // a moved or mistyped tile url would otherwise leave the button looking dead:
+  // say so once, rather than on every tile that misses
+  let loaded = false, failed = 0;
+  lp.on('tileload', () => { loaded = true; });
+  lp.on('tileerror', () => {
+    if (loaded || ++failed < 4) return;
+    show(false);
+    spotMsg('the light pollution layer could not load. every spot still links to its own light map.');
+  });
+  btn.addEventListener('click', () => show(!map.hasLayer(lp)));
+  let want = false;
+  try { want = localStorage.getItem(LP_KEY) === '1'; } catch (e) {}
+  if (want) show(true);
+}
+
+// ---------- the blue ridge parkway ----------
+
+// the road half this page's advice is about, as a simplified centreline so it
+// can be picked out of the topo at a glance. generated from openstreetmap by
+// tools/build-parkway.mjs; while it is empty the map simply does without it,
+// which is the honest failure: a road drawn from memory over a map that shows
+// the real one is worse than no road at all.
+// --- parkway:start (generated, do not edit by hand) ---
+const PARKWAY = [];
+// --- parkway:end ---
+
+function drawParkway(map) {
+  if (!PARKWAY.length) return;
+  document.querySelector('.road-key').hidden = false;
+  // a dark casing under a bright core, so the line holds up over the topo, the
+  // imagery and the sky-glow overlay alike. neither stroke takes clicks: the
+  // map has to stay clickable through it for "pick on map".
+  L.polyline(PARKWAY, { color: '#0b1226', weight: 6, opacity: 0.5, lineJoin: 'round', lineCap: 'round', interactive: false }).addTo(map);
+  L.polyline(PARKWAY, { color: '#ece7d4', weight: 2, opacity: 0.85, lineJoin: 'round', lineCap: 'round', interactive: false }).addTo(map);
+}
+
 function pinIcon(kind) {
   return L.divIcon({ className: '', html: `<div class="pin ${kind}"></div>`, iconSize: kind === 'home' ? [18, 18] : [14, 14], iconAnchor: kind === 'home' ? [9, 9] : [7, 7] });
 }
@@ -1221,6 +1307,8 @@ function initMap() {
   const el = document.getElementById('map');
   if (typeof L === 'undefined') {
     el.innerHTML = '<div class="map-fallback">the map could not load \u2014 the leaflet script was blocked or the network is down. the spot list beside it still works, and every spot has forecast, light-map and directions links.</div>';
+    // nothing for the map controls to control
+    document.querySelector('.map-tools').hidden = true;
     return;
   }
   const map = L.map(el, { zoomControl: true, attributionControl: true });
@@ -1258,6 +1346,8 @@ function initMap() {
     spotState.markers.set(s.name, mk);
     mk.addTo(map);
   }
+  drawParkway(map);
+  initLightPollution(map);
   placeHome();
 }
 
