@@ -22,6 +22,7 @@
 <meta name="twitter:image" content="https://spskelly.github.io/dark-sky/og.png?v=20260912">
 <link rel="icon" id="favicon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='13' fill='%230f1a34'/%3E%3Ccircle cx='34' cy='32' r='20' fill='%23ece7d4'/%3E%3Ccircle cx='22' cy='27' r='18' fill='%230f1a34'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..600,50&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -49,7 +50,7 @@
   html, body { margin: 0; background: var(--night); color: var(--ink); font-family: var(--sans); }
   body { min-height: 100vh; padding: 28px clamp(16px, 4vw, 56px) 64px; }
   a, button { color: inherit; font: inherit; }
-  button { background: none; border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
+  button { background: none; border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; line-height: 1.25; cursor: pointer; }
   button:hover { border-color: var(--ink-dim); }
   button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--today); outline-offset: 2px; }
   button:disabled { opacity: 0.45; cursor: not-allowed; }
@@ -61,8 +62,8 @@
   .masthead { max-width: 1100px; margin: 0 auto 24px; display: flex; align-items: baseline; gap: 4px 14px; flex-wrap: wrap; }
   .masthead .mark { align-self: center; display: inline-flex; }
   .masthead .mark svg { width: 21px; height: 21px; display: block; }
-  .masthead .wordmark { font-family: var(--serif); font-weight: 400; font-size: 19px; color: var(--moon); }
-  .masthead .scope { font-size: 13px; color: var(--ink-dim); border-left: 1px solid var(--line); padding-left: 14px; }
+  .masthead .wordmark { font-family: var(--serif); font-weight: 400; font-size: 19px; line-height: 1.26; color: var(--moon); }
+  .masthead .scope { font-size: 13px; line-height: 1.31; color: var(--ink-dim); border-left: 1px solid var(--line); padding-left: 14px; }
 
   /* top: hero moon + what the page is for, then tonight's state, then controls */
   .hero { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 28px; align-items: center; max-width: 1100px; margin: 0 auto 30px; }
@@ -73,7 +74,7 @@
   .hero svg { width: 100%; height: auto; filter: drop-shadow(0 0 28px rgba(236,231,212,0.18)); }
   /* the headline is static markup now, so the purpose paints before the
      script runs rather than after it */
-  .hero h1 { font-family: var(--serif); font-weight: 300; font-size: clamp(28px, 4.2vw, 46px); line-height: 1.06; margin: 0 0 12px; letter-spacing: -0.01em; }
+  .hero h1 { font-family: var(--serif); font-weight: 300; font-size: clamp(28px, 4.2vw, 46px); line-height: 1.06; margin: 0 0 12px; letter-spacing: -0.01em; min-height: 2.12em; }
   .hero h1 em { font-style: italic; color: var(--moon); }
   .hero p { margin: 0; max-width: 62ch; color: var(--ink-dim); line-height: 1.5; }
   .hero .hero-lede { color: var(--ink); font-size: clamp(15px, 1.4vw, 17px); max-width: 58ch; }
@@ -99,9 +100,13 @@
   .guide { max-width: 1100px; margin: 0 auto 34px; display: grid; grid-template-columns: repeat(auto-fit, minmax(232px, 1fr)); gap: 10px; }
   .guide a { display: block; text-decoration: none; background: var(--night-2); border: 1px solid transparent; border-radius: 12px; padding: 13px 16px; }
   .guide a:hover { border-color: var(--line); }
-  .guide b { display: block; font-family: var(--serif); font-weight: 400; font-size: 18px; color: var(--moon); margin-bottom: 4px; }
+  .guide b { display: block; font-family: var(--serif); font-weight: 400; font-size: 18px; line-height: 1.28; color: var(--moon); margin-bottom: 4px; }
   .guide b::after { content: " \2192"; color: var(--ink-dim); }
   .guide span { display: block; font-size: 13px; color: var(--ink-dim); line-height: 1.45; }
+
+  @media (max-width: 480px) {
+    .month-nav h2 { flex: 1 0 100%; order: -1; }
+  }
 
   /* jump links land a heading just under the top edge, not flush against it */
   .windows, .spots, #tonight { scroll-margin-top: 22px; }
@@ -109,13 +114,41 @@
   .tonight { margin-top: 18px; max-width: 640px; width: 100%; }
   /* stacked, not space-between: both labels are long enough to wrap into
      each other on a phone */
-  .tonight .head { display: flex; flex-direction: column; gap: 2px; font-size: 14px; color: var(--ink-dim); margin-bottom: 8px; }
-  .tonight .head .sub { font-size: 12px; }
+  .tonight .head { display: flex; flex-direction: column; gap: 2px; font-size: 14px; line-height: 1.29; color: var(--ink-dim); margin-bottom: 8px; }
+  .tonight .head .sub { font-size: 12px; line-height: 1.25; }
   .tonight .head, .tonight .summary, .tonight .detail, .tonight .legend-sky { text-align: left; }
   .tonight .head b { color: var(--ink); font-weight: 500; }
   /* a december night is ~15 columns; let the row scroll rather than push the
      whole page wider than the screen */
-  .tonight .hours { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--line) transparent; padding-bottom: 2px; }
+  /* the forecast is fetched async. every height below is reserved from the
+     first paint, because without it the panel grew from ~44px to ~250px when
+     the tiles landed and dropped the calendar 191px down the page (283px on a
+     phone). the reservations sit on the children rather than the panel so the
+     short error state doesn't leave a hole. */
+  .tonight .hours { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--line) transparent; padding-bottom: 2px; min-height: 80px; }
+  /* when there is nothing to plot, hold the tile row's footprint rather than
+     collapsing the panel and yanking the page up by what it would have filled.
+     dashed, so it reads as an empty state and not as a loading one. */
+  .tonight .sky-empty { min-height: 80px; display: flex; align-items: center; padding: 10px 14px; border: 1px dashed var(--line); border-radius: 10px; font-size: 13px; line-height: 1.5; color: var(--ink-dim); }
+  /* shimmer lines standing in for the verdict sentence, so the space reserved
+     for it reads as loading rather than as a gap. the count matches the lines
+     that sentence actually takes: three wide, five on a phone. */
+  .tonight .sk-lines { display: flex; flex-direction: column; gap: 6px; }
+  .tonight .sk-lines i { height: 0.85em; border-radius: 4px; background: var(--night-3); opacity: 0.5; }
+  .tonight .sk-lines i:nth-child(1) { width: 94%; }
+  .tonight .sk-lines i:nth-child(2) { width: 86%; }
+  .tonight .sk-lines i:nth-child(3) { width: 48%; }
+  .tonight .sk-lines i:nth-child(n+4) { display: none; }
+  /* a stand-in the width of "7:48 PM", so the head label wraps where the real
+     one will rather than gaining a line when the times arrive */
+  .tonight .sk-t { display: inline-block; width: 6.5ch; height: 0.85em; border-radius: 3px; background: var(--night-3); vertical-align: -0.05em; }
+  /* placeholder tiles: the same 78px box as a real hour, minus the data */
+  .tonight .hours.sk i { flex: 1 0 36px; height: 78px; border-radius: 8px; background: var(--night-3); opacity: 0.55; }
+  @media (prefers-reduced-motion: no-preference) {
+    .tonight .hours.sk i { animation: sk-pulse 1.6s ease-in-out infinite; }
+    .tonight .hours.sk i:nth-child(even) { animation-delay: 0.2s; }
+  }
+  @keyframes sk-pulse { 0%, 100% { opacity: 0.32; } 50% { opacity: 0.6; } }
   .tonight .hr { flex: 1 0 36px; display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; padding: 6px 0 5px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; }
   .tonight .hr:hover { border-color: var(--line); }
   .tonight .hr[aria-pressed="true"] { border-color: var(--today); }
@@ -125,8 +158,8 @@
   .tonight .hr .pct { font-size: 11px; color: var(--ink); line-height: 1; margin-top: 2px; }
   .tonight .hr.clear .pct { color: var(--dark-sky); }
   .tonight .hr .tmp { font-size: 10px; color: var(--ink-dim); line-height: 1; }
-  .tonight .summary { font-size: 13px; color: var(--ink-dim); margin-top: 8px; line-height: 1.5; }
-  .tonight .detail { font-size: 12px; color: var(--moon-dim); margin-top: 6px; line-height: 1.45; min-height: 1.45em; }
+  .tonight .summary { font-size: 13px; color: var(--ink-dim); margin-top: 8px; line-height: 1.5; min-height: 4.5em; }
+  .tonight .detail { font-size: 12px; color: var(--moon-dim); margin-top: 6px; line-height: 1.45; min-height: 2.9em; }
   .tonight .detail b { color: var(--moon); font-weight: 500; }
   .tonight .summary b { color: var(--ink); font-weight: 500; }
   .legend-sky { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-size: 11px; color: var(--ink-dim); }
@@ -136,13 +169,13 @@
   .spot-tonight { max-width: none; margin: 0 0 14px; background: var(--night-2); border-radius: 12px; padding: 12px 14px; }
   /* nothing is selected on load, so don't paint an empty card */
   .spot-tonight:empty { display: none; }
-  .day .cloud { font-size: 10px; text-align: center; color: var(--ink-dim); }
+  .day .cloud { font-size: 10px; line-height: 1.2; text-align: center; color: var(--ink-dim); min-height: 1.2em; }
   .day .cloud.clear { color: var(--dark-sky); }
   .day .cloud.mixed { color: var(--moon-dim); }
 
   .controls { max-width: 1100px; margin: 0 auto 18px; display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center; justify-content: space-between; }
-  .month-nav { display: flex; align-items: center; gap: 14px; }
-  .month-nav h2 { font-family: var(--serif); font-weight: 400; font-size: 28px; margin: 0; min-width: 11ch; }
+  .month-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+  .month-nav h2 { font-family: var(--serif); font-weight: 400; font-size: 28px; line-height: 1.21; margin: 0; min-width: 7.1em; white-space: nowrap; }
   .month-nav h2 span { color: var(--ink-dim); font-weight: 300; }
   .options { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; color: var(--ink-dim); font-size: 14px; }
   .options .group { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
@@ -152,14 +185,14 @@
   .cal { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
   /* role="row" wrappers carry the aria structure without becoming grid items */
   .cal .row { display: contents; }
-  .dow { text-align: center; font-size: 13px; color: var(--ink-dim); padding: 6px 0 10px; }
+  .dow { text-align: center; font-size: 13px; line-height: 1.31; color: var(--ink-dim); padding: 6px 0 10px; }
   .day {
     position: relative; min-height: 96px; border-radius: 10px; padding: 8px 8px 6px;
     background: var(--night-2); display: flex; flex-direction: column; gap: 4px;
     border: 1px solid transparent;
   }
   .day.pad { background: transparent; }
-  .day .num { font-size: 14px; color: var(--ink-dim); display: flex; justify-content: space-between; align-items: baseline; }
+  .day .num { font-size: 14px; line-height: 1.29; color: var(--ink-dim); display: flex; justify-content: space-between; align-items: baseline; }
   .day .num b { font-weight: 500; color: var(--ink); }
   .day .icon { align-self: center; margin-top: auto; margin-bottom: auto; }
   .day .icon svg { width: 34px; height: 34px; }
@@ -177,7 +210,7 @@
 
   /* upcoming windows list */
   .windows { max-width: 1100px; margin: 44px auto 0; }
-  .windows h3 { font-family: var(--serif); font-weight: 400; font-size: 24px; margin: 0 0 6px; }
+  .windows h3 { font-family: var(--serif); font-weight: 400; font-size: 24px; line-height: 1.21; margin: 0 0 6px; }
   .windows p.lede { margin: 0 0 18px; color: var(--ink-dim); max-width: 64ch; line-height: 1.5; }
   p.lede a { color: var(--moon-dim); }
   p.lede a:hover { color: var(--moon); }
@@ -194,7 +227,7 @@
 
   /* spots: map on the left, scrollable list on the right */
   .spots { max-width: 1100px; margin: 56px auto 0; }
-  .spots h3 { font-family: var(--serif); font-weight: 400; font-size: 24px; margin: 0 0 6px; }
+  .spots h3 { font-family: var(--serif); font-weight: 400; font-size: 24px; line-height: 1.21; margin: 0 0 6px; }
   .spots p.lede { margin: 0 0 16px; color: var(--ink-dim); max-width: 64ch; line-height: 1.5; }
   .spot-controls { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 14px; color: var(--ink-dim); font-size: 14px; }
   .spot-controls .group { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
@@ -260,15 +293,25 @@
   .disclaimer a:hover { color: var(--moon); }
 
   .season { max-width: 1100px; margin: 44px auto 0; }
-  .season h3 { font-family: var(--serif); font-weight: 400; font-size: 24px; margin: 0 0 12px; }
+  .season h3 { font-family: var(--serif); font-weight: 400; font-size: 24px; line-height: 1.21; margin: 0 0 12px; }
   .season ul { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px 24px; }
   .season li { color: var(--ink-dim); font-size: 14px; line-height: 1.5; }
   .season li b { color: var(--ink); font-weight: 500; }
 
+  /* the list is a scrolling column beside the map on a wide screen. below 900px
+     it stacks under the map and loses that scroll box, which put all forty
+     cards — about fifteen thousand pixels of them — between the map and the
+     rest of the page. show the nearest few and let the rest be asked for. */
+  #spot-more { display: none; margin-top: 10px; width: 100%; padding: 10px 14px; color: var(--ink-dim); }
+  #spot-more:hover { color: var(--ink); }
+  /* the id selector below would otherwise beat the ua rule for [hidden] */
+  #spot-more[hidden] { display: none; }
   @media (max-width: 900px) {
     .spot-layout { grid-template-columns: minmax(0, 1fr); }
     #map { height: 380px; }
     .spot-list { max-height: none; }
+    .spot-list:not(.all) .spot:nth-child(n+7) { display: none; }
+    #spot-more { display: block; }
   }
 
   .foot { max-width: 1100px; margin: 40px auto 0; color: var(--ink-dim); font-size: 13px; line-height: 1.6; max-width: 70ch; }
@@ -285,11 +328,22 @@
     .guide a { padding: 10px 14px; }
     .guide b { font-size: 17px; margin-bottom: 2px; }
     .guide span { font-size: 12.5px; line-height: 1.4; }
+    .tonight .summary { min-height: 7.5em; }
+    .tonight .sk-lines i:nth-child(3) { width: 90%; }
+    .tonight .sk-lines i:nth-child(4) { width: 72%; display: block; }
+    .tonight .sk-lines i:nth-child(5) { width: 48%; display: block; }
     .day { min-height: 70px; padding: 5px 4px; }
     .day .icon svg { width: 24px; height: 24px; }
     .day .label { font-size: 10px; }
     .day .illum { display: none; }
+    /* "53% cloud" wraps in a cell this narrow, so reserve both lines */
+    .day .cloud { min-height: 2.4em; }
     .month-nav h2 { font-size: 22px; min-width: 0; }
+  }
+  /* below ~340px the hour breakdown needs a third line; reserving it that wide
+     everywhere would just be dead space on every other screen */
+  @media (max-width: 336px) {
+    .tonight .detail { min-height: 4.35em; }
   }
   @media (prefers-reduced-motion: no-preference) {
     .day { transition: border-color 160ms; }
@@ -391,6 +445,7 @@
     <div id="map"></div>
     <div class="spot-list" id="spot-list"></div>
   </div>
+  <button id="spot-more" aria-expanded="false" aria-controls="spot-list"></button>
   <div class="legend">
     <span><i class="pin camp"></i> overnight camping allowed</span>
     <span><i class="pin view"></i> viewing only</span>
@@ -673,6 +728,12 @@ function renderCalendar() {
   for (let day = 1; day <= last.getDate(); day++) {
     // phase icon evaluated at 9pm local, roughly when you'd be looking up
     const d = new Date(y, m, day, 21, 0, 0);
+    // the hourly forecast reaches tonight and the six nights after it, and only
+    // those cells ever carry a cloud figure. hold the line open on exactly
+    // those from the first paint: reserving it on all thirty would pad every
+    // row of the grid for a week's worth of data.
+    const offset = Math.round((new Date(y, m, day) - startOfToday) / 86400000);
+    const inHorizon = offset >= 0 && offset < FC_HORIZON;
     const o = info.get(dayKey(d)) || {};
     // a forecast only belongs on a night that hasn't happened yet
     const fcNight = new Date(y, m, day) >= startOfToday ? fc.nightly.get(dayKey(d)) : null;
@@ -695,7 +756,9 @@ function renderCalendar() {
       <div class="num"><b>${day}</b><span class="illum">${illum}%</span></div>
       <div class="icon">${moonSvg(p, 34, state.hemi)}</div>
       ${label}
-      ${fcNight ? `<div class="cloud ${cloudClass(fcNight.mean)}" title="mean cloud cover 9pm to 3am, low ${Math.round(fcNight.tmin)}\u00b0F">${fcNight.mean}% cloud</div>` : ''}
+      ${fcNight
+        ? `<div class="cloud ${cloudClass(fcNight.mean)}" title="mean cloud cover 9pm to 3am, low ${Math.round(fcNight.tmin)}\u00b0F">${fcNight.mean}% cloud</div>`
+        : inHorizon ? '<div class="cloud" aria-hidden="true"></div>' : ''}
     </div>`);
   }
   while (cells.length % 7) cells.push('<div class="day pad" role="gridcell"></div>');
@@ -912,7 +975,7 @@ const TOWNS = [
   ['West Jefferson', 36.4035, -81.4926],
 ];
 
-const spotState = { home: { ...HOME_DEFAULT }, filter: 'all', sort: 'mins', map: null, markers: new Map(), homeMarker: null, active: null, picking: false };
+const spotState = { home: { ...HOME_DEFAULT }, filter: 'all', sort: 'mins', map: null, markers: new Map(), homeMarker: null, active: null, picking: false, showAll: false };
 
 // remember the home point between visits; storage can throw in a private window
 const HOME_KEY = 'darksky.home';
@@ -969,6 +1032,11 @@ function visibleSpots() {
     .sort((a, b) => byDrive ? a.drive - b.drive || a.dist - b.dist : a.dist - b.dist);
 }
 
+// how many cards the collapsed mobile list shows, and the width it collapses
+// at. both mirror the stylesheet: :nth-child(n+7) inside @media (max-width: 900px)
+const SPOT_PREVIEW = 6;
+const SPOT_COLLAPSE_AT = 900;
+
 function renderSpotList() {
   const list = document.getElementById('spot-list');
   const rows = visibleSpots();
@@ -982,6 +1050,15 @@ function renderSpotList() {
     <div class="note">${s.note}</div>
     <div class="links">${spotLinks(s)}</div>
   </div>`).join('');
+  // the css only collapses the list below 900px, so the button is only visible
+  // there; its label still has to match whatever the filter left behind
+  list.classList.toggle('all', spotState.showAll);
+  const more = document.getElementById('spot-more');
+  const hidden = rows.length - SPOT_PREVIEW;
+  more.hidden = hidden <= 0;
+  more.textContent = spotState.showAll ? 'show fewer' : `show all ${rows.length} spots`;
+  more.setAttribute('aria-expanded', String(spotState.showAll));
+
   list.querySelectorAll('.spot').forEach(el => {
     const go = () => focusSpot(el.dataset.name);
     el.addEventListener('click', go);
@@ -1000,6 +1077,12 @@ function renderSpotList() {
 
 function focusSpot(name) {
   spotState.active = name;
+  // the card may be one the collapsed list is hiding; opening it from the map
+  // should not scroll to nothing
+  if (!spotState.showAll && window.matchMedia(`(max-width: ${SPOT_COLLAPSE_AT}px)`).matches) {
+    const rank = visibleSpots().findIndex(x => x.name === name);
+    if (rank >= SPOT_PREVIEW) spotState.showAll = true;
+  }
   const s = SPOTS.find(x => x.name === name);
   if (s) loadSpotForecast(s);
   document.querySelectorAll('.spot').forEach(el => el.classList.toggle('active', el.dataset.name === name));
@@ -1121,6 +1204,13 @@ document.querySelectorAll('[data-sort]').forEach(b => b.addEventListener('click'
   document.querySelectorAll('[data-sort]').forEach(x => x.setAttribute('aria-pressed', x === b));
   renderSpotList();
 }));
+document.getElementById('spot-more').addEventListener('click', () => {
+  spotState.showAll = !spotState.showAll;
+  renderSpotList();
+  // collapsing from the bottom of a long list would otherwise leave the view
+  // somewhere below the whole section
+  if (!spotState.showAll) document.getElementById('spot-more').scrollIntoView({ block: 'center' });
+});
 
 // ---------- forecast (open-meteo, no key) ----------
 
@@ -1179,6 +1269,9 @@ function summarizeNights(d) {
 }
 
 const cloudClass = c => c < 25 ? 'clear' : c < 60 ? 'mixed' : 'cloudy';
+// how many nights summarizeNights keeps out of the 8-day fetch: the first and
+// last are only partly covered, so seven full ones survive
+const FC_HORIZON = 7;
 
 // sky icons for the hourly row. all drawn in palette colors so they read as one set
 const SKY_ICON = {
@@ -1202,12 +1295,34 @@ const SKY_RANGE = { clear: 'under 15% cloud', few: '15 to 40% cloud', partly: '4
 const SKY_SHORT = { clear: '<15%', few: '15–40%', partly: '40–65%', mostly: '65–85%', overcast: '>85%', fog: 'dew pt within 3°' };
 const skyLegend = () => `<div class="legend-sky">${Object.keys(SKY_ICON).map(k => `<span title="${SKY_RANGE[k]}">${SKY_ICON[k]}${SKY_NAME[k]} <i>${SKY_SHORT[k]}</i></span>`).join('')}</div>`;
 
+// before sunrise the loaded panel switches to the shorter "rest of the night"
+// wording, so guess from the clock which one is coming. getting it wrong costs
+// a line of the head on a narrow screen, not correctness.
+const skeletonLabel = name => new Date().getHours() < 7
+  ? `rest of the night at <b>${name}</b> · sunrise <i class="sk-t"></i>`
+  : `tonight at <b>${name}</b> · sunset <i class="sk-t"></i> to sunrise <i class="sk-t"></i>`;
+
 function renderPanel(panel) {
   const el = document.getElementById(panel.el);
   if (!panel.target) { el.innerHTML = ''; return; }
   const name = panel.target.name;
-  if (panel.status === 'loading') { el.innerHTML = `<div class="head"><span>tonight at <b>${name}</b></span></div><div class="summary">loading forecast…</div>`; return; }
-  if (panel.status === 'error' || !panel.data) { el.innerHTML = `<div class="head"><span>tonight at <b>${name}</b></span></div><div class="summary">forecast unavailable right now. the clear outside link on each spot still works.</div>`; return; }
+  // the loading state mirrors the loaded one: same head, a row of placeholder
+  // tiles at the same height, and the legend, which needs no data at all. that
+  // way the panel is already its final size when the forecast lands.
+  if (panel.status === 'loading') {
+    el.innerHTML = `
+      <div class="head"><span>${skeletonLabel(name)}</span><span class="sub">cloud cover and temperature by hour</span></div>
+      <div class="hours sk" aria-hidden="true">${'<i></i>'.repeat(12)}</div>
+      <div class="detail">reading the cloud model for tonight&hellip;</div>
+      <div class="summary sk-lines" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+      ${skyLegend()}`;
+    return;
+  }
+  if (panel.status === 'error' || !panel.data) {
+    el.innerHTML = `<div class="head"><span>tonight at <b>${name}</b></span><span class="sub">cloud cover and temperature by hour</span></div>
+      <div class="sky-empty">forecast unavailable right now. the clear outside link on each spot still works.</div>`;
+    return;
+  }
   const d = panel.data, h = d.hourly;
   const now = new Date();
   // before dawn: the rest of the current night, now through this morning's sunrise.
@@ -1220,7 +1335,11 @@ function renderPanel(panel) {
     const t = new Date(h.time[i]);
     if (t >= new Date(start.getTime() - 30 * 60000) && t <= sunriseNext) idx.push(i);
   }
-  if (!idx.length) { el.innerHTML = `<div class="head"><span>tonight at <b>${name}</b></span></div><div class="summary">no forecast hours left in the current night.</div>`; return; }
+  if (!idx.length) {
+    el.innerHTML = `<div class="head"><span>tonight at <b>${name}</b></span><span class="sub">cloud cover and temperature by hour</span></div>
+      <div class="sky-empty">no forecast hours left in the current night.</div>`;
+    return;
+  }
   const headLabel = preDawn
     ? `rest of the night at <b>${name}</b> · sunrise ${fmtTime(sunriseNext)}`
     : `tonight at <b>${name}</b> · sunset ${fmtTime(start)} to sunrise ${fmtTime(sunriseNext)}`;
