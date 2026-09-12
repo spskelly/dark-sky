@@ -87,6 +87,35 @@ markers. The road travels in the page rather than being fetched at runtime, so
 it still draws from `file://` and offline, and cannot break because somebody
 else's API moved. With the block empty the map just doesn't draw it.
 
+## Checking the pins
+
+`tools/check-spots.mjs` measures the spot coordinates against two references
+that are not somebody's memory:
+
+```sh
+node tools/check-spots.mjs           # report, change nothing
+node tools/check-spots.mjs --snap    # put roadside pull-offs on the road
+node tools/check-spots.mjs --osm     # compare every spot to OpenStreetMap
+node tools/check-spots.mjs --osm --fix
+```
+
+Anything tagged with a milepost is, by definition, on the parkway, so once the
+centreline is in the page an overlook sitting a mile off it is wrong by
+construction — `--snap` moves those, and only those, onto the line. A summit or
+a campground up a side road is left alone: its milepost is where you leave the
+parkway, not where the spot is.
+
+It also runs a check that needs no external data at all. Two points on one road
+cannot be farther apart in a straight line than the difference in their
+mileposts, so any pair that is proves one of them wrong. That is what vouches
+for a snap: the spots already sitting on the road agree with each other, and
+after a snap the moved ones agree with them too.
+
+For everything away from the parkway there is no reference line, so `--osm`
+compares each spot to the OpenStreetMap feature of the same name and reports the
+distance. `--fix` applies only point features — never the centroid of a park the
+size of a county, which is a spot in the woods rather than the parking.
+
 The npm dependencies exist for that generator alone — the site itself ships
 nothing from `node_modules`. To rebuild the card by hand:
 
