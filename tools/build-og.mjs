@@ -85,7 +85,8 @@ svg.bg{position:absolute;inset:0}
 .txt{position:absolute;left:600px;top:0;width:545px;height:630px;display:flex;flex-direction:column;justify-content:center;gap:16px}
 h1{font-family:F,serif;font-weight:300;font-size:70px;line-height:1.02;color:#d5dbea;letter-spacing:-.01em}
 h1 em{font-style:italic;color:#ece7d4}
-.phase{font-size:25px;color:#ece7d4}
+.scope{font-size:24px;color:#d5dbea;line-height:1.3}
+.phase{font-size:24px;color:#ece7d4}
 .phase span{color:#8b96b3}
 p{font-size:21px;line-height:1.5;color:#8b96b3;max-width:34ch}
 .win{display:inline-flex;align-items:center;gap:10px;font-size:21px;color:#5fc2ad}
@@ -102,8 +103,9 @@ p{font-size:21px;line-height:1.5;color:#8b96b3;max-width:34ch}
 <div class="moon">${sky.svg}</div>
 <div class="txt">
   <h1>dark sky<br><em>calendar</em></h1>
+  <div class="scope">stargazing nights in the<br>carolina mountains</div>
   <div class="phase">tonight: ${sky.phase} <span>· ${sky.illum}% lit</span></div>
-  <p>every new-moon window for the next twelve months, tonight's cloud cover hour by hour, and 20 dark places to point a lens from.</p>
+  <p>when the moon is out of the way, whether the sky will be clear, and forty dark places to drive to.</p>
   <span class="win"><i></i>${sky.window}</span>
 </div>
 <div class="url">spskelly.github.io/dark-sky</div>`;
