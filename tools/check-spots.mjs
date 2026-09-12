@@ -150,6 +150,7 @@ const rewrite = (spot, lat, lon) => {
 if (process.argv.includes('--snap')) {
   const moving = onRoad.filter(s => isRoadside(s) && s.near.d >= SNAP_MIN && s.near.d <= SNAP_MAX);
   console.log(`\nsnapping ${moving.length} roadside pull-off(s) onto the centreline:`);
+  if (moving.length) console.log('  (a named osm node beats this; run --osm --fix afterwards, not before)');
   for (const s of moving) {
     const lat = +s.near.lat.toFixed(4), lon = +s.near.lon.toFixed(4);
     console.log(`  ${pad(s.name, 32)} ${s.lat},${s.lon} → ${lat},${lon}  (${Math.round(s.near.d)} m)`);
@@ -195,6 +196,12 @@ const FACILITY = /\b(campground|camp site|tower|picnic area|picnic site|recreati
 // of ours matched a node called "Truck" a hundred and forty km away, because
 // "struck" contains "truck".
 const MAX_MATCH = 8000;
+
+// a pull-off is part of the road, so osm's node for one should be on the road
+// too. when it is not, osm has tagged the view rather than the parking, and
+// moving a milepost spot there would take it off the parkway that every drive
+// time on this page is measured along. report it and leave it.
+const OSM_ON_ROAD = 150;
 
 if (process.argv.includes('--osm')) {
   // this asks for every named park, peak, viewpoint and tower in a box the size
@@ -268,15 +275,18 @@ out center;`;
     const h = scored[0];
     // a way or relation reports its centroid, which for a park is a point in
     // the woods rather than its parking: report it, never apply it
+    // for a spot on the parkway, how far osm's own node sits from the road
+    const offRoad = s.mp && h.type === 'node' ? Math.round(nearestOnParkway(h).d) : null;
     const why =
       h.tier === 0 ? 'name only close, check by hand'
       : h.type !== 'node' ? `${h.type} centroid, check by hand`
       : !DESTINATION.has(h.kind) ? 'osm has the summit, we want the access \u2014 kept'
       : h.d < 30 ? 'already there'
       : h.d > OSM_FIX_MAX ? 'too far apart to be the same thing'
+      : offRoad !== null && offRoad > OSM_ON_ROAD ? `osm's node is ${offRoad} m off the parkway, check by hand`
       : 'WOULD MOVE';
     console.log(pad(s.name, 31) + pad(h.name, 31) + pad(`${h.type[0]} ${h.kind}`, 13) +
-      `${Math.round(h.d)} m`.padStart(7) + '  ' + why);
+      `${Math.round(h.d)} m`.padStart(7) + (offRoad === null ? '' : ` (${offRoad} m off road)`) + '  ' + why);
     if (why === 'WOULD MOVE') fixes.push([s, h]);
   }
 
