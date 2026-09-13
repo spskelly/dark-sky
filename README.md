@@ -58,6 +58,9 @@ works offline, and the map degrades to the list with a note.
 
 ## The moon is always current
 
+The hero, calendar and social card use a local [NASA lunar surface image](assets/README.md)
+under the phase mask. The fixed surface rotates with the hemisphere setting.
+
 Two things show tonight's real phase, and neither is hand-drawn.
 
 - **The tab icon** is generated in the browser on every render, from the same

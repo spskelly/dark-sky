@@ -609,6 +609,8 @@
   phase times come from the meeus true-phase algorithm and are converted to your local time zone, so dates should match published almanacs to the day. the window is a planning heuristic: the moon also rises and sets, so a waxing crescent a few days past new is gone by late evening, and a waning crescent doesn't rise until the small hours. those edge days are often darker than they look. cloud cover comes from open-meteo and is a model, not a promise; the spot notes are hand-written and are <a href="#check-before-you-go">not a substitute for checking with the land manager</a>. the sky line beneath each one is not hand-written: it is sampled from the light pollution atlas at the spot and at eight bearings 10, 25 and 50 km out, so &ldquo;brightest to the northwest at 50 km&rdquo; means a town sits there, not that somebody remembers it that way.
 </p>
 
+<p class="foot credits">moon surface: <a href="https://svs.gsfc.nasa.gov/5415/">NASA&rsquo;s Scientific Visualization Studio</a>, Ernie Wright. Cropped and masked here to show the phases.</p>
+
 <script>
 // ---------- lunar phase math (meeus, astronomical algorithms ch. 49) ----------
 
@@ -739,10 +741,29 @@ function moonPath(p, cx, cy, r, hemi) {
 
 const nearNew = p => Math.min(p, 1 - p) < 0.02;
 
-function moonSvg(p, size, hemi) {
+// NASA SVS full-moon surface, derived from LRO data. See assets/README.md.
+const MOON_TEXTURE = 'assets/moon-full.jpg';
+let moonDrawingId = 0;
+
+function moonSvg(p, size, hemi, texture = MOON_TEXTURE) {
+  // Each inline moon needs its own paint/clip IDs, including after re-renders.
+  const id = `moon-${++moonDrawingId}`;
+  const lit = moonPath(p, 50, 50, 48, hemi);
   return `<svg viewBox="0 0 100 100" width="${size}" height="${size}" aria-hidden="true">
-    <circle cx="50" cy="50" r="48" fill="#0a1226" stroke="#3a4a78" stroke-width="1.5"/>
-    ${nearNew(p) ? '' : `<path d="${moonPath(p, 50, 50, 48, hemi)}" fill="var(--moon)"/>`}
+    <defs>
+      <clipPath id="${id}-disc"><circle cx="50" cy="50" r="48"/></clipPath>
+      <filter id="${id}-soft"><feGaussianBlur stdDeviation=".3"/></filter>
+      <mask id="${id}-lit" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+        <path d="${lit}" fill="white" filter="url(#${id}-soft)"/>
+      </mask>
+    </defs>
+    <circle cx="50" cy="50" r="48" fill="#0a1226" stroke="#33405c" stroke-width=".4"/>
+    ${nearNew(p) ? '' : `<g clip-path="url(#${id}-disc)" mask="url(#${id}-lit)">
+      <!-- The source disc spans roughly pixels 74–950 of a 1024px square.
+           A slight inset crops out its black background at the uneven limb. -->
+      <image href="${texture}" x="-6.367" y="-6.367" width="112.734" height="112.734"
+        transform="rotate(${hemi === 'S' ? 180 : 0} 50 50)"/>
+    </g>`}
   </svg>`;
 }
 

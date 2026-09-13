@@ -23,8 +23,9 @@ const FONT = {
 };
 
 const server = http.createServer((req, res) => {
-  res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-  res.end(fs.readFileSync(path.join(ROOT, 'index.html')));
+  const isMoon = req.url === '/assets/moon-full.jpg';
+  res.writeHead(200, { 'content-type': isMoon ? 'image/jpeg' : 'text/html; charset=utf-8' });
+  res.end(fs.readFileSync(path.join(ROOT, isMoon ? 'assets/moon-full.jpg' : 'index.html')));
 });
 await new Promise(r => server.listen(PORT, '127.0.0.1', r));
 
@@ -40,7 +41,9 @@ await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'domcontentloaded' });
 await page.waitForFunction(() => typeof moonSvg === 'function');
 
 // ask the page what the sky is doing, using the same functions the calendar uses
-const sky = await page.evaluate(() => {
+// Embed the local texture because the final card is rendered in a fresh document.
+const moonTexture = 'data:image/jpeg;base64,' + fs.readFileSync(path.join(ROOT, 'assets/moon-full.jpg')).toString('base64');
+const sky = await page.evaluate((texture) => {
   const now = new Date();
   const p = lunationFraction(now);
   const half = Math.floor(state.win / 2);
@@ -52,14 +55,14 @@ const sky = await page.evaluate(() => {
   const inWindow = now >= new Date(ws.getFullYear(), ws.getMonth(), ws.getDate()) && now < addDays(we, 1);
   const md = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   return {
-    svg: moonSvg(p, 500, 'N'),
+    svg: moonSvg(p, 500, 'N', texture),
     phase: phaseWord(p),
     illum: Math.round((1 - Math.cos(2 * Math.PI * p)) / 2 * 100),
     window: inWindow
       ? `dark-sky window now, through ${md(we)}`
       : `next dark-sky window ${md(ws)}–${we.getMonth() === ws.getMonth() ? we.getDate() : md(we)}`,
   };
-});
+}, moonTexture);
 
 // deterministic starfield, kept clear of the copy
 let seed = 20260912;
@@ -92,6 +95,7 @@ p{font-size:21px;line-height:1.5;color:#8b96b3;max-width:34ch}
 .win{display:inline-flex;align-items:center;gap:10px;font-size:21px;color:#5fc2ad}
 .win i{width:11px;height:11px;border-radius:50%;background:#5fc2ad;display:block;flex:none}
 .url{position:absolute;left:600px;bottom:46px;font-size:17px;color:#a9a58f;letter-spacing:.02em}
+.credit{position:absolute;left:50px;bottom:24px;width:500px;text-align:center;font-size:13px;color:#8b96b3}
 </style>
 <svg class="bg" viewBox="0 0 1200 630">
   <defs><radialGradient id="g" cx="25%" cy="50%" r="42%">
@@ -101,6 +105,7 @@ p{font-size:21px;line-height:1.5;color:#8b96b3;max-width:34ch}
   <circle cx="300" cy="315" r="360" fill="url(#g)"/>
 </svg>
 <div class="moon">${sky.svg}</div>
+<div class="credit">Moon surface: NASA&rsquo;s Scientific Visualization Studio</div>
 <div class="txt">
   <h1>dark sky<br><em>calendar</em></h1>
   <div class="scope">stargazing nights in the<br>carolina mountains</div>
