@@ -60,6 +60,8 @@ works offline, and the map degrades to the list with a note.
 
 The hero, calendar and social card use a local [NASA lunar surface image](assets/README.md)
 under the phase mask. The fixed surface rotates with the hemisphere setting.
+`moon-preview.html` shows eight phases offline; `npm run build:moon-preview`
+refreshes its embedded renderer and image after changes to the site.
 
 Two things show tonight's real phase, and neither is hand-drawn.
 

@@ -3,7 +3,8 @@
   "private": true,
   "description": "Tooling for the dark sky calendar. The site itself is a single index.html with no build step and no runtime dependencies; these are only used to regenerate the social card.",
   "scripts": {
-    "build:og": "node tools/build-og.mjs"
+    "build:og": "node tools/build-og.mjs",
+    "build:moon-preview": "node tools/build-moon-preview.mjs"
   },
   "devDependencies": {
     "@fontsource/fraunces": "^5.0.0",
