@@ -309,12 +309,8 @@ function applyFix(tpl, maxNative) {
   if (!line.test(next)) throw new Error('could not find the LP_TILES line in index.html');
   next = next.replace(line, `const LP_TILES = '${tpl}';`);
 
-  // the credit has to point at the folder the tiles came from, not the one
-  // that moved out from under it
-  const home = tpl.match(/^(https?:\/\/[^/]+\/astronomy\/[^/]+\/)/);
-  if (home) next = next.replace(
-    /(href=")https:\/\/djlorenz\.github\.io\/astronomy\/[^"]*(" target="_blank" rel="noopener">D\. Lorenz)/,
-    `$1${home[1]}$2`);
+  // Keep the curated attribution link: a tile directory is not an author or
+  // license page. A different provider needs a separate attribution review.
 
   if (maxNative != null) next = next.replace(/maxNativeZoom: \d+/, `maxNativeZoom: ${maxNative}`);
 

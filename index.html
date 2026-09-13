@@ -251,8 +251,8 @@
   .leaflet-control-layers-expanded { padding: 8px 12px; }
   .leaflet-bar a { background: var(--night-2); color: var(--ink); border-color: var(--line); }
   .leaflet-bar a:hover { background: var(--night-3); }
-  .leaflet-control-attribution { background: rgba(15,26,52,0.7); color: var(--ink-dim); font-size: 10px; }
-  .leaflet-control-attribution a { color: var(--moon-dim); }
+  .leaflet-container .leaflet-control-attribution { background: rgba(15,26,52,0.94); color: var(--ink-dim); font-size: 11px; line-height: 1.5; padding: 2px 6px; }
+  .leaflet-container .leaflet-control-attribution a { color: var(--moon-dim); text-decoration: underline; }
   .map-fallback { height: 100%; display: grid; place-items: center; color: var(--ink-dim); padding: 20px; text-align: center; line-height: 1.5; }
   .spot-list { max-height: 560px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
   .spot { background: var(--night-2); border-radius: 10px; padding: 12px 14px; cursor: pointer; border: 1px solid transparent; }
@@ -343,6 +343,12 @@
   .foot { max-width: 1100px; margin: 40px auto 0; color: var(--ink-dim); font-size: 13px; line-height: 1.6; max-width: 70ch; }
   .foot a { color: var(--moon-dim); }
   .foot a:hover { color: var(--moon); }
+  .source-credit { margin: 10px 0 0; color: var(--ink-dim); font-size: 11px; line-height: 1.6; }
+  .source-credit a { color: var(--moon-dim); text-underline-offset: 2px; }
+  .credits { margin-top: 16px; }
+  .credits summary { cursor: pointer; color: var(--moon-dim); }
+  .credits ul { padding-left: 18px; }
+  .credits li + li { margin-top: 12px; }
 
   /* a 26px pill is a miss with a thumb. wherever the pointer is a finger,
      every control gets a box you can hit without aiming, without touching the
@@ -503,6 +509,7 @@
 </div>
 
 <div class="cal" id="cal" role="grid"></div>
+<p class="source-credit">cloud forecasts: <a href="https://open-meteo.com/">Open-Meteo</a> (<a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>); nightly averages calculated here.</p>
 
 <section class="windows" id="when">
   <h3>upcoming dark-sky windows</h3>
@@ -556,6 +563,7 @@
     <div class="spot-list" id="spot-list"></div>
   </div>
   <button id="spot-more" aria-expanded="false" aria-controls="spot-list"></button>
+  <p class="source-credit">sky glow: <a href="https://djlorenz.github.io/astronomy/lp/">David Lorenz&rsquo;s light pollution atlas</a>. Source: <a href="https://eogdata.mines.edu/products/vnl/">EOG, Colorado School of Mines</a>. Modelled brightness overhead; <a href="https://djlorenz.github.io/astronomy/lp/colors.html">color key</a> &middot; <a href="#credits">sources &amp; credits</a>.</p>
   <aside class="disclaimer" id="check-before-you-go">
     <h4>check before you go</h4>
     <p>
@@ -610,6 +618,17 @@
 </p>
 
 <p class="foot credits">moon surface: <a href="https://svs.gsfc.nasa.gov/5415/">NASA&rsquo;s Scientific Visualization Studio</a>, Ernie Wright. Cropped and masked here to show the phases.</p>
+<details class="foot credits" id="credits">
+  <summary>sources &amp; credits</summary>
+  <ul>
+    <li><b>light pollution.</b> <a href="https://djlorenz.github.io/astronomy/lp/">David Lorenz&rsquo;s atlas</a> recalculates Pierantonio Cinzano&rsquo;s original model with 2025 nighttime-light data from <a href="https://eogdata.mines.edu/products/vnl/">Earth Observation Group, Payne Institute for Public Policy, Colorado School of Mines</a>, using NOAA VIIRS observations. The EOG data are <a href="https://eogdata.mines.edu/files/EOG_products_CC_License.pdf">CC BY 4.0</a>. The overlay is shown at reduced opacity. Its colors describe modelled artificial sky brightness at zenith, not Bortle classes.</li>
+    <li><b>maps &amp; parkway.</b> Map data &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>, <a href="https://opendatacommons.org/licenses/odbl/1-0/">ODbL 1.0</a>; elevation data: SRTM. Map style &copy; <a href="https://opentopomap.org/about">OpenTopoMap</a>, <a href="https://creativecommons.org/licenses/by-sa/3.0/">CC BY-SA 3.0</a>, dimmed for this site. The parkway line is a simplified OSM extract, available under ODbL in this page&rsquo;s source.</li>
+    <li><b>satellite imagery.</b> <a href="https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer">USDA, USGS The National Map: Orthoimagery</a>. Map services and data available from U.S. Geological Survey, National Geospatial Program.</li>
+    <li><b>weather.</b> <a href="https://open-meteo.com/">Open-Meteo</a> and its <a href="https://open-meteo.com/en/license">weather data providers</a>, <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>. Nightly averages, rounding, sky-condition icons and stargazing summaries are calculated here.</li>
+    <li><b>moon.</b> <a href="https://svs.gsfc.nasa.gov/5415/">NASA&rsquo;s Scientific Visualization Studio</a>, visualization by Ernie Wright using Lunar Reconnaissance Orbiter data. The fixed surface image is cropped, rotated for the southern view and masked to illustrate the phase. Phase calculations follow Jean Meeus, <i>Astronomical Algorithms</i>, chapter 49.</li>
+    <li><b>type &amp; software.</b> <a href="https://github.com/undercasetype/Fraunces">Fraunces</a> by the Fraunces Project Authors and <a href="https://github.com/IBM/plex">IBM Plex Sans</a> by IBM, SIL Open Font License 1.1; <a href="https://leafletjs.com/">Leaflet</a> 1.9.4, BSD 2-Clause. <a href="assets/licenses/fraunces-OFL.txt">Fraunces license</a> &middot; <a href="assets/licenses/ibm-plex-sans-OFL.txt">Plex license</a> &middot; <a href="assets/licenses/leaflet-BSD.txt">Leaflet license</a>.</li>
+  </ul>
+</details>
 
 <script>
 // ---------- lunar phase math (meeus, astronomical algorithms ch. 49) ----------
@@ -1376,13 +1395,11 @@ function focusSpot(name) {
 
 // ---------- light pollution overlay ----------
 
-// world atlas / viirs sky-brightness tiles, rendered by david lorenz and served
-// from his github pages site, which is the one source of these that is free to
-// hotlink: lightpollutionmap.info's own tiles need an api key. if the layer
-// stops drawing, this url is the line to change — he publishes a new atlas
-// every few years under a new folder (lp2020, lp2022, …).
+// Sky-brightness tiles rendered by David Lorenz using EOG/VIIRS data.
+// Public hosting alone is not a reuse license; see ATTRIBUTION.md for the
+// verified source credits and the unresolved tile-license question.
 const LP_TILES = 'https://djlorenz.github.io/astronomy/image_tiles/tiles2025/tile_{z}_{x}_{y}.png';
-const LP_ATTR = 'sky glow &copy; <a href="https://djlorenz.github.io/astronomy/image_tiles/" target="_blank" rel="noopener">D. Lorenz</a>, world atlas / VIIRS';
+const LP_ATTR = 'sky glow &copy; <a href="https://djlorenz.github.io/astronomy/lp/" target="_blank" rel="noopener">D. Lorenz</a> | Source: <a href="https://eogdata.mines.edu/products/vnl/">EOG, Colorado School of Mines</a>';
 const LP_KEY = 'darksky.lightpollution';
 
 // the layer itself, built before the layers control so the control can own it
@@ -1444,6 +1461,8 @@ function initLightPollution(map, lp) {
 // tools/build-parkway.mjs; while it is empty the map simply does without it,
 // which is the honest failure: a road drawn from memory over a map that shows
 // the real one is worse than no road at all.
+// OSM extract: © OpenStreetMap contributors, ODbL 1.0.
+// https://opendatacommons.org/licenses/odbl/1-0/ — simplified by tools/build-parkway.mjs.
 // --- parkway:start (generated, do not edit by hand) ---
 const PARKWAY = [
   [[36.48,-80.9795],[36.4735,-80.9843],[36.4642,-80.9856],[36.4611,-81.0003]],
@@ -1772,16 +1791,18 @@ function initMap() {
     return;
   }
   const map = L.map(el, { zoomControl: true, attributionControl: true });
+  // The OSM parkway remains on the imagery basemap, so this credit persists.
+  map.attributionControl.addAttribution('&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>');
   // frame the spots before any tile layer is attached, so the first tile request
   // is already for the view we mean to show
   map.fitBounds(L.latLngBounds([...SPOTS.map(s => [s.lat, s.lon]), [spotState.home.lat, spotState.home.lon]]),
     { padding: [30, 30], maxZoom: 11, animate: false });
   // no-key tile sources. topo is the default: contour lines are what you need to judge a southern horizon
   const topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap contributors, SRTM | &copy; OpenTopoMap (CC-BY-SA)', maxZoom: 17, className: 'tiles-dim',
+    attribution: 'SRTM | &copy; <a href="https://opentopomap.org/about">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC BY-SA 3.0</a>)', maxZoom: 17, className: 'tiles-dim',
   });
   const imagery = L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}', {
-    attribution: 'USGS The National Map', maxZoom: 16,
+    attribution: '<a href="https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer">USDA, USGS The National Map: Orthoimagery</a>', maxZoom: 16,
   });
   // sky glow sits on top of whichever basemap is showing rather than replacing
   // one, so it belongs in the same control as an overlay, not in a toolbar of
@@ -1987,6 +2008,7 @@ const SKY_RANGE = { clear: 'under 15% cloud', few: '15 to 40% cloud', partly: '4
 // compact thresholds, shown rather than hidden in a tooltip no phone will fire
 const SKY_SHORT = { clear: '<15%', few: '15–40%', partly: '40–65%', mostly: '65–85%', overcast: '>85%', fog: 'dew pt within 3°' };
 const skyLegend = () => `<div class="legend-sky">${Object.keys(SKY_ICON).map(k => `<span title="${SKY_RANGE[k]}">${SKY_ICON[k]}${SKY_NAME[k]} <i>${SKY_SHORT[k]}</i></span>`).join('')}</div>`;
+const weatherCredit = () => `<p class="source-credit">weather data by <a href="https://open-meteo.com/">Open-Meteo</a> (<a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>); summaries calculated here.</p>`;
 
 // before sunrise the loaded panel switches to the shorter "rest of the night"
 // wording, so guess from the clock which one is coming. getting it wrong costs
@@ -2008,7 +2030,7 @@ function renderPanel(panel) {
       <div class="hours sk" aria-hidden="true">${'<i></i>'.repeat(12)}</div>
       <div class="detail">reading the cloud model for tonight&hellip;</div>
       <div class="summary sk-lines" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
-      ${skyLegend()}`;
+      ${skyLegend()}${weatherCredit()}`;
     return;
   }
   if (panel.status === 'error' || !panel.data) {
@@ -2059,7 +2081,7 @@ function renderPanel(panel) {
     <div class="hours" role="group" aria-label="sky hour by hour">${bars}</div>
     <div class="detail" aria-live="polite"></div>
     <div class="summary"><b>${verdict}</b>, ${clearHrs} of ${idx.length} hours under 25% cloud. low ${Math.round(Math.min(...temps))}°F, wind ${Math.round(Math.min(...winds))} to ${Math.round(Math.max(...winds))} mph${rain >= 30 ? `, ${rain}% chance of rain` : ''}${fogRisk ? ', dew point close to air temp so expect fog or heavy dew' : ''}. tap or arrow through the hours for the low, mid and high cloud split.</div>
-    ${skyLegend()}`;
+    ${skyLegend()}${weatherCredit()}`;
 
   // the breakdown used to live only in a title tooltip, which a phone never shows.
   // the row is one tab stop with a roving tabindex; selecting an hour writes it out.

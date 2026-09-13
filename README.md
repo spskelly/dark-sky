@@ -264,8 +264,6 @@ often on gravel, usually with no signal.
   for ice from November into April — check
   [NPS road status](https://www.nps.gov/blri/planyourvisit/roadclosures.htm)
   before committing to a gate.
-- Tiles: [OpenTopoMap](https://opentopomap.org/) (CC-BY-SA) and USGS
-  imagery via The National Map. The sky-brightness overlay is David Lorenz's
-  [light pollution atlas](https://djlorenz.github.io/astronomy/lp2022/), built
-  from the World Atlas and VIIRS; the parkway geometry is
-  [OpenStreetMap](https://www.openstreetmap.org/copyright) (ODbL).
+- Data, imagery, map and font credits are documented in [ATTRIBUTION.md](ATTRIBUTION.md)
+  and the site's **sources & credits** section. This includes the unresolved
+  license question for David Lorenz's rendered light-pollution tiles.
