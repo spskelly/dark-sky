@@ -270,6 +270,11 @@
      not read as the same kind of claim */
   .spot .sky { margin-top: 6px; padding-left: 9px; border-left: 2px solid rgba(95,194,173,0.35);
                color: var(--dark-sky); font-size: 12.5px; line-height: 1.45; }
+  /* the spot's own band, lifted straight off the overlay. the ring keeps the
+     dark end of the scale from disappearing into the card. */
+  .spot .sky .band { display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+                     margin-right: 6px; vertical-align: baseline;
+                     box-shadow: 0 0 0 1px rgba(255,255,255,0.28); }
   .spot .links { margin-top: 6px; font-size: 12px; }
   .spot .links a { color: var(--moon-dim); text-decoration: none; margin-right: 12px; }
   .spot .links a:hover { color: var(--moon); text-decoration: underline; }
@@ -292,8 +297,10 @@
   .legend span { display: inline-flex; align-items: center; gap: 6px; }
   /* a line, not a dot, so the road reads as a route beside the pins */
   .legend .line { width: 20px; height: 3px; border-radius: 2px; background: var(--moon); box-shadow: 0 0 0 1px rgba(15,26,52,0.85); }
-  /* the overlay's own ramp, roughly: night sky through green rural to a city core */
-  .legend .ramp { width: 84px; height: 10px; border-radius: 999px; background: linear-gradient(90deg, #1b2a4d, #2f6f5a, #6fbf3f, #d8d84a, #e8a33d, #d8443a, #f2e9df); }
+  /* the overlay's own bands, filled in from SKY_SCALE at render so the key
+     cannot drift from the atlas. the fallback here is only what shows if the
+     generated block is empty, and it is deliberately vague. */
+  .legend .ramp { width: 128px; height: 10px; border-radius: 3px; background: linear-gradient(90deg, #222222, #142f72, #0f5714, #b8a625, #fd9650, #fb5a49, #f2f2f2); }
   /* .legend span above would otherwise beat the ua rule for [hidden] */
   .legend span[hidden] { display: none; }
 
@@ -541,7 +548,7 @@
     <span><i class="pin warn"></i> restricted, read the note</span>
     <span><i class="pin home"></i> home</span>
     <span class="road-key" hidden><i class="line"></i> blue ridge parkway</span>
-    <span class="lp-key" hidden><i class="ramp"></i> sky glow, darkest to city</span>
+    <span class="lp-key" hidden><i class="ramp"></i> sky glow, darkest to city core</span>
   </div>
   <div class="tonight spot-tonight" id="spot-tonight" aria-live="polite"></div>
   <div class="spot-layout">
@@ -1103,87 +1110,105 @@ const SPOTS = [
 // somebody's local knowledge, and so the measured half is visibly the measured
 // half. with the block empty the cards simply do not show a sky line.
 // --- skyglow:start (generated, do not edit by hand) ---
+const SKY_SCALE = [
+  ["#000000", "black"],
+  ["#222222", "near black"],
+  ["#424242", "charcoal"],
+  ["#142f72", "deep blue"],
+  ["#2154d8", "bright blue"],
+  ["#0f5714", "deep green"],
+  ["#1fa12a", "bright green"],
+  ["#6e641e", "olive"],
+  ["#b8a625", "yellow"],
+  ["#bf641e", "burnt orange"],
+  ["#fd9650", "bright orange"],
+  ["#fb5a49", "red"],
+  ["#fb998a", "pink"],
+  ["#a0a0a0", "grey"],
+  ["#f2f2f2", "off white"],
+  ["#ffffff", "white"],
+];
 const SKY = {
-  "Waterrock Knob":
-    "green on the overlay, the usual reading along the high ridges. brightest to the northwest at 50 km, and already brighter 10 km to the northeast, east, southwest and west; west is darker still at 50 km.",
-  "Thunder Struck Ridge Overlook":
-    "olive on the overlay, a band off the best in these mountains. brightest to the northwest at 50 km, and already brighter 10 km to the northeast, east and west; southwest through west are darker still at 50 km.",
-  "Cove Field Ridge Overlook":
-    "olive on the overlay, a band off the best in these mountains. brightest to the east at 50 km, and already brighter 10 km to the northeast; west is darker still at 50 km.",
-  "Black Balsam Knob":
-    "green on the overlay, the usual reading along the high ridges. brightest to the east at 25 km, and already brighter 10 km to the north through southeast; southwest through north stay as dark as the spot out to 50 km.",
-  "Sam Knob / Flat Laurel Creek":
-    "green on the overlay, the usual reading along the high ridges. brightest to the northeast through southeast at 50 km, and already brighter 10 km to the north through east; southwest through north stay as dark as the spot out to 50 km.",
-  "Graveyard Fields":
-    "green on the overlay, the usual reading along the high ridges. brightest to the southeast at 50 km, and already brighter 10 km to the north through southeast; southwest through north stay as dark as the spot out to 50 km.",
-  "Devil's Courthouse":
-    "green on the overlay, the usual reading along the high ridges. brightest to the northeast at 50 km; southwest through north stay as dark as the spot out to 50 km.",
-  "Cowee Mountains Overlook":
-    "green on the overlay, the usual reading along the high ridges. brightest to the east at 50 km, and already brighter 10 km to the north; north, southwest and west stay as dark as the spot out to 50 km.",
-  "Wolf Mountain Overlook":
-    "green on the overlay, the usual reading along the high ridges. brightest to the northeast at 50 km; west is darker still at 50 km.",
-  "Fryingpan Mountain tower":
-    "olive on the overlay, a band off the best in these mountains. brightest to the northeast at 25 km; west through north are darker still at 50 km.",
-  "Mount Pisgah campground":
-    "olive on the overlay, a band off the best in these mountains. brightest to the northeast at 25 km, and already brighter 10 km to the northwest through east; northwest through north are darker still at 50 km.",
-  "Cataloochee Valley":
-    "green on the overlay, the usual reading along the high ridges. brightest to the east at 50 km, and already brighter 10 km to the southeast through south; southwest is darker still at 50 km.",
-  "Mount Sterling summit":
-    "green on the overlay, the usual reading along the high ridges. brightest to the east and northwest at 50 km; northeast, south and southwest stay as dark as the spot out to 50 km.",
-  "Kuwohi (Clingmans Dome)":
-    "green on the overlay, the usual reading along the high ridges. brightest to the north at 25 km, and already brighter 10 km to the northwest through north; southeast through southwest stay as dark as the spot out to 50 km.",
-  "Cherohala Skyway, Hooper Bald":
-    "dark green on the overlay, the darkest band anywhere on this page. brightest to the north at 50 km; southeast stays as dark as the spot out to 50 km.",
-  "Panthertown Valley":
-    "green on the overlay, the usual reading along the high ridges. brightest to the southeast at 50 km, and already brighter 10 km to the southeast and southwest; west is darker still at 50 km.",
-  "Roan Highlands, Carvers Gap":
-    "green on the overlay, the usual reading along the high ridges. brightest to the northwest at 25 km, and already brighter 10 km to the northwest through east; northeast stays as dark as the spot out to 50 km.",
-  "Mayland Earth to Sky Park":
-    "green on the overlay, the usual reading along the high ridges. brightest to the southwest at 50 km, and already brighter 10 km to the east; west stays as dark as the spot out to 50 km.",
-  "PARI":
-    "green on the overlay, the usual reading along the high ridges. brightest to the southeast at 50 km, and already brighter 10 km to the east; north and southwest stay as dark as the spot out to 50 km.",
-  "Max Patch":
-    "green on the overlay, the usual reading along the high ridges. brightest to the southeast and west at 50 km; east and south stay as dark as the spot out to 50 km.",
-  "Mount Mitchell State Park":
-    "green on the overlay, the usual reading along the high ridges. brightest to the southwest at 25 km, and already brighter 10 km to the south through southwest; west stays as dark as the spot out to 50 km.",
-  "Craggy Pinnacle":
-    "olive on the overlay, a band off the best in these mountains. brightest to the southwest at 25 km, and already brighter 10 km to the south through southwest; west is darker still at 50 km.",
-  "Black Mountain Campground":
-    "green on the overlay, the usual reading along the high ridges. brightest to the east at 50 km, and already brighter 10 km to the east through southwest; west through northwest stay as dark as the spot out to 50 km.",
-  "Big Bald":
-    "green on the overlay, the usual reading along the high ridges. brightest to the north and south at 50 km, and already brighter 10 km to the north through northeast; southwest stays as dark as the spot out to 50 km.",
-  "Wiseman's View":
-    "green on the overlay, the usual reading along the high ridges. brightest to the southeast at 25 km, and already brighter 10 km to the southwest through west; west stays as dark as the spot out to 50 km.",
-  "Table Rock picnic area":
-    "green on the overlay, the usual reading along the high ridges. brightest to the southeast at 25 km, and already brighter 10 km on every side; west stays as dark as the spot out to 50 km.",
-  "Beacon Heights":
-    "olive on the overlay, a band off the best in these mountains. brightest to the southeast at 50 km, and already brighter 10 km to the west through northeast; southwest is darker still at 50 km.",
-  "Grandfather Mountain State Park":
-    "yellow on the overlay, washed by town glow. brightest to the southeast at 50 km; southwest is darker still at 50 km.",
-  "Elk Knob State Park":
-    "olive on the overlay, a band off the best in these mountains. brightest to the west at 50 km, and already brighter 10 km to the south; east and southwest are darker still at 50 km.",
-  "Doughton Park":
-    "green on the overlay, the usual reading along the high ridges. brightest to the south and west at 25 km, and already brighter 10 km to the northeast; even the quietest side, southwest through west, sits a band up.",
-  "Lake James State Park":
-    "yellow on the overlay, washed by town glow. brightest to the east at 50 km, and already brighter 10 km to the east and southwest; northwest is darker still at 50 km.",
-  "Bearwallow Mountain":
-    "yellow on the overlay, washed by town glow. brightest to the northwest at 25 km, and already brighter 10 km to the southwest through west; northwest is darker still at 50 km.",
-  "DuPont State Recreational Forest":
-    "olive on the overlay, a band off the best in these mountains. brightest to the southeast at 50 km, and already brighter 10 km to the northwest; west is darker still at 50 km.",
-  "Gorges State Park":
-    "green on the overlay, the usual reading along the high ridges. brightest to the northeast, southeast and south at 50 km, and already brighter 10 km to the west; southwest through west stay as dark as the spot out to 50 km.",
-  "Whiteside Mountain":
-    "olive on the overlay, a band off the best in these mountains. brightest to the southeast at 50 km; west is darker still at 50 km.",
-  "Wayah Bald":
-    "dark green on the overlay, the darkest band anywhere on this page. brightest to the southwest at 50 km, and already brighter 10 km to the east; west stays as dark as the spot out to 50 km.",
-  "Standing Indian Campground":
-    "dark green on the overlay, the darkest band anywhere on this page. brightest to the south at 50 km, and already brighter 10 km to the northeast; northwest stays as dark as the spot out to 50 km.",
-  "Jackrabbit Mountain":
-    "olive on the overlay, a band off the best in these mountains. brightest to the south at 50 km, and already brighter 10 km to the southwest; northwest through north are darker still at 50 km.",
-  "Huckleberry Knob":
-    "dark green on the overlay, the darkest band anywhere on this page. brightest to the north at 50 km, and already brighter 10 km to the east; southeast stays as dark as the spot out to 50 km.",
-  "Tsali Recreation Area":
-    "dark green on the overlay, the darkest band anywhere on this page. brightest to the northwest through north at 50 km, and already brighter 10 km to the east; south stays as dark as the spot out to 50 km.",
+  "Waterrock Knob": ["#1fa12a",
+    "bright green on the overlay, the usual reading along the high ridges. brightest to the northwest at 50 km, and already brighter 10 km to the northeast, east, southwest and west; west is darker still at 50 km."],
+  "Thunder Struck Ridge Overlook": ["#6e641e",
+    "olive on the overlay, a band off the best in these mountains. brightest to the northwest at 50 km, and already brighter 10 km to the northeast, east and west; southwest through west are darker still at 50 km."],
+  "Cove Field Ridge Overlook": ["#6e641e",
+    "olive on the overlay, a band off the best in these mountains. brightest to the east at 50 km, and already brighter 10 km to the northeast; west is darker still at 50 km."],
+  "Black Balsam Knob": ["#1fa12a",
+    "bright green on the overlay, the usual reading along the high ridges. brightest to the east at 25 km, and already brighter 10 km to the north through southeast; southwest through north stay as dark as the spot out to 50 km."],
+  "Sam Knob / Flat Laurel Creek": ["#1fa12a",
+    "bright green on the overlay, the usual reading along the high ridges. brightest to the northeast through southeast at 50 km, and already brighter 10 km to the north through east; southwest through north stay as dark as the spot out to 50 km."],
+  "Graveyard Fields": ["#1fa12a",
+    "bright green on the overlay, the usual reading along the high ridges. brightest to the southeast at 50 km, and already brighter 10 km to the north through southeast; southwest through north stay as dark as the spot out to 50 km."],
+  "Devil's Courthouse": ["#1fa12a",
+    "bright green on the overlay, the usual reading along the high ridges. brightest to the northeast at 50 km; southwest through north stay as dark as the spot out to 50 km."],
+  "Cowee Mountains Overlook": ["#1fa12a",
+    "bright green on the overlay, the usual reading along the high ridges. brightest to the east at 50 km, and already brighter 10 km to the north; north, southwest and west stay as dark as the spot out to 50 km."],
+  "Wolf Mountain Overlook": ["#1fa12a",
+    "bright green on the overlay, the usual reading along the high ridges. brightest to the northeast at 50 km; west is darker still at 50 km."],
+  "Fryingpan Mountain tower": ["#6e641e",
+    "olive on the overlay, a band off the best in these mountains. brightest to the northeast at 25 km; west through north are darker still at 50 km."],
+  "Mount Pisgah campground": ["#6e641e",
+    "olive on the overlay, a band off the best in these mountains. brightest to the northeast at 25 km, and already brighter 10 km to the northwest through east; northwest through north are darker still at 50 km."],
+  "Cataloochee Valley": ["#1fa12a",
+    "bright green on the overlay, the usual reading along the high ridges. brightest to the east at 50 km, and already brighter 10 km to the southeast through south; southwest is darker still at 50 km."],
+  "Mount Sterling summit": ["#1fa12a",
+    "bright green on the overlay, the usual reading along the high ridges. brightest to the east and northwest at 50 km; northeast, south and southwest stay as dark as the spot out to 50 km."],
+  "Kuwohi (Clingmans Dome)": ["#1fa12a",
+    "bright green on the overlay, the usual reading along the high ridges. brightest to the north at 25 km, and already brighter 10 km to the northwest through north; southeast through southwest stay as dark as the spot out to 50 km."],
+  "Cherohala Skyway, Hooper Bald": ["#0f5714",
+    "deep green on the overlay, the darkest band anywhere on this page. brightest to the north at 50 km; southeast stays as dark as the spot out to 50 km."],
+  "Panthertown Valley": ["#1fa12a",
+    "bright green on the overlay, the usual reading along the high ridges. brightest to the southeast at 50 km, and already brighter 10 km to the southeast and southwest; west is darker still at 50 km."],
+  "Roan Highlands, Carvers Gap": ["#1fa12a",
+    "bright green on the overlay, the usual reading along the high ridges. brightest to the northwest at 25 km, and already brighter 10 km to the northwest through east; northeast stays as dark as the spot out to 50 km."],
+  "Mayland Earth to Sky Park": ["#1fa12a",
+    "bright green on the overlay, the usual reading along the high ridges. brightest to the southwest at 50 km, and already brighter 10 km to the east; west stays as dark as the spot out to 50 km."],
+  "PARI": ["#1fa12a",
+    "bright green on the overlay, the usual reading along the high ridges. brightest to the southeast at 50 km, and already brighter 10 km to the east; north and southwest stay as dark as the spot out to 50 km."],
+  "Max Patch": ["#1fa12a",
+    "bright green on the overlay, the usual reading along the high ridges. brightest to the southeast and west at 50 km; east and south stay as dark as the spot out to 50 km."],
+  "Mount Mitchell State Park": ["#1fa12a",
+    "bright green on the overlay, the usual reading along the high ridges. brightest to the southwest at 25 km, and already brighter 10 km to the south through southwest; west stays as dark as the spot out to 50 km."],
+  "Craggy Pinnacle": ["#6e641e",
+    "olive on the overlay, a band off the best in these mountains. brightest to the southwest at 25 km, and already brighter 10 km to the south through southwest; west is darker still at 50 km."],
+  "Black Mountain Campground": ["#1fa12a",
+    "bright green on the overlay, the usual reading along the high ridges. brightest to the east at 50 km, and already brighter 10 km to the east through southwest; west through northwest stay as dark as the spot out to 50 km."],
+  "Big Bald": ["#1fa12a",
+    "bright green on the overlay, the usual reading along the high ridges. brightest to the north and south at 50 km, and already brighter 10 km to the north through northeast; southwest stays as dark as the spot out to 50 km."],
+  "Wiseman's View": ["#1fa12a",
+    "bright green on the overlay, the usual reading along the high ridges. brightest to the southeast at 25 km, and already brighter 10 km to the southwest through west; west stays as dark as the spot out to 50 km."],
+  "Table Rock picnic area": ["#1fa12a",
+    "bright green on the overlay, the usual reading along the high ridges. brightest to the southeast at 25 km, and already brighter 10 km on every side; west stays as dark as the spot out to 50 km."],
+  "Beacon Heights": ["#6e641e",
+    "olive on the overlay, a band off the best in these mountains. brightest to the southeast at 50 km, and already brighter 10 km to the west through northeast; southwest is darker still at 50 km."],
+  "Grandfather Mountain State Park": ["#b8a625",
+    "yellow on the overlay, washed by town glow. brightest to the southeast at 50 km; southwest is darker still at 50 km."],
+  "Elk Knob State Park": ["#6e641e",
+    "olive on the overlay, a band off the best in these mountains. brightest to the west at 50 km, and already brighter 10 km to the south; east and southwest are darker still at 50 km."],
+  "Doughton Park": ["#1fa12a",
+    "bright green on the overlay, the usual reading along the high ridges. brightest to the south and west at 25 km, and already brighter 10 km to the northeast; even the quietest side, southwest through west, sits a band up."],
+  "Lake James State Park": ["#b8a625",
+    "yellow on the overlay, washed by town glow. brightest to the east at 50 km, and already brighter 10 km to the east and southwest; northwest is darker still at 50 km."],
+  "Bearwallow Mountain": ["#b8a625",
+    "yellow on the overlay, washed by town glow. brightest to the northwest at 25 km, and already brighter 10 km to the southwest through west; northwest is darker still at 50 km."],
+  "DuPont State Recreational Forest": ["#6e641e",
+    "olive on the overlay, a band off the best in these mountains. brightest to the southeast at 50 km, and already brighter 10 km to the northwest; west is darker still at 50 km."],
+  "Gorges State Park": ["#1fa12a",
+    "bright green on the overlay, the usual reading along the high ridges. brightest to the northeast, southeast and south at 50 km, and already brighter 10 km to the west; southwest through west stay as dark as the spot out to 50 km."],
+  "Whiteside Mountain": ["#6e641e",
+    "olive on the overlay, a band off the best in these mountains. brightest to the southeast at 50 km; west is darker still at 50 km."],
+  "Wayah Bald": ["#0f5714",
+    "deep green on the overlay, the darkest band anywhere on this page. brightest to the southwest at 50 km, and already brighter 10 km to the east; west stays as dark as the spot out to 50 km."],
+  "Standing Indian Campground": ["#0f5714",
+    "deep green on the overlay, the darkest band anywhere on this page. brightest to the south at 50 km, and already brighter 10 km to the northeast; northwest stays as dark as the spot out to 50 km."],
+  "Jackrabbit Mountain": ["#6e641e",
+    "olive on the overlay, a band off the best in these mountains. brightest to the south at 50 km, and already brighter 10 km to the southwest; northwest through north are darker still at 50 km."],
+  "Huckleberry Knob": ["#0f5714",
+    "deep green on the overlay, the darkest band anywhere on this page. brightest to the north at 50 km, and already brighter 10 km to the east; southeast stays as dark as the spot out to 50 km."],
+  "Tsali Recreation Area": ["#0f5714",
+    "deep green on the overlay, the darkest band anywhere on this page. brightest to the northwest through north at 50 km, and already brighter 10 km to the east; south stays as dark as the spot out to 50 km."],
 };
 // --- skyglow:end ---
 
@@ -1267,6 +1292,11 @@ function visibleSpots() {
 const SPOT_PREVIEW = 6;
 const SPOT_COLLAPSE_AT = 900;
 
+// the band itself, so "the deep green one" needs no matching up against the
+// map. generated data, but it lands in a style attribute, so it is checked.
+const skySwatch = hex => (/^#[0-9a-f]{6}$/.test(hex || '')
+  ? `<i class="band" style="background:${hex}"></i>` : '');
+
 function renderSpotList() {
   const list = document.getElementById('spot-list');
   const rows = visibleSpots();
@@ -1278,7 +1308,7 @@ function renderSpotList() {
       ${s.tags.map(t => `<span class="tag">${t}</span>`).join('')}
     </div>
     <div class="note">${s.note}</div>
-    ${SKY[s.name] ? `<div class="sky">${SKY[s.name]}</div>` : ''}
+    ${SKY[s.name] ? `<div class="sky">${skySwatch(SKY[s.name][0])}${SKY[s.name][1]}</div>` : ''}
     <div class="links">${spotLinks(s)}</div>
   </div>`).join('');
   // the css only collapses the list below 900px, so the button is only visible
@@ -2145,7 +2175,21 @@ document.getElementById('cal').addEventListener('focusin', e => {
   if (c) state.focus = +c.dataset.day;
 });
 
+// the map key, filled in from the atlas's own palette. hard stops rather than a
+// blend, because the atlas has sixteen discrete bands and a smooth ramp is what
+// let two different greens read as one colour. it describes the data rather than
+// the map widget, so it does not wait on leaflet loading.
+function paintSkyKey() {
+  const ramp = document.querySelector('.legend .ramp');
+  if (!ramp || !SKY_SCALE.length) return;
+  const n = SKY_SCALE.length;
+  ramp.style.background = 'linear-gradient(90deg, ' + SKY_SCALE
+    .map(([hex], i) => `${hex} ${i / n * 100}%, ${hex} ${(i + 1) / n * 100}%`).join(', ') + ')';
+  ramp.title = SKY_SCALE.map(([, name]) => name).join(' \u2192 ');
+}
+
 renderAll();
+paintSkyKey();
 const savedHome = loadSavedHome() || HOME_DEFAULT;
 spotState.home = { lat: savedHome.lat, lon: savedHome.lon, name: savedHome.name || '' };
 initMap();

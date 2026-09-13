@@ -136,27 +136,32 @@ for (let i = 0; i <= STEPS; i++)
 //
 // the order is three greys, five dark/light hue pairs, three greys again, and
 // it is not a guess about what the colours look like. the transect fixes the
-// middle (green -> olive -> yellow -> dark orange -> orange -> red, rising into
-// town) and the reference points fix the ends and the direction, with the
+// middle (green -> olive -> yellow -> orange -> red, rising into town) and the
+// reference points fix the ends and the direction, with the
 // greys landing above red because knoxville reads #a0a0a0 while asheville, a
 // tenth the size, reads #fb5a49. the check below re-runs that argument on
 // every run rather than trusting this comment.
+//
+// the names have to survive being read next to the map. the scale is built from
+// dark/light pairs of one hue, so "green" and "dark green" is no help at all
+// when you are looking at two greens and working out which one you are standing
+// in. every name says which half of its pair it is.
 const SCALE = [
   ['#000000', 'black'],
-  ['#222222', 'dark grey'],
-  ['#424242', 'grey'],
-  ['#142f72', 'navy'],
-  ['#2154d8', 'blue'],
-  ['#0f5714', 'dark green'],
-  ['#1fa12a', 'green'],
+  ['#222222', 'near black'],
+  ['#424242', 'charcoal'],
+  ['#142f72', 'deep blue'],
+  ['#2154d8', 'bright blue'],
+  ['#0f5714', 'deep green'],
+  ['#1fa12a', 'bright green'],
   ['#6e641e', 'olive'],
   ['#b8a625', 'yellow'],
-  ['#bf641e', 'dark orange'],
-  ['#fd9650', 'orange'],
+  ['#bf641e', 'burnt orange'],
+  ['#fd9650', 'bright orange'],
   ['#fb5a49', 'red'],
   ['#fb998a', 'pink'],
-  ['#a0a0a0', 'light grey'],
-  ['#f2f2f2', 'near white'],
+  ['#a0a0a0', 'grey'],
+  ['#f2f2f2', 'off white'],
   ['#ffffff', 'white'],
 ];
 const RANK = new Map(SCALE.map(([h], i) => [h, i + 1]));
@@ -363,7 +368,11 @@ const many = dirs => dirs.length > 1 && dirs.length < 7;
 
 const notes = [];
 for (const { s, here, ring, worst, best } of summary) {
-  if (here == null) continue;
+  // rank 0 means the atlas ships no tile there, which is the floor of the scale
+  // out at sea and a failed fetch anywhere near these mountains. either way it
+  // is not a measurement, and a card is better with no sky line than with a
+  // confident one built out of nothing.
+  if (!here) continue;
   const colour = NAME.get(got.get(key(s.name, 'self')));
   const said = [];
   if (worst && worst.r > here) {
@@ -381,13 +390,23 @@ for (const { s, here, ring, worst, best } of summary) {
     : best.r === here
     ? `${where(best.dirs)} ${many(best.dirs) ? 'stay' : 'stays'} as dark as the spot out to ${best.km} km`
     : `even the quietest side, ${where(best.dirs)}, sits a band up`);
-  notes.push([s.name, `${colour} on the overlay, ${band(here)}. ${said.join('; ')}.`]);
+  // the colour travels with the sentence: a card can then show the band itself
+  // rather than ask somebody to match a word against a pixel
+  notes.push([s.name, got.get(key(s.name, 'self')),
+    `${colour} on the overlay, ${band(here)}. ${said.join('; ')}.`]);
 }
 
 const START = '// --- skyglow:start (generated, do not edit by hand) ---';
 const END = '// --- skyglow:end ---';
-const block = [START, 'const SKY = {',
-  ...notes.map(([n, t]) => `  ${JSON.stringify(n)}:\n    ${JSON.stringify(t)},`),
+// the page's map key is built from this rather than from an impression of it.
+// the old key was a seven-stop gradient with one green in it, and the atlas has
+// sixteen bands and two greens.
+const block = [START,
+  'const SKY_SCALE = [',
+  ...SCALE.map(([h, n]) => `  [${JSON.stringify(h)}, ${JSON.stringify(n)}],`),
+  '];',
+  'const SKY = {',
+  ...notes.map(([n, h, t]) => `  ${JSON.stringify(n)}: [${JSON.stringify(h)},\n    ${JSON.stringify(t)}],`),
   '};', END].join('\n');
 
 if (has('--fix')) {
@@ -396,11 +415,14 @@ if (has('--fix')) {
   // a colour the scale cannot place would put a wrong band on a card, and the
   // cards are the whole point, so refuse rather than write something plausible
   if (unknown.length) throw new Error(`refusing to write: ${unknown.length} colour(s) are not on the scale`);
+  // a run where nothing came back would otherwise quietly empty the block
+  if (notes.length < spots.length)
+    throw new Error(`refusing to write: only ${notes.length} of ${spots.length} spots got a reading`);
   fs.writeFileSync(FILE, html.slice(0, a) + block + html.slice(b + END.length));
   console.log(`\nwrote ${notes.length} sky lines into index.html`);
 } else {
   console.log('\nwhat each card would say (pass --fix to write it in):\n');
-  for (const [n, t] of notes) console.log(`  ${n}\n    ${t}`);
+  for (const [n, , t] of notes) console.log(`  ${n}\n    ${t}`);
 }
 
 const out = opt('--json');

@@ -172,10 +172,19 @@ node tools/build-skyglow.mjs --replay s.json # replay saved samples, no network
 
 `--fix` rewrites the `SKY` block in `index.html`, which the spot cards render
 under the hand-written note and visibly apart from it: one is measured, the
-other is remembered, and they age differently. The hand-written notes are never
-touched, so re-running this cannot eat somebody's local knowledge. It refuses to
-write at all if any colour turned up that the scale cannot place, because a
-wrong band on a card is worse than no card.
+other is remembered, and they age differently. Each line carries its band as a
+swatch, and the block also holds the scale itself, so the map key is drawn from
+the atlas's own sixteen colours as hard stops rather than from an impression of
+them — the key it replaced was a seven-stop blend with one green in it, and the
+atlas has two. The hand-written notes are never touched, so re-running this
+cannot eat somebody's local knowledge. It refuses to write at all if a colour
+turned up that the scale cannot place, or if any spot came back without a
+reading, because a wrong band on a card is worse than no card.
+
+The band names are chosen to survive being read next to the map. The scale is
+built from dark/light pairs of one hue, so they are *deep green* and *bright
+green* rather than *dark green* and *green*: the second pair is no use when you
+are looking at two greens and working out which one you are standing in.
 
 `--replay` takes the samples back out of a `--json` run instead of fetching, so
 the wording — the part most likely to need another pass — can be worked on, and
