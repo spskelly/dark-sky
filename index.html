@@ -3391,9 +3391,11 @@ function drawLabels(ctx, w, h) {
 
 // ---------- the sentence under the canvas ----------
 
-// 9:04pm, the way the rest of the page talks
+// 9:04pm, the way the rest of the page talks. every spot is in North
+// Carolina, so this is always Carolina time, not whatever the reader's
+// device happens to be set to.
 function panTime(d) {
-  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase().replace(/\s/g, '');
+  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }).toLowerCase().replace(/\s/g, '');
 }
 
 const PAN_DIR = ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest'];
@@ -4009,9 +4011,14 @@ function panoNight(lat, lon) {
   return out.length ? out : [new Date(now.getFullYear(), now.getMonth(), now.getDate(), 21, 0, 0)];
 }
 
+// Eastern, same as panTime and for the same reason: getHours/getMinutes read
+// the reader's own device clock, which is the wrong clock for a page about
+// North Carolina skies
 function fmtClock(d) {
-  let h = d.getHours();
-  const m = String(d.getMinutes()).padStart(2, '0');
+  const parts = new Intl.DateTimeFormat('en-US',
+    { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(d);
+  let h = Number(parts.find(p => p.type === 'hour').value);
+  const m = parts.find(p => p.type === 'minute').value;
   const ap = h < 12 ? 'am' : 'pm';
   h = h % 12 || 12;
   return h + ':' + m + ap;

@@ -455,9 +455,11 @@ function drawLabels(ctx, w, h) {
 
 // ---------- the sentence under the canvas ----------
 
-// 9:04pm, the way the rest of the page talks
+// 9:04pm, the way the rest of the page talks. every spot is in North
+// Carolina, so this is always Carolina time, not whatever the reader's
+// device happens to be set to.
 function panTime(d) {
-  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase().replace(/\s/g, '');
+  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }).toLowerCase().replace(/\s/g, '');
 }
 
 const PAN_DIR = ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest'];

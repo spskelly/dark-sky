@@ -246,6 +246,42 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   await ctx.close();
 }
 
+// --- the summary sentence and the scrubber are always Carolina time ---
+{
+  // a viewer's own device clock is the wrong clock for a page about North
+  // Carolina skies. a context whose timezone is nowhere near Eastern is the
+  // proof: if fmtClock or panTime ever went back to reading getHours()
+  // straight off the Date, this would show Tokyo's wall clock instead.
+  const ctx = await browser.newContext({ viewport: DESKTOP, timezoneId: 'Asia/Tokyo' });
+  await quiet(ctx);
+  const page = await ctx.newPage();
+  await page.goto(URL_ + '#where');
+  await page.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
+
+  const fixed = Date.UTC(2026, 11, 25, 3, 17);   // an arbitrary real instant
+  const got = await page.evaluate(t => ({ clock: fmtClock(new Date(t)), sentence: panTime(new Date(t)) }), fixed);
+
+  // computed independently, in this node process, unaffected by the page's
+  // simulated timezone -- the same algorithm fmtClock uses, written again
+  // rather than shared, so a shared bug cannot pass both
+  const parts = new Intl.DateTimeFormat('en-US',
+    { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(fixed));
+  let h = Number(parts.find(p => p.type === 'hour').value);
+  const m = parts.find(p => p.type === 'minute').value;
+  const eastern = (h % 12 || 12) + ':' + m + (h < 12 ? 'am' : 'pm');
+
+  ok(got.clock === eastern, `the scrubber label is Eastern time from a Tokyo browser (got ${got.clock}, want ${eastern})`);
+  ok(got.sentence === eastern, `and so is the summary sentence's time (got ${got.sentence})`);
+
+  // Tokyo is 13 or 14 hours ahead of Eastern, so its own wall clock for the
+  // same instant never lands on the same hour; if this ever matched, the
+  // check above would have been unable to tell "correct" from "coincidence"
+  const tokyoLocalHour = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Tokyo', hour: '2-digit', hourCycle: 'h23' })
+    .format(new Date(fixed));
+  ok(Number(tokyoLocalHour) !== h, `Tokyo's own hour differs from Eastern's for this instant (${tokyoLocalHour} vs ${h}), so the match above is not a coincidence`);
+  await ctx.close();
+}
+
 // --- the remembered tab, and the hash outranking it ---
 {
   // one context, so the two loads share a localStorage the way two visits do
