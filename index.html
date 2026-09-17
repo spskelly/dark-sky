@@ -4928,15 +4928,26 @@ function setPicking(on) {
   spotMsg(on ? 'tap anywhere on the map to set home, or press “pick on map” again to cancel' : '');
 }
 
+// picking needs a click on the map, which only has a real size once the where
+// panel has been shown at least once (leaflet reads 0x0 from a hidden one).
+// the strip that arms picking sits above every tab, so jump to the map's tab
+// first; a real click on it is what the tab bar already listens for.
+function armPicking() {
+  document.getElementById('tab-where').click();
+  setPicking(true);
+}
+
 (function initHomeControls() {
   const sel = document.getElementById('home-town');
   sel.innerHTML = TOWNS.map(([n]) => `<option value="${n}">${n}</option>`).join('')
     + '<option value="__custom">custom\u2026</option>';
   sel.addEventListener('change', () => {
     const t = TOWNS.find(([n]) => n === sel.value);
-    if (t) setHome(t[1], t[2], t[0]); else setPicking(true);
+    if (t) setHome(t[1], t[2], t[0]); else armPicking();
   });
-  document.getElementById('home-pick').addEventListener('click', () => setPicking(!spotState.picking));
+  document.getElementById('home-pick').addEventListener('click', () => {
+    if (spotState.picking) setPicking(false); else armPicking();
+  });
   document.getElementById('home-set').addEventListener('click', () =>
     setHome(parseFloat(document.getElementById('home-lat').value), parseFloat(document.getElementById('home-lon').value)));
   document.getElementById('home-geo').addEventListener('click', () => {
@@ -5068,6 +5079,25 @@ const skeletonLabel = name => new Date().getHours() < 7
   ? `rest of the night at <b>${name}</b> · sunrise <i class="sk-t"></i>`
   : `tonight at <b>${name}</b> · sunset <i class="sk-t"></i> to sunrise <i class="sk-t"></i>`;
 
+// the slice of an 8-day fetch that counts as "the rest of tonight": now (or
+// sunset) through the next sunrise. shared by the hour-by-hour panel and the
+// home strip's one-line summary, so the two never disagree about which hours
+// they are describing.
+function weatherWindow(d) {
+  const h = d.hourly, now = new Date();
+  // before dawn: the rest of the current night, now through this morning's sunrise.
+  // otherwise: tonight, from sunset through tomorrow's sunrise
+  const preDawn = now < new Date(d.daily.sunrise[0]);
+  const start = preDawn ? now : new Date(d.daily.sunset[0]);
+  const sunriseNext = new Date(preDawn ? d.daily.sunrise[0] : d.daily.sunrise[1]);
+  const idx = [];
+  for (let i = 0; i < h.time.length; i++) {
+    const t = new Date(h.time[i]);
+    if (t >= new Date(start.getTime() - 30 * 60000) && t <= sunriseNext) idx.push(i);
+  }
+  return { preDawn, start, sunriseNext, idx };
+}
+
 function renderPanel(panel) {
   const el = document.getElementById(panel.el);
   if (!panel.target) { el.innerHTML = ''; return; }
@@ -5090,17 +5120,7 @@ function renderPanel(panel) {
     return;
   }
   const d = panel.data, h = d.hourly;
-  const now = new Date();
-  // before dawn: the rest of the current night, now through this morning's sunrise.
-  // otherwise: tonight, from sunset through tomorrow's sunrise
-  const preDawn = now < new Date(d.daily.sunrise[0]);
-  const start = preDawn ? now : new Date(d.daily.sunset[0]);
-  const sunriseNext = new Date(preDawn ? d.daily.sunrise[0] : d.daily.sunrise[1]);
-  const idx = [];
-  for (let i = 0; i < h.time.length; i++) {
-    const t = new Date(h.time[i]);
-    if (t >= new Date(start.getTime() - 30 * 60000) && t <= sunriseNext) idx.push(i);
-  }
+  const { preDawn, start, sunriseNext, idx } = weatherWindow(d);
   if (!idx.length) {
     el.innerHTML = `<div class="head"><span>tonight at <b>${name}</b></span><span class="sub">cloud cover and temperature by hour</span></div>
       <div class="sky-empty">no forecast hours left in the current night.</div>`;
@@ -5158,15 +5178,34 @@ function renderPanel(panel) {
   if (hrs.length) select(0);
 }
 
+// the strip above the tabs is not the place for an hour-by-hour breakdown,
+// only enough to know whether to look up. the full picture is one click away
+// on "will it be clear?", linked from the same line.
+function renderHomeHeadline(panel) {
+  const el = document.getElementById('home-sky');
+  if (!panel.target) { el.innerHTML = ''; return; }
+  if (panel.status === 'loading') { el.textContent = 'checking tonight’s sky at home…'; return; }
+  if (panel.status === 'error' || !panel.data) { el.textContent = 'tonight’s forecast is unavailable right now.'; return; }
+  const { preDawn, idx } = weatherWindow(panel.data);
+  if (!idx.length) { el.textContent = 'no forecast hours left in the current night.'; return; }
+  const h = panel.data.hourly;
+  const clearHrs = idx.filter(i => h.cloud_cover[i] < 25).length;
+  const verdict = clearHrs >= idx.length * 0.7 ? 'mostly clear' : clearHrs >= 3 ? 'partly clear' : 'cloudy';
+  const low = Math.round(Math.min(...idx.map(i => h.temperature_2m[i])));
+  el.innerHTML = `${preDawn ? 'rest of the night' : 'tonight'} at home: <b>${verdict}</b>, low ${low}°F &middot; <a href="#tonight">hour by hour</a>`;
+}
+
 async function loadPanel(panel, target) {
   panel.target = target;
   panel.status = 'loading'; renderPanel(panel);
+  if (panel === fc.home) renderHomeHeadline(panel);
   try { panel.data = await fetchForecast(target); panel.status = 'ok'; }
   catch (e) { panel.data = null; panel.status = 'error'; }
   renderPanel(panel);
   if (panel === fc.home) {
     fc.nightly = panel.data ? summarizeNights(panel.data) : new Map();
     renderCalendar();
+    renderHomeHeadline(panel);
   }
 }
 
