@@ -244,7 +244,7 @@ out center;`;
   if (data.remark) console.log(`overpass remarked: ${data.remark}`);
   if (!data.elements?.length) {
     throw new Error('overpass returned no features at all. that is a problem with the query, ' +
-      'not with the spots \u2014 nothing below would mean anything, so stopping here.');
+      'not with the spots: nothing below would mean anything, so stopping here.');
   }
 
   const features = (data.elements || []).map(e => ({
@@ -271,7 +271,7 @@ out center;`;
         : -1;
       return tier < 0 ? null : { ...f, d, tier };
     }).filter(Boolean).sort((x, y) => (y.tier - x.tier) || (x.d - y.d));
-    if (!scored.length) { console.log(pad(s.name, 31) + '\u2014'); continue; }
+    if (!scored.length) { console.log(pad(s.name, 31) + '-'); continue; }
     const h = scored[0];
     // a way or relation reports its centroid, which for a park is a point in
     // the woods rather than its parking: report it, never apply it
@@ -280,7 +280,7 @@ out center;`;
     const why =
       h.tier === 0 ? 'name only close, check by hand'
       : h.type !== 'node' ? `${h.type} centroid, check by hand`
-      : !DESTINATION.has(h.kind) ? 'osm has the summit, we want the access \u2014 kept'
+      : !DESTINATION.has(h.kind) ? 'osm has the summit, we want the access, kept'
       : h.d < 30 ? 'already there'
       : h.d > OSM_FIX_MAX ? 'too far apart to be the same thing'
       : offRoad !== null && offRoad > OSM_ON_ROAD ? `osm's node is ${offRoad} m off the parkway, check by hand`
