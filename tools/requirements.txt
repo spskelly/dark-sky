@@ -1,0 +1,5 @@
+# tools/build_horizons.py only. the page itself has no build step and no
+# dependencies; this is the offline raycast against the USGS 3DEP tiles on S:.
+# pinned to what the interpreter this was developed against reports.
+rasterio==1.4.3
+numpy==2.3.3

@@ -1,2 +1,9 @@
 node_modules/
 tools/.osm-cache.json
+tools/.horizon-cache/
+tools/.starcat-cache/
+tools/__pycache__/
+docs/handoffs/
+docs/superpowers/
+docs/research/
+docs/lorenz-email-draft.md
