@@ -306,7 +306,7 @@
   .spot .pano, .ovl .pano { margin-top: 8px; }
   .spot .pano canvas.skyline, .ovl canvas.skyline { display: block; width: 100%; height: 54px; border-radius: 5px;
     background: #070c18; cursor: zoom-in; border: 1px solid rgba(255,255,255,0.06);
-    transition: height .18s ease; }
+    transition: height .18s ease; touch-action: pan-y; }
   .spot .pano canvas.skyline:hover { border-color: rgba(95,194,173,0.45); }
   .spot .pano canvas.skyline:focus-visible { outline: 2px solid var(--accent, #5fc2ad); outline-offset: 2px; }
   .spot .pano.open canvas.skyline, .ovl .pano.open canvas.skyline { height: 230px; cursor: zoom-out; }
@@ -3970,8 +3970,16 @@ const skySwatch = hex => (/^#[0-9a-f]{6}$/.test(hex || '')
 
 // the scrubber is remembered as a clock time, not a slider index or a date:
 // the slices are tonight's dark hours and differ every night, so an index
-// lands on a different time and a date is last night.
-const panoState = { when: new Map(Object.entries(recall('darksky.panoWhen', {}) || {})) };
+// lands on a different time and a date is last night. the heading is one
+// value shared by every spot and overlook, not one per key: it is "which way
+// am I used to looking", not part of what the scrubber remembers about a
+// particular place.
+const PANO_AZ_KEY = 'darksky.panoAz';
+function loadPanoAz() {
+  const v = Number(recall(PANO_AZ_KEY, 180));
+  return isFinite(v) ? ((v % 360) + 360) % 360 : 180;
+}
+const panoState = { when: new Map(Object.entries(recall('darksky.panoWhen', {}) || {})), az0: loadPanoAz() };
 const hhmm = d => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
 // minutes since 5pm, so 00:10 sorts after 23:50 rather than before 20:00
 const sinceFive = s => { const [h, m] = String(s).split(':').map(Number); return ((h * 60 + m) - 17 * 60 + 1440) % 1440; };
@@ -4027,7 +4035,7 @@ function paintPano(box, o) {
   const paint = () => {
     const date = nights[Number(slider.value)];
     try {
-      drawPanorama(cv, { horizon, lat, lon, elevM, date, mode: open ? 'full' : 'thumb' });
+      drawPanorama(cv, { horizon, lat, lon, elevM, date, mode: open ? 'full' : 'thumb', az0: panoState.az0 });
     } catch (e) {
       if (!window.__panoWarned) { window.__panoWarned = true; console.warn('panorama:', e); }
       box.classList.remove('open');
@@ -4049,6 +4057,50 @@ function paintPano(box, o) {
     paint();
   };
   slider.onclick = ev => ev.stopPropagation();
+
+  // the open panorama only: a closed thumbnail keeps its own fixed full turn
+  if (open) bindPanoRotate(cv, paint);
+}
+
+// drag or arrow-key the open panorama around, one shared heading for every
+// spot and overlook. pointer events cover mouse and touch alike; touch-action
+// is set in css (canvas.skyline), not here, so a vertical scroll on a phone
+// still works while a horizontal drag turns the view. a plain click (no
+// movement) has to keep doing whatever the canvas already does today -- open
+// a card's panorama, toggle nothing in a popup -- so a drag only ever marks
+// the canvas as dragged; bindSkylineToggle's own click handler is what reads
+// that mark and skips the toggle, since it is the one place a click on a card
+// canvas is ever actually handled (see the comment there).
+function bindPanoRotate(cv, paint) {
+  cv.tabIndex = 0;
+  const label = cv.getAttribute('aria-label') || 'skyline and sky';
+  cv.setAttribute('aria-label', label + ', drag or use the left and right arrow keys to turn the view');
+  const rotate = deg => {
+    panoState.az0 = ((panoState.az0 + deg) % 360 + 360) % 360;
+    remember(PANO_AZ_KEY, panoState.az0);
+    paint();
+  };
+  let dragging = false, lastX = 0;
+  cv.onpointerdown = ev => {
+    dragging = true; lastX = ev.clientX;
+    try { cv.setPointerCapture(ev.pointerId); } catch (e) {}
+  };
+  cv.onpointermove = ev => {
+    if (!dragging) return;
+    const dx = ev.clientX - lastX;
+    lastX = ev.clientX;
+    if (!dx) return;
+    cv.dataset.panoDragged = '1';
+    // a drag across the full width of the canvas turns by one field of view
+    rotate(-dx * PAN_FOV / (cv.clientWidth || 600));
+  };
+  const release = () => { dragging = false; };
+  cv.onpointerup = release;
+  cv.onpointercancel = release;
+  cv.onkeydown = ev => {
+    if (ev.key === 'ArrowLeft') { ev.preventDefault(); ev.stopPropagation(); rotate(-8); }
+    else if (ev.key === 'ArrowRight') { ev.preventDefault(); ev.stopPropagation(); rotate(8); }
+  };
 }
 
 function drawSkylines() {
@@ -4090,6 +4142,10 @@ function bindSkylineToggle() {
     const cv = ev.target.closest && ev.target.closest('canvas.skyline');
     if (!cv) return;
     ev.stopPropagation();   // the card selects the spot; the canvas does not
+    // a drag that just turned the open view also ends in a click, on mouse:
+    // bindPanoRotate marks the canvas as the drag happens, so the click that
+    // follows it can be told apart from one that never moved
+    if (cv.dataset.panoDragged) { delete cv.dataset.panoDragged; return; }
     spotState.pano = spotState.pano === cv.dataset.pano ? null : cv.dataset.pano;
     remember('darksky.pano', spotState.pano || '');
     renderSpotList();

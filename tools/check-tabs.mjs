@@ -155,6 +155,97 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   await page.close();
 }
 
+// --- the open panorama is a window that turns, and remembers where ---
+{
+  const ctx = await browser.newContext({ viewport: DESKTOP });
+  await quiet(ctx);
+  const pixHash = (page, selector) => page.$eval(selector, c => {
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let h = 0;
+    for (let i = 0; i < d.length; i += 97) h = (h * 31 + d[i]) >>> 0;
+    return h;
+  });
+
+  const a = await ctx.newPage();
+  await a.goto(URL_ + '#where');
+  await a.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
+  await a.click('#spot-list .pano canvas.skyline');
+  const box = '#spot-list .pano.open';
+  await a.waitForSelector(box);
+
+  // default heading is south, dead centre; a full turn would put every
+  // compass point somewhere on screen, a 120 degree window does not. drawn
+  // fresh here, and PAN_AZ0/panX read in the same call, because drawSkylines
+  // paints every thumbnail on the list too and leaves those module globals
+  // set from whichever canvas it drew last, not necessarily this one.
+  const centred = await a.evaluate(() => {
+    const cv = document.querySelector('#spot-list .pano.open canvas.skyline');
+    const s = SPOTS.find(x => x.name === cv.dataset.pano);
+    const horizon = decodeHorizon(HORIZONS[s.name]);
+    const lat = s.view ? s.view[0] : s.lat, lon = s.view ? s.view[1] : s.lon;
+    drawPanorama(cv, { horizon, lat, lon, elevM: s.elev * 0.3048, date: new Date(), mode: 'full', az0: panoState.az0 });
+    return { az0: PAN_AZ0, s: panX(180, 900), n: panX(0, 900) };
+  });
+  ok(centred.az0 === 180, 'the open view defaults to south');
+  ok(Math.abs(centred.s - 450) < 1e-6, `south sits at the centre of the canvas (x=${centred.s})`);
+  ok(centred.n < 0 || centred.n > 900, `north is outside the default 120 degree window (x=${centred.n})`);
+
+  const thumbBefore = await pixHash(a, '#spot-list .pano:not(.open) canvas.skyline');
+  const openBefore = await pixHash(a, box + ' canvas.skyline');
+  const cvBox = await a.$eval(box + ' canvas.skyline', c => {
+    const r = c.getBoundingClientRect();
+    return { x: r.x, y: r.y, w: r.width, h: r.height };
+  });
+
+  // drag most of the way across the open canvas: mouse down, move, up. the
+  // synthetic pointer events chromium fires alongside these are what
+  // bindPanoRotate listens for, so this exercises the same path a touch drag
+  // would.
+  await a.mouse.move(cvBox.x + cvBox.w * 0.85, cvBox.y + cvBox.h / 2);
+  await a.mouse.down();
+  await a.mouse.move(cvBox.x + cvBox.w * 0.15, cvBox.y + cvBox.h / 2, { steps: 8 });
+  await a.mouse.up();
+
+  const az = await a.evaluate(() => panoState.az0);
+  ok(az !== 180, `dragging left turned the heading off the default (now ${az.toFixed(1)})`);
+  ok(await pixHash(a, box + ' canvas.skyline') !== openBefore, 'and redrew the open canvas');
+  ok(await a.evaluate(k => JSON.parse(localStorage.getItem(k)), 'darksky.panoAz') === az, 'and stored the new heading');
+  ok(await a.evaluate(() => spotState.active) === null, 'the drag did not select the card');
+  ok(await pixHash(a, '#spot-list .pano:not(.open) canvas.skyline') === thumbBefore,
+    'a closed thumbnail elsewhere on the list is unaffected by the drag');
+  await a.close();
+
+  // a reload brings the heading back; the key is shared, not per spot
+  const b = await ctx.newPage();
+  await b.goto(URL_ + '#where');
+  await b.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
+  ok(await b.evaluate(() => panoState.az0) === az, `a reload restores the shared heading (${az.toFixed(1)})`);
+
+  // garbage under the key falls back to the same south the page opens on
+  await b.evaluate(() => localStorage.setItem('darksky.panoAz', 'not a heading'));
+  await b.close();
+  const c = await ctx.newPage();
+  await c.goto(URL_ + '#where');
+  await c.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
+  ok(await c.evaluate(() => panoState.az0) === 180, 'garbage under the heading key falls back to south');
+
+  // arrow keys turn the view when the open canvas has focus. darksky.pano
+  // may already have this card open, restored from the earlier visit, so
+  // only click if it is not -- clicking an already-open one would close it
+  if (!(await c.$(box))) await c.click('#spot-list .pano canvas.skyline');
+  await c.waitForSelector(box);
+  await c.focus(box + ' canvas.skyline');
+  const before = await c.evaluate(() => panoState.az0);
+  await c.keyboard.press('ArrowRight');
+  const afterRight = await c.evaluate(() => panoState.az0);
+  ok(afterRight !== before, `the right arrow key turns the view (${before} to ${afterRight})`);
+  await c.keyboard.press('ArrowLeft');
+  await c.keyboard.press('ArrowLeft');
+  const afterLeft = await c.evaluate(() => panoState.az0);
+  ok(afterLeft !== afterRight, 'and the left arrow key turns it back the other way');
+  await ctx.close();
+}
+
 // --- the remembered tab, and the hash outranking it ---
 {
   // one context, so the two loads share a localStorage the way two visits do
