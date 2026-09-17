@@ -124,3 +124,60 @@ No `--force` needed. Each cached profile records the coordinate it was computed
 from, so a spot whose `lat, lon` or `view:` changed recomputes itself and
 prints `coordinate moved, recomputing`. Everything else stays cached, and a
 single spot takes about 0.1 s.
+
+## Verifying that a skyline still belongs to its coordinate
+
+Added 2026-09-17, after the coordinates above were applied.
+
+The panorama is computed from the coordinate, so comparing the drawing to the
+pin proves nothing: move the pin and the drawing moves with it, staying just as
+self-consistent. `python tools/check_alignment.py` checks the chain that can
+actually break — every spot has a horizon, every horizon was raycast from the
+coordinate the page uses now, and the string in the page is still that raycast.
+As of this date all 40 pass, and the four listings that disagree with the model
+on purpose (DuPont, Gorges, Mayland, Doughton) are named in the script so the
+output stays quiet until something new breaks.
+
+There used to be a `tools/.horizon-cache/build.log`, and it cost an hour before
+it was deleted on 2026-09-17. It was not written by `build_horizons.py`: it was
+a shell redirect from one manual run, so nothing refreshed it, and its
+elevation check still listed 20 spots disagreeing by more than 30 m long after
+those coordinates were corrected. Being gitignored, it looked like tooling
+output while actually being a snapshot of one moment nobody could date. If you
+pipe a build into a file again, put the date and the commit in the first line,
+or expect to be misled by it later.
+
+## The pull-off 537 m south of Cove Field Ridge
+
+Cove Field Ridge Overlook itself measures correct: the model puts its ground at
+1409 m against a listed 4,620 ft (1408 m), and it sits 9 m off the parkway
+centreline. Its problem is not placement but aspect. The skyline walls the west
+quarter at 24 degrees and the south at 12, with those blockers 150 to 200 m
+away, which is the bank the pull-off is cut into rather than a distant ridge.
+Only the northeast through southeast is open, and there the nearest terrain is
+6 to 29 km out.
+
+`tools/sweep_road.py` measured the 13 parkway vertices within 2 km. One point
+stands out, 537 m away on a bearing of 171:
+
+| | Cove Field, as listed | the point south |
+|---|---:|---:|
+| coordinate | 35.4309, -83.0357 | 35.4261, -83.0348 |
+| model ground | 1409 m | 1448 m |
+| mean horizon | 12.3° | 7.5° |
+| south quarter (135-225°) | 12.3° | 4.9° |
+| open sky | 78.9 % | 87.1 % |
+
+USGS imagery at zoom 16 shows a paved apron at that bend, roughly 100 m
+southwest of the vertex itself; measured at the apron the south quarter reads
+5.0 to 5.5 degrees, so anywhere in that bend buys about 7 degrees of southern
+sky over the listed spot. The differences between points inside the bend are
+smaller than a 1/3 arc-second grid can resolve, so there is no point choosing
+between them by model.
+
+**Not applied, and it should not be a coordinate move.** This is a different
+place from the overlook at mp 439.4: moving Cove Field's pin here would leave
+its name, its milepost and its note describing somewhere else. It wants either
+its own entry, with whatever the pull-off is actually called, or nothing. The
+galactic core sits in this southern quarter from here, so an entry that opens
+it from 12 degrees to 5 is worth having.

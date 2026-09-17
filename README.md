@@ -250,6 +250,50 @@ compares each spot to the OpenStreetMap feature of the same name and reports the
 distance. `--fix` applies only point features — never the centroid of a park the
 size of a county, which is a spot in the woods rather than the parking.
 
+### Keeping a skyline attached to its coordinate
+
+`check-spots.mjs` says where a pin sits. `tools/check_alignment.py` says whether
+the drawn skyline still belongs to it, which is the thing that rots silently:
+revise a coordinate without rebuilding and the page draws last week's horizon
+from this week's pin, looking perfectly plausible.
+
+```sh
+python tools/check_alignment.py            # 40 spots in under a second, exit 1 if broken
+python tools/check_alignment.py --quiet    # failures only, for a hook or CI
+python tools/check_alignment.py --html other.html
+```
+
+It needs no DEM and no rasterio, because it reads the cache
+`build_horizons.py` leaves behind: every spot has a horizon, every horizon was
+raycast from the coordinate the page uses *now*, and the encoded string in the
+page is still that raycast. Then it compares the model's ground elevation
+against the listed one, reading the two kinds of spot differently — a drive-up
+should agree within about 20 m, while a walk-in spot's gap is the climb to its
+`view:` coordinate, where a *negative* gap means the viewpoint never left the
+trailhead. The four listings that disagree on purpose are named in the script
+with their reasons, so the output stays quiet until something new breaks.
+
+### Choosing a pull-off from the model
+
+`tools/check_viewpoint.py` compares two coordinates you already have.
+`tools/sweep_road.py` answers the question before that: of the road near a
+spot, which point is worth standing on.
+
+```sh
+python tools/sweep_road.py --spot "Cove Field"                   # 2 km of parkway
+python tools/sweep_road.py --spot "Cove Field" --south --radius 1500
+python tools/sweep_road.py 35.4309 -83.0357 --sector 45 135      # score the east instead
+```
+
+It walks the `PARKWAY` polyline, takes every vertex within the radius — the line
+is simplified to about 120 m, which is roughly a pull-off apart — and measures
+each, scoring a sector you choose. Both tools need the DEM tiles and the
+far-field grid, so run `build_horizons.py` once first.
+
+Both are bare earth. 3DEP models no vegetation, and the raycast starts 150 m
+out, so a pull-off's own bank and treeline are invisible to either tool. For an
+overlook whose note says the view has grown in, the model is the best case.
+
 The npm dependencies exist for that generator alone — the site itself ships
 nothing from `node_modules`. To rebuild the card by hand:
 

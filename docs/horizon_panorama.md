@@ -36,7 +36,8 @@ again: it needs `playwright`, which the elevation work does not.
 
 | If this changes | Re-run | Why |
 |---|---|---|
-| A spot's lat, lon or name in `SPOTS` | `build_horizons.py --force --only <name>`, then a plain run | The cache is keyed on the name slug, so a renamed spot silently keeps the old skyline |
+| A spot's `lat, lon` or its `view:` | `build_horizons.py` | Superseded 2026-09-17: each cached profile now records the coordinate it was computed from, so a moved spot recomputes itself and prints `coordinate moved, recomputing`. No `--force` needed |
+| A spot's **name** in `SPOTS` | `build_horizons.py --force --only <name>` | The cache is keyed on the name slug, so a rename orphans the old file and silently keeps nothing. The coordinate check cannot help here |
 | A spot is added or removed | `build_horizons.py` | Cached spots are skipped, so this only costs the new ones |
 | `ALT_MIN`, `ALT_RANGE`, or the azimuth count | `build_horizons.py --force` | The encoding changes, so every profile has to be re-encoded |
 | `MAG_LIMIT` in `build-starcat.mjs` | `node tools/build-starcat.mjs` | Changes which stars ship and which figures can close |
@@ -82,11 +83,19 @@ cell at 1759.9 m, rasterio's inverse transform picks the western at 1764.1 m.
 The 4 m gap changes no elevation-report verdict. Written down so nobody spends
 an hour on a 14 ft discrepancy.
 
-**The elevation report is a report, not a correction.** A large gap between the
-DEM and the hand-typed `elev` usually means the coordinate is the pull-off and
-the number is the summit, not that the DEM is wrong. Devil's Courthouse is
--491 ft for exactly this reason. The observer stays at the DEM height of the
-coordinate, which is where somebody actually stands.
+**The elevation report is a report, not a correction.** A gap between the DEM
+and the hand-typed `elev` usually means those two describe different places,
+not that the DEM is wrong. The observer stays at the DEM height of the
+coordinate the panorama is drawn from, which is where somebody actually stands.
+
+Revised 2026-09-17, after the viewpoints landed. The check measures `elev`
+against the **parking** where a spot carries a `view:`, because measuring it
+against the summit the panorama is drawn from reports the walk itself as an
+error. That change exposed a real inconsistency worth knowing before reading
+the report: `elev` means the viewpoint on most entries (Max Patch 4,629 against
+a view of 4,629) and the parking on a handful (Waterrock 5,820 against a lot at
+5,774 and a summit at 6,287). Neither convention was imposed. The full table is
+in [spot_viewpoints.md](spot_viewpoints.md).
 
 **Name collisions are a page-killer, not a feature-killer.** A duplicate
 top-level `const` is a SyntaxError that stops the whole script, calendar
@@ -132,8 +141,61 @@ wrong side on a night nobody happens to be checking.
 |---|---|---|
 | 2026-09-16 | Star catalogue build, warm cache | 1.1 s, byte-identical output |
 | 2026-09-16 | `tools/stars.js` | 29,868 bytes, 12,854 gzipped |
+| 2026-09-16 | Far field grid build, 15 tiles off `S:` | about 2 min, 777 MB, 10800 x 18000 float32. Max cell 2036.9 m, which is Mount Mitchell, so the mosaic georeferences correctly |
+| 2026-09-16 | 40 spots, grid cached | 0.1 to 0.2 s each, under 10 s total |
+| 2026-09-16 | Generated `HORIZONS` block | 29.5 kB for 40 spots |
+| 2026-09-17 | 19 coordinate moves plus 24 viewpoints, recompute | 0.1 s per changed spot, everything else served from cache |
 
-<!-- the first full horizon run goes here once it lands -->
+## Horizon spread, measured 2026-09-17
+
+Taken after the 19 coordinate moves, so it describes the corrected pins and not
+the originals. This is the number that says whether the thumbnail window is
+still the right one.
+
+| | mean horizon |
+|---|---|
+| Across all 40 spots | -1.1 to 13.4 degrees |
+| Flattest four | Mount Mitchell, Kuwohi, Grandfather, Black Balsam |
+| Most enclosed four | Cataloochee Valley, Standing Indian, Cove Field Ridge, Black Mountain Campground |
+
+Highest points flattest, valleys most enclosed, which is the sanity check on the
+whole pipeline in one line.
+
+**Known design limit that follows from it.** The thumbnail is scaled -3 to +24
+degrees, so it spends most of its height on terrain that a summit does not
+have, and the flat end of that range renders as a nearly straight line: correct,
+and indistinguishable from an empty box. The strip therefore compares spots well
+at the enclosed end and poorly at the open end. A test can only freeze whichever
+window is chosen, so this is recorded rather than asserted. The upgrade path is
+an adapting scale, or an explicit "open sky" state, rather than a straight line
+the reader has to interpret. Revisit the window against the spread above.
+
+**Second limit, same origin.** All 40 spots sit inside about 200 km, so the moon
+and the galactic core land within a degree or two of the same screen position on
+every one of them. Two spots side by side differ only in their ridgeline. That
+is the point of the feature, and it is not obvious from a single screenshot.
+
+## Sampling rule for eyes-on checks
+
+Behavioural assertions pass on a canvas that paints at the right size with the
+wrong content, so some looking is not optional. The trap is in how the sample is
+picked.
+
+The first eyes-on pass after the coordinate moves used the five spots whose
+coordinates had moved furthest. Four of the five came back with near flat, near
+identical horizons, which reads as a broken renderer. The renderer was correct:
+those five had all moved onto summits, because moving furthest and ending up on
+a summit are the same event here. The sample was biased by the dimension it was
+sorted on.
+
+**Pick from both ends of the range, never from the extremes of one dimension.**
+For this feature that means at least one spot from the flattest group and one
+from the most enclosed group above, and it means the check is not finished until
+the enclosed end has been looked at, because that is where the drawing carries
+information.
+
+`node tools/check-tabs.mjs --shots` renders the where tab at desktop and phone
+width and takes a path argument, so it can be pointed at a candidate copy.
 
 ## Left open
 
