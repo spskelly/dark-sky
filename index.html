@@ -1138,12 +1138,12 @@ const SPOTS = [
     note: 'highest point in the park, half-mile paved walk to the tower. gatlinburg glows to the north but south and west are black. no camping; the lot is open at night when the road is.' },
   { name: 'Cherohala Skyway, Hooper Bald', lat: 35.3042, lon: -84.0011, elev: 5290, view: [35.3059, -83.9941], kind: 'view', approach: 16, tags: ['cherohala skyway', 'darkest westward sky', 'drive-up'],
     note: 'the skyway overlooks between santeetlah gap and the tennessee line are the darkest drive-up sky in the region, with nothing to the west for a hundred miles. hooper bald is a short walk from its lot. dispersed camping is nearby off the forest roads but not at the overlooks.' },
-  { name: 'Panthertown Valley', lat: 35.1684, lon: -83.0402, elev: 3900, view: [35.1589, -83.0278], kind: 'camp', approach: 34, tags: ['nantahala nf', 'backcountry', 'granite domes'],
+  { name: 'Panthertown Valley', lat: 35.1684, lon: -83.0402, elev: 4058, view: [35.1589, -83.0278], kind: 'camp', approach: 34, tags: ['nantahala nf', 'backcountry', 'granite domes'],
     note: 'high valley with bare granite domes (salt rock, big green) that open up the sky above the trees. free dispersed camping, no permits. domes are wet and slick after dark, know your route.' },
   { name: 'Roan Highlands, Carvers Gap', lat: 36.1064, lon: -82.1105, elev: 5512, view: [36.1071, -82.1040], kind: 'camp', approach: 48, tags: ['appalachian trail', 'grass balds', 'far'],
     note: 'miles of open bald along the at; grassy ridge bald is the classic overnight. a long drive for a weekend, but the most black balsam-like sky north of it, and the rhododendron in june is a bonus.' },
   { name: 'Mayland Earth to Sky Park', lat: 35.9305, lon: -82.1825, elev: 2700, kind: 'view', approach: 38, tags: ['darksky certified park', 'observatory', 'grounds open 24h'],
-    note: 'the only darksky international certified park in the state, with the bare dark sky observatory. the 34-inch scope inside the building is ticketed event nights only, but the grounds and the parking stay open 24 hours for stargazing with your own gear, and there are telescope stations built around the building. not a camping spot, and the right place to take someone new to this.' },
+    note: 'the only darksky international certified park in the state, with the bare dark sky observatory. the 34-inch scope inside the building is ticketed event nights only, but the grounds and the parking stay open 24 hours for stargazing with your own gear, and there are telescope stations built around the building. not a camping spot, and the right place to take someone new to this. the listed elevation is uncertain: the position the park publishes sits near 2,700 feet with a 12 degree ridge to the south, the observatory mapped 166 metres away sits near 2,880 and is open all round, and the pin here is the observatory.' },
   { name: 'PARI', lat: 35.1996, lon: -82.8720, elev: 2900, kind: 'view', approach: 32, tags: ['pisgah astronomical research institute', 'book ahead'],
     note: 'former nasa tracking station turned observatory campus in the pisgah forest. never walk-up, but more available than an event calendar suggests: pari sells overnight stays, tents from about 12 dollars a person, and says observers bringing their own gear can often book a night when the site is not already reserved by a group. ask rather than wait for an event.' },
   { name: 'Max Patch', lat: 35.7963, lon: -82.9622, elev: 4629, view: [35.7970, -82.9568], kind: 'warn', approach: 26, tags: ['closed after dark', 'closed until 21 jun 2029'],
@@ -1179,10 +1179,10 @@ const SPOTS = [
   { name: 'Bearwallow Mountain', lat: 35.4607, lon: -82.3681, elev: 4232, view: [35.4610, -82.3568], kind: 'view', approach: 7, tags: ['grassy bald', 'conservation easement', 'short hike'],
     note: 'a mile up an old road to a grazed bald with a tower and a wide southern view over hickory nut gorge. conserving carolina, who hold the easement, explicitly welcome stargazing and full-moon hikes here, with no camping and no fires. come at it from the hendersonville side: bearwallow mountain road through gerton is still restricted after helene.' },
   { name: 'DuPont State Recreational Forest', lat: 35.2000, lon: -82.6200, elev: 2900, kind: 'warn', approach: 20, tags: ['open until 10pm', 'no camping'],
-    note: 'better than this page used to say. the n.c. forest service publishes 5am to 10pm every day of the year, not thirty minutes after sunset, so from about october to march there are real hours of full dark inside legal hours. camping is still banned outright, so it is an evening trip rather than a night. the granite domes are the open ground here, not the waterfall corridor most people park in.' },
+    note: 'better than this page used to say. the n.c. forest service publishes 5am to 10pm every day of the year, not thirty minutes after sunset, so from about october to march there are real hours of full dark inside legal hours. camping is still banned outright, so it is an evening trip rather than a night. the granite domes are the open ground here, not the waterfall corridor most people park in. which of the two this entry describes is unsettled: the pin sits in the waterfall corridor at about 2,300 feet, while the listed 2,900 matches the domes 2.6 km away around cedar rock, which measure far more open.' },
 
   // ---- south ----
-  { name: 'Gorges State Park', lat: 35.0960, lon: -82.9510, elev: 3000, kind: 'camp', approach: 32, tags: ['backcountry and drive-in sites', 'south facing', 'jocassee gorges'],
+  { name: 'Gorges State Park', lat: 35.0960, lon: -82.9510, elev: 3249, kind: 'camp', approach: 32, tags: ['backcountry and drive-in sites', 'south facing', 'jocassee gorges'],
     note: 'the escarpment drops two thousand feet into the jocassee gorges right in front of you, and there is almost nothing on the south carolina side to light it. one of the best southern horizons in the state for the core. book a site if you want it: the gate is locked at posted closing every night and there is no vehicle access after that, so camping is the only legal way to still be inside in the dark.' },
 
   // ---- southwest, highlands and cashiers ----
@@ -1260,6 +1260,32 @@ const HORIZONS = {
   "Jackrabbit Mountain": "JbJkJiJeJmJuJwJ4JyJ3JzJwJ1J6JuJwJgJcJhJYJVJPJQJFI0IlIxJCJDIsIkIjIuI4IuIpI1JAI+I9IzI7I2I5I4I3I2JGJiJwJuJyJ3J5J0KAKQKfKrK4LALFLGLDK7K3K3K2K3K6K9LGLNLWLXLZLYLWLZLaLbLcLdLhLhLfLdLYLULOK5KqKmKfKSKKKEKEKEKDKLKNKBJ/J5JzJwJ5J+KEKNKKJ+KAKHKTKWKNKAJ1KAKMKRKLKKKSKJKAKPKQJ9JmJPJDJJI8I4I1I7I+IuIhIYIjI1JOJwJoJXJLJJJDIxIiIgImInIUIMIcIeIRIMIJINIFIBIAH8H/IDIKIQIKIIISINIKIKIIIMIaIjIQIZIbIiIjIkIuI5I8JCJHJTJRJHJAJHJNJMJJJLJQJEIwIiIoIxI/JIJHJHJJI4InIoIhIaITIIH+H9HrHoHyH8H8H9H9IAICIPIcIhIdINIFIKIKIWIbIQINIOIOINIPIRIRIPIKICH9IEIXIqIzIoIaIMIZIjIWIOH7H4H7H1H5IBIDIBIBH4H7H2H8IAH/HrHmHmHtHyHsHzHzHvHzHsHqHsHxH4H/IDIFIBIAH3H4H4HzHwHzH3H2H3H7H7H/IEIIILIQIaIdIkImImIlIkIqI1I0IxIxIxItIrIeIbIeIhIkIoIvIrItI4I6JAJGJFI9JAJFI8JBI6I9I8I0I2I3JAJEJFJQ",
   "Huckleberry Knob": "GlGoGnGmGhGVGUGVGWGUGUGVGTGXGaGZGcGjGYGUGSGRGSGUGcGnGlGpGuGpGkGpGnGgGjGkGoGsGmGrGzGyG0G7G7G5G3GtGyGxG2G1G/HGHIHBG+HCHGHNHKHAHBG4G3G0GzG7G6G8G3G1G5G0G4GzG2G3G8G9G3GyGzG3G2G3G6G8G7G3G3G5G2GvGtGvGwGwGsGvGxG0G2G1G1G1GzGvGzGyGsG1G7G4G9GyGxGwG3G0GsGxG1G3G0GwG0G3G5G5G4G0G3GzGxGwGoGlGuGpGiGjGjGgGgGoGlGjGoGlGkGlGjGmGtGqGkGjGmGoGnGsGtGqGnGiGfGlGlGiGjGkGiGnGeGlGoGpGnGhGlGlGhGiGfGhGhGiGgGiGkGjGiGkGjGjGhGiGiGhGiGiGfGeGjGqGoGmGiGdGXGUGWGWGVGUGaGcGfGjGhGlGlGhGhGjGkGlGqGnGlGiGfGpGpGgGWGXGVGXGcGiGpGpGsGxGuGnGiGaGSGQGQGRGWGVGRGPGQGRGRGRGSGRGSGQGRGPGPGOGOGPGPGNGNGOGNGNGOGOGOGOGPGPGPGPGUGXGYGXGXGYGYGYGZGZGZGYGZGaGYGZGYGZGaGZGYGbGcGbGcGbGbGcGdGbGcGbGdGaGbGaGXGWGWGVGUGVGdGVGZGYGdGfGfGhGhGgGiGfGiGjGgGjGeGhGkGjGhGbGYGVGZGdGbGgGgGiGkGk",
   "Tsali Recreation Area": "JyJzJyJ3J6J+KAJ/J+J5J5J3J1J5KFKXKkKmK6LILZLmLmLyL3L3L7MEMEMBLyLyLyLpLpLRLHLHK3K0K0LDLDLSLVLkLlLrLwLvL8L8MINCNCNCNCNCOAOAOAOAOKOKOKN2N2NGNBNBNBMSMNMSMSMGMJMJMJL9L9LxLqLqLlLvL8L8MRMTMTMiMiMkMdMfMfMcMcMUMUMDL/L8L7LxLtLsLhLeLhLhLWLWLZLWLVLVLWLMLMLMLMLAK/K6K6KtKtKqKqKQKQKLKfK9LELcL3MMMmMqM8NRNpN+ODOOOmOqOrOtO6O/O6O/O3OvOlOlOYOWOFN/NwNaNEM8MlMQLxLYLRK1LMLLLbLmMbMbNYNYOQOQO/PDPYPdP8P8QYQYQrQ8Q8RKRKRKQ8Q8Q8Q8Q+QuQuQwQxQxQnQnQ3Q3Q5QxQ3Q3Q3QjQjQhQSQCQCPvPaPaPTO+O1OfOGNqNYNYM2M4NBNANLNGNFM3M3MvMaMNL7LlLaLMLLLPLLLFLBK+LGLPLWLSLEKvK7LBLlLlMMMMMzMzNWNWNhNhNrN6N8OOOTObOmOxOxO0OqOqOrOZOZOTOOOHOENiNSMtMiMhMULzLjLPLPLBLALBLBLBK6K4KoKoKdKbKdKdKaKeKdKkKkKsKvKvKtK7LBK9K4KzKuK1K8K9K8LALBLDLDLCLAK5KyK+LBK6KxKvKvKyKtKqKiKiKlKSKNKBJ5J0",
+};
+const VIEW_ELEV = {
+  "Waterrock Knob": [5774, 6287],
+  "Black Balsam Knob": [6147, 6211],
+  "Sam Knob / Flat Laurel Creek": [5807, 6072],
+  "Devil's Courthouse": [5468, 5748],
+  "Fryingpan Mountain tower": [4934, 5306],
+  "Mount Pisgah campground": [4852, 5707],
+  "Cataloochee Valley": [2624, 2771],
+  "Mount Sterling summit": [3890, 5835],
+  "Kuwohi (Clingmans Dome)": [6310, 6641],
+  "Cherohala Skyway, Hooper Bald": [5309, 5428],
+  "Panthertown Valley": [4058, 4194],
+  "Roan Highlands, Carvers Gap": [5510, 5824],
+  "Max Patch": [4361, 4629],
+  "Craggy Pinnacle": [5651, 5884],
+  "Big Bald": [4659, 5515],
+  "Table Rock picnic area": [3349, 3925],
+  "Beacon Heights": [4220, 4380],
+  "Grandfather Mountain State Park": [4037, 5924],
+  "Elk Knob State Park": [4515, 5538],
+  "Lake James State Park": [1194, 1218],
+  "Bearwallow Mountain": [3653, 4227],
+  "Whiteside Mountain": [4272, 4903],
+  "Wayah Bald": [5273, 5340],
+  "Huckleberry Knob": [5301, 5557],
 };
 // --- horizons:end ---
 
@@ -3596,6 +3622,13 @@ function bindSkylineToggle() {
   });
 }
 
+// lot and view, off the dem, where there is a walk between them; the listed
+// figure where there is not
+function elevTag(s) {
+  const v = VIEW_ELEV[s.name];
+  return v ? `${v[0].toLocaleString()} ft lot &middot; ${v[1].toLocaleString()} ft view` : `${s.elev.toLocaleString()} ft`;
+}
+
 function renderSpotList() {
   const list = document.getElementById('spot-list');
   const rows = visibleSpots();
@@ -3603,7 +3636,7 @@ function renderSpotList() {
     <div class="top"><span class="name">${s.name}</span><span class="dist">${s.dist.toFixed(0)} mi ${s.dir} &middot; ~${fmtDur(s.drive)}</span></div>
     <div class="tags">
       <span class="tag ${s.kind === 'camp' ? 'camp' : s.kind === 'warn' ? 'warn' : ''}">${s.kind === 'camp' ? 'camp overnight' : s.kind === 'warn' ? 'restricted' : 'viewing only'}</span>
-      <span class="tag">${s.elev.toLocaleString()} ft</span>
+      <span class="tag">${elevTag(s)}</span>
       ${s.tags.map(t => `<span class="tag">${t}</span>`).join('')}
     </div>
     <div class="note">${s.note}</div>
@@ -4110,7 +4143,7 @@ function initMap() {
   spotState.map = map;
   for (const s of SPOTS) {
     const mk = L.marker([s.lat, s.lon], { icon: pinIcon(s.kind), title: s.name })
-      .bindPopup(`<b>${s.name}</b><br>${s.elev.toLocaleString()} ft &middot; ~${fmtDur(driveMins(haversine(spotState.home, s), s))} from home<br>${s.tags.join(', ')}`);
+      .bindPopup(`<b>${s.name}</b><br>${elevTag(s)} &middot; ~${fmtDur(driveMins(haversine(spotState.home, s), s))} from home<br>${s.tags.join(', ')}`);
     mk.on('click', () => {
       spotState.active = s.name;
       loadSpotForecast(s);

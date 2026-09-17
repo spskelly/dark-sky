@@ -152,6 +152,18 @@ class TestSpotParsing(unittest.TestCase):
         self.assertEqual(bh.slug('Sam Knob / Flat Laurel Creek'), 'sam-knob-flat-laurel-creek')
 
 
+class TestViewElev(unittest.TestCase):
+
+    def test_only_spots_with_a_walk_get_a_pair_in_whole_feet(self):
+        spots = [{'name': 'Mount Sterling summit', 'has_view': True},
+                 {'name': 'Cove Field Ridge Overlook', 'has_view': False}]
+        results = {'Mount Sterling summit': {'dem_m': 1778.5},
+                   'Cove Field Ridge Overlook': {'dem_m': 1409.0}}
+        lots = {'Mount Sterling summit': 1185.7}
+        self.assertEqual(bh.view_elev_js(spots, results, lots),
+                         'const VIEW_ELEV = {\n  "Mount Sterling summit": [3890, 5835],\n};')
+
+
 class TestLattice(unittest.TestCase):
 
     def test_sampling_maps_north_to_row_zero_and_west_to_column_zero(self):

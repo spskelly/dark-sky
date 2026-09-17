@@ -145,6 +145,7 @@ wrong side on a night nobody happens to be checking.
 | 2026-09-16 | 40 spots, grid cached | 0.1 to 0.2 s each, under 10 s total |
 | 2026-09-16 | Generated `HORIZONS` block | 29.5 kB for 40 spots |
 | 2026-09-17 | 19 coordinate moves plus 24 viewpoints, recompute | 0.1 s per changed spot, everything else served from cache |
+| 2026-09-17 | Generated block with `VIEW_ELEV` added (24 lot and view pairs, feet, off the DEM) | 30.4 kB for 40 spots, up from 29.5 |
 
 ## Horizon spread, measured 2026-09-17
 

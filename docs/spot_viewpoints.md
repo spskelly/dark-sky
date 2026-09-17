@@ -97,17 +97,27 @@ night. The builder's elevation check compares `elev` against the parking where
 a `view:` exists, so whichever convention you pick, it will tell you which
 entries do not follow it.
 
-**Four spots still disagree by more than 30 m with no viewpoint to explain it:**
+**Four spots disagreed by more than 30 m with no viewpoint to explain it.
+Settled with Shawn 2026-09-17:**
 
-- **DuPont**, listed 2900 against a pin at 2305. The research found 2900
-  matches the granite domes, not the waterfall corridor the pin sits in. Either
-  the pin or the figure is describing the wrong part of the forest.
-- **Gorges**, listed 3000 against 3249 at the corrected Grassy Ridge access.
-- **Mayland**, listed 2700 against 2876 at the observatory. The move is medium
-  confidence: Mayland's own published GPS and OSM's observatory node disagree
-  by 166 m and 53 m of height, so one of them is on the hillside. Worth a
-  phone call rather than another query.
-- **Panthertown**, listed 3900 against a corrected access at 4058.
+- **Gorges**, listed 3000, now 3249, the DEM at the corrected Grassy Ridge
+  access. A stale figure.
+- **Panthertown**, listed 3900, now 4058, the DEM at the corrected access.
+- **DuPont**, left at 2900 against a pin at 2305, and the note now says the
+  entry is unsettled: the pin is in the waterfall corridor, 2900 matches the
+  granite domes 2.6 km away around Cedar Rock. Still open: which part of the
+  forest the entry is for.
+- **Mayland**, left at 2700 against 2876 at the observatory, and the note now
+  says the listed elevation is uncertain and why: the published GPS and OSM's
+  observatory node disagree by 166 m and 53 m of height. Still open, and only
+  somebody at the park can close it.
+
+**The card now shows both elevations where there is a walk** (2026-09-17):
+`3,890 ft lot · 5,835 ft view` on the 24 spots with a `view:`, the listed
+`elev` on the other 16. Both figures come off the DEM, written by
+`build_horizons.py` as the generated `VIEW_ELEV` block next to `HORIZONS`, so
+they follow a moved coordinate on the next build. The hand-typed `elev` is
+untouched and still feeds the forecast's elevation downscaling.
 
 **Two spots are low confidence and flagged in the research:** Kuwohi, where the
 original coordinate was the summit rather than the access and moving the pin at
@@ -132,7 +142,7 @@ Added 2026-09-17, after the coordinates above were applied.
 The panorama is computed from the coordinate, so comparing the drawing to the
 pin proves nothing: move the pin and the drawing moves with it, staying just as
 self-consistent. `python tools/check_alignment.py` checks the chain that can
-actually break — every spot has a horizon, every horizon was raycast from the
+actually break: every spot has a horizon, every horizon was raycast from the
 coordinate the page uses now, and the string in the page is still that raycast.
 As of this date all 40 pass, and the four listings that disagree with the model
 on purpose (DuPont, Gorges, Mayland, Doughton) are named in the script so the

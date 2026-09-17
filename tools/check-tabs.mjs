@@ -115,6 +115,11 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   else ok(cv.backing === Math.round(cv.client * cv.dpr),
     `skyline canvas painted at panel width (${cv.client} css px, ${cv.backing} device px)`);
 
+  // a hike-in spot shows the climb, a drive-up spot shows one figure
+  const tags = await page.$$eval('#spot-list .tag', els => els.map(e => e.textContent));
+  ok(tags.includes('3,890 ft lot · 5,835 ft view'), 'mount sterling shows lot and view elevation');
+  ok(tags.includes('4,620 ft'), 'cove field, with no walk, shows one');
+
   // this panel is drawn twice: once by renderSpotList at load, once when the
   // tab first opens. a skyline has to take one click to open and one to close,
   // not two of each, which is what a listener bound per draw would cost.

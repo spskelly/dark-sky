@@ -308,6 +308,16 @@ def write_json(rec):
     return go
 
 
+def view_elev_js(spots, results, lots):
+    """[lot ft, view ft] for each spot with a walk, both off the dem, so the card
+    can show the climb. the hand typed elev cannot do this: it means the view on
+    most entries and the parking on a handful."""
+    body = ''.join('  %s: [%d, %d],\n' % (json.dumps(s['name']), round(lots[s['name']] / 0.3048),
+                                          round(results[s['name']]['dem_m'] / 0.3048))
+                   for s in spots if s['has_view'] and s['name'] in results and s['name'] in lots)
+    return 'const VIEW_ELEV = {\n' + body + '};'
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--dry-run', action='store_true', help='say what the real run would do, compute nothing')
@@ -400,6 +410,7 @@ def main():
     # not that the dem is wrong, so this reports and does not correct.
     print()
     bad = 0
+    lots = {}
     for s in todo:
         rec = results.get(s['name'])
         if not rec:
@@ -411,6 +422,7 @@ def main():
         if s['has_view']:
             fine = fine_lattice(s['lat'], s['lon'])
             here = float(fine.sample(np.array([s['lat']]), np.array([s['lon']]))[0])
+            lots[s['name']] = here
         else:
             here = rec['dem_m']
         d = here - s['elev_ft'] * 0.3048
@@ -430,7 +442,8 @@ def main():
              + '\nconst HORIZON_ALT_MIN = %g;   // degrees' % ALT_MIN
              + '\nconst HORIZON_ALT_RANGE = %g;  // degrees, so %g .. %g'
              % (ALT_RANGE, ALT_MIN, ALT_MIN + ALT_RANGE)
-             + '\nconst HORIZONS = {\n' + body + '\n};\n' + END)
+             + '\nconst HORIZONS = {\n' + body + '\n};\n'
+             + view_elev_js(spots, results, lots) + '\n' + END)
 
     print('\n%d spots, %.1f kB of index.html' % (len(results), len(block.encode()) / 1024))
     if args.only:
