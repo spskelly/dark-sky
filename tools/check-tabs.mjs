@@ -417,6 +417,32 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   await page.close();
 }
 
+// --- the sky viewer on a tall phone canvas ---
+{
+  // the field of view is set across the width, so a portrait canvas sees far
+  // below the horizon. whatever is down there has to be ground, never more sky
+  const ctx = await browser.newContext({ viewport: PHONE });
+  await quiet(ctx);
+  const page = await ctx.newPage();
+  await page.goto(URL_ + '#where');
+  await page.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
+  await page.evaluate(() => openSkyViewerForSpot('Waterrock Knob'));
+  await page.waitForSelector('#sky-viewer[open]');
+  await page.waitForTimeout(200);
+  const low = await page.$eval('.sky-viewer-canvas', cv => {
+    const g = cv.getContext('2d');
+    const d = g.getImageData(0, Math.floor(cv.height * 0.9), cv.width, Math.floor(cv.height * 0.08)).data;
+    let bright = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i] + d[i + 1] + d[i + 2] > 110) bright++;
+    return { bright, tall: cv.height > cv.width };
+  });
+  ok(low.tall, 'the phone viewer canvas is taller than it is wide');
+  ok(low.bright === 0, `and the bottom of it is ground, with no sky under the ridge (${low.bright} bright pixels)`);
+  const sub = await page.$eval('.sky-viewer-elev', e => e.textContent);
+  ok(!sub.includes('&') && sub.includes('ft'), `the elevation line is text, not markup (${sub})`);
+  await ctx.close();
+}
+
 // --- the home strip above the tabs ---
 {
   // a made-up forecast, flat on purpose: 10 per cent cloud and 50 degrees every

@@ -461,32 +461,47 @@ function drawGridView(ctx, view, w, h) {
   if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
 }
 
-// the ridge, closed down to a wall well below anything ever drawn: 360
-// samples of the horizon (or a flat line at 0 when none is modelled, which is
-// what a picked point gets before terrain from phase 2 exists) projected
-// twice, once at the crest and once 30 degrees under it, split into the runs
-// still in front of the viewer and filled between the two.
+// the same projection with nothing culled, for the one shape that has to go
+// all the way round: the ridge ring. stereographic is finite everywhere but
+// the point directly behind the viewer, so the depth is held just short of it.
+function panProjectAll(alt, az, view) {
+  const p = panViewFrame(panWorldVec(alt, az), view.az0, view.alt0);
+  const factor = 2 / (1 + Math.max(p.z2, -0.996));
+  const scale = panViewScale(view.fov, view.w);
+  return { x: view.w / 2 + scale * p.x2 * factor, y: view.h / 2 + scale * p.y2 * factor };
+}
+
+// the ridge: 360 samples of the horizon (or a flat line at 0 when none is
+// modelled, which is what a picked point gets without terrain). the ground is
+// everything on the far side of that ring from the zenith, however far down
+// the canvas reaches: a portrait phone sees 60 degrees below the horizon, and
+// a wall 30 degrees deep let the sky come back underneath it. in this
+// projection the point behind the viewer is at infinity, so whichever side of
+// the ring holds it is the unbounded side.
+// ponytail: ring sampled per degree with straight chords. if the ridge passes
+// within a degree of the point directly behind the viewer a chord can cut the
+// canvas; only reachable looking at or below the horizon. sample finer there
+// if it ever shows.
 function drawRidgeView(ctx, horizon, view, w, h) {
   const altAt = horizon ? (az => horizonAt(horizon, az)) : (() => 0);
-  const top = [], bot = [];
-  for (let az = 0; az < 360; az++) {
-    top.push(panProject(altAt(az), az, view));
-    bot.push(panProject(-30, az, view));
-  }
-  const usable = top.map((t, i) => (t && bot[i]) ? t : null);
+  const top = [];
+  for (let az = 0; az < 360; az++) top.push(panProject(altAt(az), az, view));
   const g = ctx.createLinearGradient(0, 0, 0, h);
   g.addColorStop(0, '#0b1226');
   g.addColorStop(1, '#03060f');
-  for (const run of panRuns(usable, true)) {
-    if (run.length < 2) continue;
-    ctx.beginPath();
-    ctx.moveTo(top[run[0]].x, top[run[0]].y);
-    for (let k = 1; k < run.length; k++) ctx.lineTo(top[run[k]].x, top[run[k]].y);
-    for (let k = run.length - 1; k >= 0; k--) ctx.lineTo(bot[run[k]].x, bot[run[k]].y);
-    ctx.closePath();
-    ctx.fillStyle = g;
-    ctx.fill();
+  ctx.beginPath();
+  for (let az = 0; az < 360; az++) {
+    const p = panProjectAll(altAt(az), az, view);
+    if (az === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+  }
+  ctx.closePath();
+  const behindIsGround = -view.alt0 < altAt(view.az0 + 180);
+  if (behindIsGround) ctx.rect(-1, -1, w + 2, h + 2);
+  ctx.fillStyle = g;
+  ctx.fill('evenodd');
 
+  for (const run of panRuns(top, true)) {
+    if (run.length < 2) continue;
     // the rim of sky light along the crest, same as the flat ridge
     ctx.beginPath();
     ctx.moveTo(top[run[0]].x, top[run[0]].y);
