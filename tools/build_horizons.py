@@ -289,8 +289,31 @@ def parse_spots(html):
     return spots
 
 
+def parse_overlooks(html):
+    """the generated OVERLOOKS block: one json object per line, written by
+    tools/build-overlooks.mjs. a page that has not had it added yet has none."""
+    if 'const OVERLOOKS = [' not in html:
+        return []
+    block = html.split('const OVERLOOKS = [', 1)[1].split('];', 1)[0]
+    return [json.loads(line.strip().rstrip(','))
+            for line in block.splitlines() if line.strip().startswith('{')]
+
+
 def slug(name):
     return re.sub(r'-+', '-', re.sub(r'[^a-z0-9]+', '-', name.lower())).strip('-')
+
+
+def cache_name(s):
+    """overlooks are keyed on their osm id: two can share a name, and one can
+    share a name with a curated spot, whose cache is keyed on the name slug."""
+    return ('ov-%s.json' % s['ov_id']) if s.get('ov_id') else slug(s['name']) + '.json'
+
+
+def overlook_horizons_js(overlooks, results):
+    body = ''.join('  %s: [%d, %s],\n' % (json.dumps(o['id']), round(results['ov:' + o['id']]['dem_m'] / 0.3048),
+                                          json.dumps(encode(results['ov:' + o['id']]['alt'])))
+                   for o in overlooks if 'ov:' + o['id'] in results)
+    return 'const OVERLOOK_HORIZONS = {\n' + body + '};'
 
 
 def save_atomic(path, write):
@@ -334,7 +357,13 @@ def main():
     spots = parse_spots(html)
     if not spots:
         sys.exit('no spots found in index.html; the SPOTS block may have been reformatted')
-    todo = [s for s in spots if not args.only or args.only.lower() in s['name'].lower()]
+    overlooks = parse_overlooks(html)
+    for s in spots:
+        s['key'] = s['name']
+    ov_spots = [{'name': o['name'], 'key': 'ov:' + o['id'], 'ov_id': o['id'],
+                 'lat': o['lat'], 'lon': o['lon'], 'view_lat': o['lat'], 'view_lon': o['lon'],
+                 'has_view': False, 'elev_ft': None} for o in overlooks]
+    todo = [s for s in spots + ov_spots if not args.only or args.only.lower() in s['name'].lower()]
     if not todo:
         sys.exit('--only %r matched nothing' % args.only)
 
@@ -343,13 +372,13 @@ def main():
     # the answer away is not a preview of the work, it is the work with the
     # ending cut off, and the name lies about what it costs.
     if args.dry_run:
-        cached = [s for s in todo if os.path.exists(os.path.join(CACHE, slug(s['name']) + '.json'))]
+        cached = [s for s in todo if os.path.exists(os.path.join(CACHE, cache_name(s)))]
         fresh = [s for s in todo if s not in cached] if not args.force else todo
         if args.force:
             cached = []
         grid = os.path.join(CACHE, 'coarse_1as.npy')
         have_grid = os.path.exists(grid) and not args.force
-        print('%d spots in index.html, %d selected' % (len(spots), len(todo)))
+        print('%d spots and %d overlooks in index.html, %d selected' % (len(spots), len(overlooks), len(todo)))
         print('  %d already cached, %d to compute' % (len(cached), len(fresh)))
         print('  far field grid: %s' % ('cached, %.0f MB' % (os.path.getsize(grid) / 1e6)
                                         if have_grid else 'not built, about 2 minutes and 777 MB'))
@@ -369,7 +398,7 @@ def main():
 
     results = {}
     for i, s in enumerate(todo, 1):
-        path = os.path.join(CACHE, slug(s['name']) + '.json')
+        path = os.path.join(CACHE, cache_name(s))
         if os.path.exists(path) and not args.force:
             with open(path, encoding='utf-8') as f:
                 rec = json.load(f)
@@ -380,7 +409,7 @@ def main():
             moved = (abs(rec.get('lat', 1e9) - s['view_lat']) > 1e-9
                      or abs(rec.get('lon', 1e9) - s['view_lon']) > 1e-9)
             if not moved:
-                results[s['name']] = rec
+                results[s['key']] = rec
                 print('[%d/%d] %s ... cached' % (i, len(todo), s['name']), flush=True)
                 continue
             print('[%d/%d] %s ... coordinate moved, recomputing' % (i, len(todo), s['name']), flush=True)
@@ -397,12 +426,12 @@ def main():
         # is inlined into index.html. that is deliberate: distance graded haze and
         # peak labels both want the range, and holding it here means adding them
         # later costs an inlining step rather than another 7 GB read off S:.
-        rec = {'name': s['name'], 'lat': s['view_lat'], 'lon': s['view_lon'],
+        rec = {'name': s['name'], 'ov_id': s.get('ov_id'), 'lat': s['view_lat'], 'lon': s['view_lon'],
                'from_view': s['has_view'], 'dem_m': h,
                'alt': [round(float(a), 4) for a in alt],
                'range_m': [float(x) for x in rng]}
         save_atomic(path, write_json(rec))
-        results[s['name']] = rec
+        results[s['key']] = rec
         print('[%d/%d] %s ... %.1fs' % (i, len(todo), s['name'], time.time() - t), flush=True)
 
     # 40 hand typed elevations in feet, against the model. a big disagreement
@@ -410,11 +439,15 @@ def main():
     # not that the dem is wrong, so this reports and does not correct.
     print()
     bad = 0
+    curated = 0
     lots = {}
     for s in todo:
-        rec = results.get(s['name'])
+        if s['elev_ft'] is None:
+            continue
+        rec = results.get(s['key'])
         if not rec:
             continue
+        curated += 1
         # compare the listed elev against the coordinate it describes. where a
         # spot carries a view:, elev is the parking, and measuring it against
         # the summit the panorama is drawn from would report a gap that is the
@@ -430,7 +463,7 @@ def main():
             bad += 1
             print('elev check: %-36s dem %5.0f ft, listed %5.0f ft, %+5.0f m'
                   % (s['name'], here / 0.3048, s['elev_ft'], d))
-    print('elev check: %d of %d spots disagree by more than 30 m' % (bad, len(results)))
+    print('elev check: %d of %d spots disagree by more than 30 m' % (bad, curated))
     if bad:
         print('  a large gap usually means the listed coordinate is not the listed viewpoint.')
         print('  the observer stays at the dem height of the coordinate, which is where')
@@ -443,9 +476,11 @@ def main():
              + '\nconst HORIZON_ALT_RANGE = %g;  // degrees, so %g .. %g'
              % (ALT_RANGE, ALT_MIN, ALT_MIN + ALT_RANGE)
              + '\nconst HORIZONS = {\n' + body + '\n};\n'
-             + view_elev_js(spots, results, lots) + '\n' + END)
+             + view_elev_js(spots, results, lots) + '\n' + overlook_horizons_js(overlooks, results) + '\n' + END)
 
-    print('\n%d spots, %.1f kB of index.html' % (len(results), len(block.encode()) / 1024))
+    print('\n%d spots and %d overlooks, %.1f kB of index.html'
+          % (len([s for s in spots if s['key'] in results]),
+             len([o for o in overlooks if 'ov:' + o['id'] in results]), len(block.encode()) / 1024))
     if args.only:
         print('--only run, index.html left alone so a partial set cannot replace the full one')
         return

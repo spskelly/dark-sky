@@ -164,6 +164,34 @@ class TestViewElev(unittest.TestCase):
                          'const VIEW_ELEV = {\n  "Mount Sterling summit": [3890, 5835],\n};')
 
 
+class TestOverlooks(unittest.TestCase):
+
+    HTML = ('const OVERLOOKS = [\n'
+            '  {"id":"n11","name":"Pounding Mill Overlook","lat":35.3301,"lon":-82.8001,"mp":413.2},\n'
+            '  {"id":"w7","name":"View Waynesville","lat":35.45,"lon":-83},\n'
+            '];\n')
+
+    def test_parses_the_generated_block(self):
+        ov = bh.parse_overlooks(self.HTML)
+        self.assertEqual([o['id'] for o in ov], ['n11', 'w7'])
+        self.assertEqual(ov[1]['lon'], -83.0)
+
+    def test_a_page_without_the_block_has_no_overlooks(self):
+        self.assertEqual(bh.parse_overlooks('const SPOTS = [];'), [])
+
+    def test_cache_files_are_keyed_on_the_id_not_the_name(self):
+        # two overlooks can share a name, and one can share a name with a spot
+        self.assertEqual(bh.cache_name({'name': 'View Waynesville', 'ov_id': 'w7'}), 'ov-w7.json')
+        self.assertEqual(bh.cache_name({'name': 'View Waynesville'}), 'view-waynesville.json')
+
+    def test_block_carries_feet_and_the_encoded_horizon(self):
+        results = {'ov:n11': {'dem_m': 1283.2, 'alt': [0.0] * 360}}
+        js = bh.overlook_horizons_js([{'id': 'n11'}, {'id': 'w7'}], results)
+        self.assertTrue(js.startswith('const OVERLOOK_HORIZONS = {\n  "n11": [4210, "'))
+        self.assertNotIn('w7', js)   # no dem coverage, no entry, and the page copes
+        self.assertTrue(js.endswith('\n};'))
+
+
 class TestLattice(unittest.TestCase):
 
     def test_sampling_maps_north_to_row_zero_and_west_to_column_zero(self):

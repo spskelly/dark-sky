@@ -101,10 +101,12 @@ def main():
 
     html = open(a.html, encoding='utf-8', newline='').read()
     sp, drawn = spots(html), page_horizons(html)
-    cache = {}
+    cache, ov_cache = {}, {}
     for path in glob.glob(os.path.join(CACHE, '*.json')):
         d = json.load(open(path, encoding='utf-8'))
-        if 'name' in d:
+        if d.get('ov_id'):
+            ov_cache[d['ov_id']] = d
+        elif 'name' in d:
             cache[d['name']] = d
 
     fail, warn = [], []
@@ -151,6 +153,24 @@ def main():
                 say('  %-34s %+5.0f m, known: %s' % (name[:34], gap, KNOWN[name]))
             else:
                 warn.append(msg)
+
+    # the overlooks: every one in the page has a horizon, raycast from the
+    # coordinate the page has now, and the string in the page is that raycast
+    ov_block = html.split('const OVERLOOKS = [', 1)[1].split('];', 1)[0] if 'const OVERLOOKS = [' in html else ''
+    ovs = [json.loads(l.strip().rstrip(',')) for l in ov_block.splitlines() if l.strip().startswith('{')]
+    ov_drawn = {}
+    if 'const OVERLOOK_HORIZONS = {' in html:
+        blk = html.split('const OVERLOOK_HORIZONS = {', 1)[1].split('\n};', 1)[0]
+        ov_drawn = dict(re.findall(r'"([^"]+)": \[\d+, "([A-Za-z0-9+/]+)"\]', blk))
+    for o in ovs:
+        rec, enc = ov_cache.get(o['id']), ov_drawn.get(o['id'])
+        if rec is None or enc is None:
+            fail.append('%s (%s): no horizon' % (o['name'], o['id']))
+        elif abs(rec['lat'] - o['lat']) > 1e-9 or abs(rec['lon'] - o['lon']) > 1e-9:
+            fail.append('%s (%s): horizon was raycast from a different coordinate' % (o['name'], o['id']))
+        elif max(abs(a - b) for a, b in zip(decode(enc), rec['alt'])) > ALT_RANGE / 4095.0:
+            fail.append('%s (%s): the page string is not this raycast' % (o['name'], o['id']))
+    say('%d overlooks checked' % len(ovs))
 
     for w in warn:
         print('WARN  %s' % w)
