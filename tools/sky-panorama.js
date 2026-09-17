@@ -38,17 +38,61 @@ function horizonAt(horizon, azDeg) {
 }
 
 // ---------- projection ----------
-// cylindrical: azimuth linear across the full turn, altitude linear.
-// the full view is -10 to +80. the thumbnail keeps a fixed window of its own,
-// -3 to +24: on the full scale a sixty pixel strip gives a typical ridge nine
-// pixels and it reads as a smudge. every thumbnail shares the one window, so
-// two spots side by side still compare honestly.
+// cylindrical: azimuth linear, altitude linear. the open view is a window onto
+// the cylinder, PAN_FOV degrees of azimuth centred on a heading the reader can
+// turn, altitude -5 to +40 so a degree of azimuth and a degree of altitude cost
+// about the same pixels on screen. the thumbnail keeps the full turn and its
+// own fixed altitude window, -3 to +24: on that scale a sixty pixel strip gives
+// a typical ridge nine pixels and it reads as a smudge. every thumbnail shares
+// the one window, so two spots side by side still compare honestly.
 // ponytail: module-level rather than threaded through every draw call. one
 // canvas is drawn at a time and nothing here is reentrant.
-let PAN_TOP = 80;
-let PAN_BOT = -10;
+const PAN_FOV = 120;   // degrees of azimuth across the open view. the full turn
+                       // read as a smear once it had to share the canvas with
+                       // stars and labels; 120 keeps a degree of azimuth close
+                       // to a degree of altitude (the window below is 45 tall)
+                       // so turning to face something feels like turning.
+let PAN_TOP = 40;
+let PAN_BOT = -5;
+let PAN_AZ0 = 180;     // heading at the centre of the view being drawn. thumb
+                       // mode (a full turn) leaves this at 180, which is where
+                       // the old fixed mapping put the left edge; nothing in a
+                       // full turn depends on where that edge falls.
+let PAN_FOV_DEG = 360; // the current draw's azimuth window: 360 for a thumb's
+                       // full turn, PAN_FOV for the open view.
 
-const panX = (az, w) => (((az % 360) + 360) % 360) / 360 * w;
+// azimuth to x, no wrapping: az is trusted to already be in the frame the
+// caller wants, either a raw sweep index or an azimuth already folded near
+// PAN_AZ0 by wrapNear below. pure, so it is what tools/test-panorama.mjs
+// exercises directly.
+function azToX(az, az0, fovDeg, w) {
+  return (az - az0 + fovDeg / 2) / fovDeg * w;
+}
+// the copy of az, mod 360, nearest centre: a point off to the side of the
+// window lands a bounded, predictable distance off-canvas instead of wherever
+// its raw degree value happens to fall. not safe on a value a sweep or a
+// chain has already unwrapped relative to a neighbour -- that value is
+// deliberately allowed outside +/-180 of centre, which is the whole point of
+// unwrapping it, and folding it back here would undo that.
+function wrapNear(az, center) {
+  const d = ((az - center) % 360 + 540) % 360 - 180;
+  return center + d;
+}
+// the point mapping: az resolved to its nearest copy of centre, then placed.
+// at the thumb defaults (centre 180, a 360 degree window) wrapNear is the
+// identity for any az already in [0, 360), so this is byte-for-byte the old
+// unwrapped formula for every input the old code ever saw.
+const panX = (az, w) => azToX(wrapNear(az, PAN_AZ0), PAN_AZ0, PAN_FOV_DEG, w);
+// the raw mapping, for a sweep or a chain that has already placed az in the
+// frame it wants (the ridge's two ends have to land on 0 and w, not the same
+// point, which wrapNear would do to them).
+const panXLin = (az, w) => azToX(az, PAN_AZ0, PAN_FOV_DEG, w);
+// pixels per full physical turn: the wrap-repeat copies below try a point one
+// turn either side of its raw position, in case that is the copy nearest the
+// window. one turn is the whole canvas in thumb mode, three canvas widths in
+// the open window, which is also why the open window never needs more than
+// the one nearby copy: the other two land two turns away, off-canvas by a lot.
+const panTurnPx = w => 360 / PAN_FOV_DEG * w;
 const panY = (alt, h) => (PAN_TOP - alt) / (PAN_TOP - PAN_BOT) * h;
 
 // ---------- sky positions ----------
@@ -99,8 +143,12 @@ function drawPanorama(canvas, opts) {
   ctx.clearRect(0, 0, w, h);
 
   const thumb = opts.mode === 'thumb';
-  PAN_TOP = thumb ? 24 : 80;
-  PAN_BOT = thumb ? -3 : -10;
+  PAN_TOP = thumb ? 24 : 40;
+  PAN_BOT = thumb ? -3 : -5;
+  PAN_FOV_DEG = thumb ? 360 : PAN_FOV;
+  // a heading off the end of a turn, or not a number at all (nothing stored
+  // yet, or a garbage value), falls back to the same south the page opens on
+  PAN_AZ0 = thumb ? 180 : (isFinite(opts.az0) ? ((opts.az0 % 360) + 360) % 360 : 180);
   if (thumb) {
     drawRidge(ctx, opts.horizon, w, h, true);
     return true;
@@ -137,6 +185,7 @@ function drawSkyWash(ctx, w, h) {
 function milkyWayPath(ctx, sky, halfWidth, w, h) {
   ctx.beginPath();
   let prev = null;
+  const turn = panTurnPx(w);
   for (let l = 0; l <= 360; l += 2) {
     // fat and bright toward sagittarius, thin toward the anticentre, which is
     // what the eye actually recognises as the milky way
@@ -148,10 +197,10 @@ function milkyWayPath(ctx, sky, halfWidth, w, h) {
         let az = p.az;
         while (az - ref > 180) az -= 360;
         while (az - ref < -180) az += 360;
-        return { x: az / 360 * w, y: panY(p.alt, h) };
+        return { x: panXLin(az, w), y: panY(p.alt, h) };
       });
       for (let k = -1; k <= 1; k++) {
-        const dx = k * w;
+        const dx = k * turn;
         ctx.moveTo(pts[0].x + dx, pts[0].y);
         ctx.lineTo(pts[1].x + dx, pts[1].y);
         ctx.lineTo(pts[2].x + dx, pts[2].y);
@@ -183,12 +232,13 @@ function drawMilkyWay(ctx, sky, w, h) {
     const x = panX(core.az, w);
     const y = panY(core.alt, h);
     const r = Math.max(34, w * 0.055);
+    const turn = panTurnPx(w);
     for (let k = -1; k <= 1; k++) {
-      const g = ctx.createRadialGradient(x + k * w, y, 0, x + k * w, y, r);
+      const g = ctx.createRadialGradient(x + k * turn, y, 0, x + k * turn, y, r);
       g.addColorStop(0, 'rgba(236,231,212,0.14)');
       g.addColorStop(1, 'rgba(236,231,212,0)');
       ctx.fillStyle = g;
-      ctx.fillRect(x + k * w - r, y - r, r * 2, r * 2);
+      ctx.fillRect(x + k * turn - r, y - r, r * 2, r * 2);
     }
     if (core.alt > 2) {
       ctx.fillStyle = 'rgba(169,165,143,0.85)';
@@ -241,6 +291,7 @@ function drawStars(ctx, sky, w, h) {
 function drawFigures(ctx, seen, w, h) {
   if (typeof CONSTELLATION_LINES === 'undefined' || !CONSTELLATION_LINES) return;
   ctx.beginPath();
+  const turn = panTurnPx(w);
   for (let r = 0; r < CONSTELLATION_LINES.length; r++) {
     const run = CONSTELLATION_LINES[r];
     for (let i = 1; i < run.length; i++) {
@@ -254,8 +305,8 @@ function drawFigures(ctx, seen, w, h) {
       // to leave that segment out rather than to draw a great circle.
       if (Math.abs(az - a.az) > 60) continue;
       for (let k = -1; k <= 1; k++) {
-        ctx.moveTo(panX(a.az, w) + k * w, panY(a.alt, h));
-        ctx.lineTo(az / 360 * w + k * w, panY(b.alt, h));
+        ctx.moveTo(panXLin(a.az, w) + k * turn, panY(a.alt, h));
+        ctx.lineTo(panXLin(az, w) + k * turn, panY(b.alt, h));
       }
     }
   }
@@ -313,7 +364,7 @@ function drawGrid(ctx, w, h) {
   ctx.strokeStyle = 'rgba(95,116,173,0.20)';
   ctx.lineWidth = 1;
   ctx.setLineDash([2, 5]);
-  [20, 40, 60].forEach(function (a) {
+  [10, 20, 30].forEach(function (a) {
     const y = Math.round(panY(a, h)) + 0.5;
     ctx.beginPath();
     ctx.moveTo(0, y);
@@ -333,13 +384,24 @@ function drawGrid(ctx, w, h) {
   ctx.setLineDash([]);
 }
 
+// the ridge sweeps degree by degree, thumb mode always the full turn, the
+// open view only the window plus one degree of pad either side so the crest
+// stroke does not stop short of the edge. leftAz/rightAz can land off a whole
+// degree when the reader has dragged the heading, which is why the sweep
+// itself runs from the whole degrees either side while the two bottom
+// corners of the fill close on the exact edges.
 function drawRidge(ctx, horizon, w, h, thumb) {
+  const leftAz = thumb ? 0 : PAN_AZ0 - PAN_FOV_DEG / 2;
+  const rightAz = thumb ? 360 : PAN_AZ0 + PAN_FOV_DEG / 2;
+  const from = Math.floor(leftAz), to = Math.ceil(rightAz);
+  const altAt = i => horizon[((Math.round(i) % 360) + 360) % 360];
+
   ctx.beginPath();
-  ctx.moveTo(0, h);
-  for (let i = 0; i <= 360; i++) {
-    ctx.lineTo(i / 360 * w, panY(horizon[i % 360], h));
+  ctx.moveTo(panXLin(leftAz, w), h);
+  for (let i = from; i <= to; i++) {
+    ctx.lineTo(panXLin(i, w), panY(altAt(i), h));
   }
-  ctx.lineTo(w, h);
+  ctx.lineTo(panXLin(rightAz, w), h);
   ctx.closePath();
 
   const g = ctx.createLinearGradient(0, panY(PAN_TOP * 0.3, h), 0, h);
@@ -351,10 +413,10 @@ function drawRidge(ctx, horizon, w, h, thumb) {
   // a rim of sky light along the crest. without it the silhouette reads as a
   // hole punched in the canvas rather than as a ridge with sky behind it.
   ctx.beginPath();
-  for (let i = 0; i <= 360; i++) {
-    const x = i / 360 * w;
-    const y = panY(horizon[i % 360], h);
-    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  for (let i = from; i <= to; i++) {
+    const x = panXLin(i, w);
+    const y = panY(altAt(i), h);
+    if (i === from) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   }
   if (!thumb) {
     ctx.save();
@@ -375,22 +437,18 @@ function drawLabels(ctx, w, h) {
   if ('letterSpacing' in ctx) ctx.letterSpacing = '0.14em';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'alphabetic';
+  // this only ever draws the open window, never a full turn, so each compass
+  // point has exactly one position; whichever of the 8 fall outside the
+  // window land off-canvas and are simply not seen, same as a star would be.
   for (let i = 0; i < 8; i++) {
     ctx.fillStyle = i === 0 ? 'rgba(236,231,212,0.8)' : 'rgba(169,165,143,0.7)';
-    if (i === 0) {
-      // north is both ends of a full turn, so it is labelled at both ends,
-      // nudged in far enough not to be clipped
-      ctx.fillText('N', 11, h - 6);
-      ctx.fillText('N', w - 11, h - 6);
-    } else {
-      ctx.fillText(PAN_COMPASS[i], panX(i * 45, w), h - 6);
-    }
+    ctx.fillText(PAN_COMPASS[i], panX(i * 45, w), h - 6);
   }
   if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
   ctx.font = '10px "IBM Plex Sans", system-ui, sans-serif';
   ctx.textAlign = 'left';
   ctx.fillStyle = 'rgba(139,150,179,0.7)';
-  [20, 40, 60].forEach(function (a) {
+  [10, 20, 30].forEach(function (a) {
     ctx.fillText(a + '°', 6, panY(a, h) - 4);
   });
 }
