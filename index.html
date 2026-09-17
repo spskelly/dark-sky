@@ -2975,7 +2975,8 @@ const CONSTELLATION_LINES = [
      HORIZON_ALT_MIN, HORIZON_ALT_RANGE, HORIZONS   from the generated
                         horizons block, which is why they are not declared here
 
-   public: decodeHorizon(s), drawPanorama(canvas, opts), horizonSummary(opts)
+   public: decodeHorizon(s), drawPanorama(canvas, opts), horizonSummary(opts),
+            panProject(alt, az, view), panDir16(az)
 */
 
 const PAN_D2R = Math.PI / 180;
@@ -3059,6 +3060,74 @@ const panXLin = (az, w) => azToX(az, PAN_AZ0, PAN_FOV_DEG, w);
 const panTurnPx = w => 360 / PAN_FOV_DEG * w;
 const panY = (alt, h) => (PAN_TOP - alt) / (PAN_TOP - PAN_BOT) * h;
 
+// ---------- stereographic projection, for the dialog viewer ----------
+// the open view above is a flat cylinder: fast, and right for a strip meant
+// to compare spots, but it tears apart anything wider than about 60 degrees.
+// the dialog looks around freely, so it needs a projection that keeps angles
+// honest wherever the reader turns: stereographic, centred on the view
+// direction, conformal (a circle on the sky is still a circle on screen),
+// and the one real all-sky cameras use for the same reason.
+
+// alt/az to a unit vector, east-north-up
+function panWorldVec(altDeg, azDeg) {
+  const alt = altDeg * PAN_D2R, az = azDeg * PAN_D2R;
+  return { x: Math.cos(alt) * Math.sin(az), y: Math.cos(alt) * Math.cos(az), z: Math.sin(alt) };
+}
+
+// rotates a world vector into the view frame: first the heading (a rotation
+// about the up axis, which only ever shifts azimuth), then the altitude (a
+// rotation about the resulting east axis) so the view centre lands on the
+// frame's own z axis. z2 is then the cosine of the angular distance from the
+// view centre for every point, x2/y2 its right/up components. the altitude
+// step's angle is 90 - alt0, which passes through zero rather than blowing up
+// as alt0 reaches 90 -- looking straight up needs no special case here.
+function panViewFrame(v, az0, alt0) {
+  const a0 = az0 * PAN_D2R;
+  const x1 = v.x * Math.cos(a0) - v.y * Math.sin(a0);
+  const y1 = v.x * Math.sin(a0) + v.y * Math.cos(a0);
+  const phi = (90 - alt0) * PAN_D2R;
+  const cp = Math.cos(phi), sp = Math.sin(phi);
+  return { x2: x1, y2: y1 * cp - v.z * sp, z2: y1 * sp + v.z * cp };
+}
+
+// pixels per unit of the stereographic radius, 2*tan(half the angular
+// distance from the view centre). that radius depends only on the angular
+// distance, never on which direction it is measured in -- x2/y2 above sit on
+// a circle of radius sin(c) at every c, whichever way x2 and y2 split it --
+// so calibrating against fov/2 of pure altitude gives the same scale as
+// calibrating fov/2 of pure azimuth would, without the azimuth version's
+// failure mode: an azimuth offset from a view centre near the zenith is
+// still almost the zenith itself, and the reference point collapses toward
+// the pole instead of landing fov/2 away from it.
+function panViewScale(fov, w) {
+  const half = (fov / 2) * PAN_D2R;
+  return (w / 2) / (2 * Math.tan(half / 2));
+}
+
+// beyond this, 1+z2 is still comfortably away from zero (that only happens
+// 180 degrees out, directly behind the viewer) but the point is not worth
+// drawing, and the caller can skip the segment instead of stretching it
+const PAN_CULL_COS = Math.cos(100 * PAN_D2R);
+
+// the pure function every draw routine in the dialog goes through: alt/az to
+// canvas pixel, or null when the point is more than 100 degrees from the view
+// centre. view is { az0, alt0, fov, w, h }.
+// ponytail: recomputes the view scale on every call rather than caching it on
+// the view object. a full redraw is a few thousand calls, comfortably under a
+// millisecond of trig; cache it if a profiler ever says otherwise.
+function panProject(alt, az, view) {
+  const v = panWorldVec(alt, az);
+  const p = panViewFrame(v, view.az0, view.alt0);
+  if (p.z2 < PAN_CULL_COS) return null;
+  const scale = panViewScale(view.fov, view.w);
+  const factor = 2 / (1 + p.z2);
+  // y2 falls as altitude rises (the frame's own "up" is toward the view
+  // centre, not the canvas edge), and canvas y already runs the other way
+  // from screen "up", so the two flips cancel: higher altitude wants a
+  // smaller y, which is scale * y2 added, not subtracted.
+  return { x: view.w / 2 + scale * p.x2 * factor, y: view.h / 2 + scale * p.y2 * factor };
+}
+
 // ---------- sky positions ----------
 
 // one place that turns a J2000 right ascension and declination into where it
@@ -3096,7 +3165,10 @@ function galAltAz(l, b, ctxSky) {
 
 function drawPanorama(canvas, opts) {
   const ctx = canvas.getContext && canvas.getContext('2d');
-  if (!ctx || !opts.horizon) return false;
+  // the dialog viewer draws with no horizon at all -- a flat line and a
+  // caveat, for a picked point before phase 2's terrain exists -- so only
+  // the older modes, which have nothing to fall back to, require one
+  if (!ctx || (!opts.horizon && opts.mode !== 'view')) return false;
 
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.clientWidth || canvas.width;
@@ -3115,6 +3187,10 @@ function drawPanorama(canvas, opts) {
   PAN_AZ0 = thumb ? 180 : (isFinite(opts.az0) ? ((opts.az0 % 360) + 360) % 360 : 180);
   if (thumb) {
     drawRidge(ctx, opts.horizon, w, h, true);
+    return true;
+  }
+  if (opts.mode === 'view') {
+    drawSkyView(ctx, w, h, opts);
     return true;
   }
 
@@ -3417,6 +3493,299 @@ function drawLabels(ctx, w, h) {
   });
 }
 
+// ---------- the dialog viewer (stereographic) ----------
+// same drawing job as the flat open view above -- wash, milky way, stars,
+// figures, moon, grid, ridge -- but every point goes through panProject
+// instead of panX/panY. a null from panProject means "not in front of the
+// viewer", so a line or a quad with a null end is just skipped: there is no
+// wrap-copy loop to write here, because a stereographic view never has to
+// repeat itself to cover the seam the way the cylinder does.
+
+function drawSkyWashView(ctx, w, h, view) {
+  // brightest at the true horizon below the view centre, same reasoning as
+  // the flat wash: the very bottom of the canvas is behind the ridge
+  const horizon = panProject(0, view.az0, view) || { y: h * 0.7 };
+  const g = ctx.createLinearGradient(0, 0, 0, horizon.y);
+  g.addColorStop(0, '#060b19');
+  g.addColorStop(0.7, '#0e1834');
+  g.addColorStop(1, '#17254a');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
+}
+
+function milkyWayPathView(ctx, sky, halfWidth, view) {
+  ctx.beginPath();
+  let prev = null;
+  for (let l = 0; l <= 360; l += 2) {
+    const b = halfWidth * (0.42 + 0.58 * (0.5 + 0.5 * Math.cos(l * PAN_D2R)));
+    const top = galAltAz(l, b, sky), bot = galAltAz(l, -b, sky);
+    if (prev) {
+      const pts = [
+        panProject(prev.top.alt, prev.top.az, view),
+        panProject(prev.bot.alt, prev.bot.az, view),
+        panProject(bot.alt, bot.az, view),
+        panProject(top.alt, top.az, view),
+      ];
+      if (pts.every(Boolean)) {
+        ctx.moveTo(pts[0].x, pts[0].y);
+        ctx.lineTo(pts[1].x, pts[1].y);
+        ctx.lineTo(pts[2].x, pts[2].y);
+        ctx.lineTo(pts[3].x, pts[3].y);
+        ctx.closePath();
+      }
+    }
+    prev = { top: top, bot: bot };
+  }
+}
+
+function drawMilkyWayView(ctx, sky, view, w, h) {
+  const bands = [[22, 0.015], [17, 0.018], [12, 0.020], [7.5, 0.023], [3.5, 0.027]];
+  const blurred = 'filter' in ctx;
+  if (blurred) ctx.filter = 'blur(9px)';
+  for (let i = 0; i < bands.length; i++) {
+    milkyWayPathView(ctx, sky, bands[i][0], view);
+    ctx.fillStyle = 'rgba(198,208,238,' + bands[i][1] + ')';
+    ctx.fill();
+  }
+  if (blurred) ctx.filter = 'none';
+
+  const core = galAltAz(0, 0, sky);
+  const cp = panProject(core.alt, core.az, view);
+  if (cp) {
+    const r = Math.max(34, w * 0.055);
+    const g = ctx.createRadialGradient(cp.x, cp.y, 0, cp.x, cp.y, r);
+    g.addColorStop(0, 'rgba(236,231,212,0.14)');
+    g.addColorStop(1, 'rgba(236,231,212,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(cp.x - r, cp.y - r, r * 2, r * 2);
+    if (core.alt > 2) {
+      ctx.fillStyle = 'rgba(169,165,143,0.85)';
+      ctx.font = '11px "IBM Plex Sans", system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('galactic core', cp.x, cp.y - r * 0.52);
+    }
+  }
+}
+
+function drawStarsView(ctx, sky, view, w, h) {
+  const list = (typeof STARS !== 'undefined' && STARS) || [];
+  const limit = starMagLimit(w);
+  const seen = new Array(list.length);
+  ctx.fillStyle = '#e9edf8';
+  for (let i = 0; i < list.length; i++) {
+    const mag = list[i][2];
+    if (mag > limit) { seen[i] = null; continue; }
+    const p = panAltAz(list[i][0], list[i][1], sky);
+    const at = panProject(p.alt, p.az, view);
+    seen[i] = at;
+    if (!at) continue;
+    const r = Math.max(0.4, 1.7 - 0.30 * mag);
+    ctx.globalAlpha = Math.max(0.2, Math.min(1, 1.02 - 0.16 * mag));
+    ctx.beginPath();
+    ctx.arc(at.x, at.y, r, 0, Math.PI * 2);
+    ctx.fill();
+    if (mag < 1.0) {
+      ctx.globalAlpha = 0.13;
+      ctx.beginPath();
+      ctx.arc(at.x, at.y, r * 3.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+  drawFiguresView(ctx, seen);
+}
+
+function drawFiguresView(ctx, seen) {
+  if (typeof CONSTELLATION_LINES === 'undefined' || !CONSTELLATION_LINES) return;
+  ctx.beginPath();
+  for (let r = 0; r < CONSTELLATION_LINES.length; r++) {
+    const run = CONSTELLATION_LINES[r];
+    for (let i = 1; i < run.length; i++) {
+      const a = seen[run[i - 1]], b = seen[run[i]];
+      if (!a || !b) continue;
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+    }
+  }
+  ctx.strokeStyle = 'rgba(152,172,224,0.17)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+function drawMoonView(ctx, sky, view) {
+  const m = moonAltAz(sky);
+  const p = panProject(m.alt, m.az, view);
+  if (!p) return;
+  const r = 9;
+
+  const g = ctx.createRadialGradient(p.x, p.y, r, p.x, p.y, r * 5);
+  g.addColorStop(0, 'rgba(236,231,212,0.17)');
+  g.addColorStop(1, 'rgba(236,231,212,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(p.x - r * 5, p.y - r * 5, r * 10, r * 10);
+
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.fillStyle = '#101c3a';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(95,116,173,0.5)';
+  ctx.lineWidth = 0.75;
+  ctx.stroke();
+
+  const k = Math.max(0, Math.min(1, m.illum));
+  if (k > 0.02) {
+    // the zenith direction on screen tilts away from straight up once the
+    // view looks away from the moon; a point nudged a degree higher in
+    // altitude, projected the same way, says which way it tilted here.
+    const up = panProject(Math.min(90, m.alt + 1), m.az, view) || { x: p.x, y: p.y - 1 };
+    const upAngle = Math.atan2(up.y - p.y, up.x - p.x);
+    ctx.rotate(upAngle - (m.limbPA || 0) * PAN_D2R);
+    ctx.beginPath();
+    ctx.ellipse(0, 0, r, r, 0, -Math.PI / 2, Math.PI / 2, false);
+    ctx.ellipse(0, 0, r * Math.abs(1 - 2 * k), r, 0, Math.PI / 2, -Math.PI / 2, k < 0.5);
+    ctx.closePath();
+    ctx.fillStyle = '#ece7d4';
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// a run of samples is a path only where every point in it is in front of the
+// viewer; split on every null instead of drawing through it, so a line or a
+// filled ridge never stretches across the gap where the back of the view
+// would otherwise be. circular joins the last run back onto the first when
+// both ends of the sweep are visible, for a sweep around a full circle
+// (the ridge, an altitude ring) rather than a line with two real ends (an
+// azimuth line, alt -10 to 90).
+function panRuns(points, circular) {
+  const runs = [];
+  let cur = null;
+  for (let i = 0; i < points.length; i++) {
+    if (points[i]) { (cur || (cur = [])).push(i); }
+    else if (cur) { runs.push(cur); cur = null; }
+  }
+  if (cur) runs.push(cur);
+  if (circular && runs.length > 1 && points[0] && points[points.length - 1]) {
+    const first = runs[0], last = runs[runs.length - 1];
+    if (first[0] === 0 && last[last.length - 1] === points.length - 1) {
+      runs.pop();
+      runs[0] = last.concat(first);
+    }
+  }
+  return runs;
+}
+
+function panStrokeRuns(ctx, pts, circular) {
+  for (const run of panRuns(pts, circular)) {
+    if (run.length < 2) continue;
+    ctx.beginPath();
+    run.forEach(function (i, k) {
+      const p = pts[i];
+      if (k === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+    });
+    ctx.stroke();
+  }
+}
+
+// altitude circles every 10 degrees, azimuth lines every 45, compass letters
+// at the horizon. looking straight up, every altitude circle is the same
+// angular distance from the view centre at every azimuth, so it survives as
+// one circular run rather than being cut into pieces -- that is the case
+// panRuns's circular join exists for.
+function drawGridView(ctx, view, w, h) {
+  ctx.strokeStyle = 'rgba(95,116,173,0.20)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([2, 5]);
+  for (let a = -10; a <= 90; a += 10) {
+    const pts = [];
+    for (let az = 0; az <= 360; az += 5) pts.push(panProject(a, az, view));
+    panStrokeRuns(ctx, pts, true);
+  }
+  ctx.setLineDash([2, 7]);
+  ctx.strokeStyle = 'rgba(95,116,173,0.13)';
+  for (let az = 0; az < 360; az += 45) {
+    const pts = [];
+    for (let a = -10; a <= 90; a += 5) pts.push(panProject(a, az, view));
+    panStrokeRuns(ctx, pts, false);
+  }
+  ctx.setLineDash([]);
+
+  ctx.font = '10px "IBM Plex Sans", system-ui, sans-serif';
+  if ('letterSpacing' in ctx) ctx.letterSpacing = '0.14em';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  for (let i = 0; i < 8; i++) {
+    const p = panProject(0, i * 45, view);
+    if (!p) continue;
+    ctx.fillStyle = i === 0 ? 'rgba(236,231,212,0.8)' : 'rgba(169,165,143,0.7)';
+    ctx.fillText(PAN_COMPASS[i], p.x, p.y - 6);
+  }
+  if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+}
+
+// the ridge, closed down to a wall well below anything ever drawn: 360
+// samples of the horizon (or a flat line at 0 when none is modelled, which is
+// what a picked point gets before terrain from phase 2 exists) projected
+// twice, once at the crest and once 30 degrees under it, split into the runs
+// still in front of the viewer and filled between the two.
+function drawRidgeView(ctx, horizon, view, w, h) {
+  const altAt = horizon ? (az => horizonAt(horizon, az)) : (() => 0);
+  const top = [], bot = [];
+  for (let az = 0; az < 360; az++) {
+    top.push(panProject(altAt(az), az, view));
+    bot.push(panProject(-30, az, view));
+  }
+  const usable = top.map((t, i) => (t && bot[i]) ? t : null);
+  const g = ctx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, '#0b1226');
+  g.addColorStop(1, '#03060f');
+  for (const run of panRuns(usable, true)) {
+    if (run.length < 2) continue;
+    ctx.beginPath();
+    ctx.moveTo(top[run[0]].x, top[run[0]].y);
+    for (let k = 1; k < run.length; k++) ctx.lineTo(top[run[k]].x, top[run[k]].y);
+    for (let k = run.length - 1; k >= 0; k--) ctx.lineTo(bot[run[k]].x, bot[run[k]].y);
+    ctx.closePath();
+    ctx.fillStyle = g;
+    ctx.fill();
+
+    // the rim of sky light along the crest, same as the flat ridge
+    ctx.beginPath();
+    ctx.moveTo(top[run[0]].x, top[run[0]].y);
+    for (let k = 1; k < run.length; k++) ctx.lineTo(top[run[k]].x, top[run[k]].y);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(140,164,220,0.10)';
+    ctx.lineWidth = 11;
+    ctx.stroke();
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(132,152,204,0.5)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+  if (!horizon) {
+    const label = panProject(0, view.az0, view);
+    if (label) {
+      ctx.font = '11px "IBM Plex Sans", system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(236,231,212,0.75)';
+      ctx.fillText('terrain not modelled', label.x, label.y + 16);
+    }
+  }
+}
+
+function drawSkyView(ctx, w, h, opts) {
+  const view = { az0: opts.az0, alt0: opts.alt0, fov: opts.fov, w: w, h: h };
+  const sky = skyContext(opts);
+  drawSkyWashView(ctx, w, h, view);
+  drawMilkyWayView(ctx, sky, view, w, h);
+  drawStarsView(ctx, sky, view, w, h);
+  drawMoonView(ctx, sky, view);
+  drawGridView(ctx, view, w, h);
+  drawRidgeView(ctx, opts.horizon, view, w, h);
+}
+
 // ---------- the sentence under the canvas ----------
 
 // 9:04pm, the way the rest of the page talks. every spot is in North
@@ -3428,6 +3797,14 @@ function panTime(d) {
 
 const PAN_DIR = ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest'];
 const panDir = az => PAN_DIR[Math.round((((az % 360) + 360) % 360) / 45) % 8];
+
+// the sixteen-point compass, for the dialog's own "looking south-southwest"
+// readout: the eight above read fine in a sentence about the ridge, but a
+// heading the reader dragged to by hand deserves the finer word.
+const PAN_DIR16 = ['north', 'north-northeast', 'northeast', 'east-northeast', 'east', 'east-southeast',
+  'southeast', 'south-southeast', 'south', 'south-southwest', 'southwest', 'west-southwest',
+  'west', 'west-northwest', 'northwest', 'north-northwest'];
+const panDir16 = az => PAN_DIR16[Math.round((((az % 360) + 360) % 360) / 22.5) % 16];
 
 // dusk to dawn, civil twilight either side. stepped rather than solved: this
 // runs once per card, not per frame.
@@ -3541,6 +3918,7 @@ function horizonSummary(opts) {
 
   return parts.join(', ');
 }
+
 // --- sky:end ---
 
 // what the light pollution atlas measures at each spot, and which way its glow

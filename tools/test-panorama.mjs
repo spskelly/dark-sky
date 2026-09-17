@@ -25,7 +25,7 @@ const src = readFileSync(new URL('./sky-panorama.js', import.meta.url), 'utf8');
 const ctx = { Math, HORIZON_ALT_MIN: -10, HORIZON_ALT_RANGE: 90 };
 vm.createContext(ctx);
 vm.runInContext(src, ctx);
-const { azToX, wrapNear } = ctx;
+const { azToX, wrapNear, panProject } = ctx;
 
 test('azToX is a plain affine map: the window edges land on 0 and w', () => {
   // centre 180, a 120 degree window: the edges are 120 and 240
@@ -97,4 +97,76 @@ test('a segment straddling the wrap is only ever drawn at one of the three turn 
     const inside = [-1, 0, 1].filter(k => base + k * turn >= 0 && base + k * turn <= w);
     assert.ok(inside.length <= 1, `az ${az} landed inside the canvas at ${inside.length} of the 3 copies`);
   }
+});
+
+// panProject: the stereographic map the dialog viewer draws through. every
+// draw routine in that mode goes through this one function, so a bug here is
+// a bug everywhere -- the ridge, the stars, the grid, the moon.
+test('panProject: the view centre maps to the centre of the canvas', () => {
+  const view = { az0: 200, alt0: 25, fov: 100, w: 900, h: 600 };
+  const p = panProject(25, 200, view);
+  assert.ok(Math.abs(p.x - 450) < 1e-6 && Math.abs(p.y - 300) < 1e-6, `expected (450, 300), got (${p.x}, ${p.y})`);
+});
+
+test('panProject: a point 90 degrees off in azimuth at the view centre\'s own altitude lands left or right, never above or below the centre row by much', () => {
+  const view = { az0: 200, alt0: 25, fov: 100, w: 900, h: 600 };
+  const right = panProject(25, 290, view);   // +90 degrees of azimuth: clockwise, so screen-right
+  const left = panProject(25, 110, view);    // -90 degrees: screen-left
+  assert.ok(right.x > 450, `expected right of centre, got x=${right.x}`);
+  assert.ok(left.x < 450, `expected left of centre, got x=${left.x}`);
+  // symmetric off the view centre's own meridian, so the two are mirror images
+  assert.ok(Math.abs((right.x - 450) + (left.x - 450)) < 1e-6,
+    `expected the pair symmetric about the centre column (right ${right.x}, left ${left.x})`);
+});
+
+test('panProject: directly behind the viewer returns null', () => {
+  const view = { az0: 180, alt0: 25, fov: 100, w: 900, h: 600 };
+  // the antipode of the view centre: 180 degrees of angular distance, the
+  // farthest a point can be, and well past the 100 degree cull
+  assert.equal(panProject(-25, 0, view), null);
+});
+
+test('panProject: a point 150 degrees off is culled, one 80 degrees off is not', () => {
+  const view = { az0: 180, alt0: 0, fov: 100, w: 900, h: 600 };
+  assert.equal(panProject(0, 330, view), null);          // 150 degrees of azimuth off, same altitude
+  assert.ok(panProject(0, 260, view) !== null);          // 80 degrees off: still in front of the viewer
+});
+
+test('panProject: the zenith projects to a finite point when looking straight up', () => {
+  const view = { az0: 0, alt0: 90, fov: 100, w: 900, h: 600 };
+  const p = panProject(90, 0, view);
+  assert.ok(Number.isFinite(p.x) && Number.isFinite(p.y), `expected finite, got (${p.x}, ${p.y})`);
+  assert.ok(Math.abs(p.x - 450) < 1e-6 && Math.abs(p.y - 300) < 1e-6, 'and it is the view centre, so it is the canvas centre');
+  // a point 10 degrees down from the zenith, at any azimuth, is the same
+  // angular distance from centre either way -- looking straight up, altitude
+  // circles are rings, not the strips they are everywhere else
+  const a = panProject(80, 0, view), b = panProject(80, 200, view);
+  const ra = Math.hypot(a.x - 450, a.y - 300), rb = Math.hypot(b.x - 450, b.y - 300);
+  assert.ok(Math.abs(ra - rb) < 1e-6, `expected the same radius at any azimuth (${ra} vs ${rb})`);
+});
+
+test('panProject: fov is a true angular field, not an azimuth degree count', () => {
+  // at alt0 = 0, an azimuth offset and the true angular distance from centre
+  // are the same thing (both points sit on the horizon), so this is the one
+  // case an edge lands at a known pixel exactly
+  const view = { az0: 90, alt0: 0, fov: 80, w: 1000, h: 600 };
+  const edgeR = panProject(0, 90 + 40, view);
+  const edgeL = panProject(0, 90 - 40, view);
+  assert.ok(Math.abs(edgeR.x - 1000) < 1e-6, `right edge of the window at x=1000, got ${edgeR.x}`);
+  assert.ok(Math.abs(edgeL.x - 0) < 1e-6, `left edge of the window at x=0, got ${edgeL.x}`);
+
+  // away from the horizon, an azimuth offset of fov/2 is NOT fov/2 of true
+  // angular distance (lines of azimuth converge toward the pole, the same
+  // way lines of longitude do) -- an offset that has to hug the edge exactly
+  // would be the wrong fix; a straight-up offset of fov/2, which is always a
+  // true angular distance whatever the altitude, is the one that belongs on
+  // the edge instead
+  const tilted = { az0: 90, alt0: 40, fov: 80, w: 1000, h: 600 };
+  const notEdge = panProject(40, 90 + 40, tilted);
+  assert.ok(Math.abs(notEdge.x - 1000) > 1, `an azimuth offset off the horizon should miss the edge, got ${notEdge.x}`);
+  const trueEdge = panProject(40 + 40, 90, tilted);
+  assert.ok(Math.abs(trueEdge.x - 500) < 1e-6, 'a pure altitude offset stays on the centre column');
+  assert.ok(trueEdge.y < 300, 'and moves toward the top of the canvas');
+  const radius = Math.hypot(trueEdge.x - 500, trueEdge.y - 300);
+  assert.ok(Math.abs(radius - 500) < 1e-6, `fov/2 of true angular distance lands exactly on the edge radius (${radius})`);
 });
