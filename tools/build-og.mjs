@@ -123,4 +123,4 @@ await shot.screenshot({ path: OUT });
 
 await browser.close();
 server.close();
-console.log(`og.png: ${sky.phase}, ${sky.illum}% lit — ${sky.window}`);
+console.log(`og.png: ${sky.phase}, ${sky.illum}% lit, ${sky.window}`);

@@ -13,7 +13,7 @@ import { dirname, join } from 'node:path';
 import { mkdir } from 'node:fs/promises';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-// a path argument checks some other copy of the page — a staged blob, say —
+// a path argument checks some other copy of the page (a staged blob, say)
 // rather than the working tree's index.html
 const FILE = process.argv.slice(2).find(a => !a.startsWith('--')) || 'index.html';
 const URL_ = pathToFileURL(join(ROOT, FILE)).href;

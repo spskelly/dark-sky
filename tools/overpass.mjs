@@ -31,13 +31,13 @@ export async function ask(query) {
       } catch (e) { tried.push(`${host}: ${e.message}`); break; }
       if (res.ok) return res.json();
       const why = await reason(res);
-      tried.push(`${host}: ${res.status} ${res.statusText}${why ? ' — ' + why : ''}`);
+      tried.push(`${host}: ${res.status} ${res.statusText}${why ? ': ' + why : ''}`);
       // busy or rate limited rather than broken: a 429 means the slot is taken
       // and clears when whatever is running finishes, which takes rather longer
       // than five seconds
       if ((res.status !== 429 && res.status !== 504) || attempt === 3) break;
       const pause = [10000, 30000][attempt - 1];
-      console.log(`  ${res.status} ${res.statusText || 'busy'}${why ? ': ' + why.slice(0, 70) : ''} — waiting ${pause / 1000}s`);
+      console.log(`  ${res.status} ${res.statusText || 'busy'}${why ? ': ' + why.slice(0, 70) : ''}, waiting ${pause / 1000}s`);
       await wait(pause);
     }
   }

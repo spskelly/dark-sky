@@ -68,7 +68,7 @@ const inBox = p => p[0] >= BBOX.s && p[0] <= BBOX.n && p[1] >= BBOX.w && p[1] <=
 const data = await ask(QUERY);
 
 const ways = (data.elements || []).filter(e => e.type === 'way' && Array.isArray(e.geometry));
-if (!ways.length) throw new Error('overpass returned no ways — the relation may have been renamed');
+if (!ways.length) throw new Error('overpass returned no ways: the relation may have been renamed');
 
 let rawPoints = 0;
 const segments = [];
@@ -90,7 +90,7 @@ for (const w of ways) {
   }
   flush();
 }
-if (!segments.length) throw new Error('nothing left after clipping — check BBOX');
+if (!segments.length) throw new Error('nothing left after clipping: check BBOX');
 
 const kept = segments.reduce((n, s) => n + s.length, 0);
 const body = segments.map(s => '  [' + s.map(p => `[${p[0]},${p[1]}]`).join(',') + '],').join('\n');

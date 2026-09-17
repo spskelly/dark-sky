@@ -2,7 +2,7 @@
 // index.html.
 //
 // the overlay is somebody else's static tile set on github pages. it gets
-// republished under a new folder every few years — lp2016, lp2020, lp2022 —
+// republished under a new folder every few years (lp2016, lp2020, lp2022)
 // and when it moves, every tile the page asks for comes back 404 and the layer
 // turns itself off. this script runs from a machine that can reach the host
 // and finds the url that works now, so the fix is a command rather than a
@@ -18,8 +18,8 @@
 //   1. a github pages site is served straight out of a public repo, so the
 //      file layout can be *read* through the contents api instead of guessed
 //      at. one real tile filename is all this needs.
-//   2. failing that, read the site's own pages — dumping the small ones whole,
-//      because a 300-byte page is a signpost to somewhere else, not content —
+//   2. failing that, read the site's own pages, dumping the small ones whole,
+//      because a 300-byte page is a signpost to somewhere else, not content,
 //      and follow where they point.
 //   3. only then try the shapes tile sets of this kind usually take.
 //
@@ -42,7 +42,7 @@ const REPO = new URL(HOST).hostname.replace(/\.github\.io$/, '') + '/' + new URL
 const BASE = 'astronomy';   // where the atlases live on the site
 
 // two places far apart, both with enough sky glow that a missing tile means
-// the url is wrong rather than that the tile was never drawn — these sets
+// the url is wrong rather than that the tile was never drawn: these sets
 // often ship nothing at all for empty ocean. a template has to work for both,
 // which is what rules out x and y being the right numbers the wrong way round.
 const PROBES = [
@@ -96,7 +96,7 @@ async function get(url, extra) {
 }
 
 // github pages answers a missing file with a 404 *page*, so a 200 is not
-// enough on its own — it has to actually be an image
+// enough on its own: it has to actually be an image
 const isTile = r => r.ok && /^image\//.test(r.type);
 
 // a template is believed only when it holds at several zooms in both places
@@ -122,8 +122,8 @@ async function ls(p) {
 }
 
 // which folder to open first. the site keeps several atlases side by side and
-// the same tiles twice — once as images, once as packed binary for its own
-// viewer — so walking in alphabetical order lands on nine-year-old sky glow
+// the same tiles twice (once as images, once as packed binary for its own
+// viewer), so walking in alphabetical order lands on nine-year-old sky glow
 // inside a folder that is not even images. newest first, images before
 // binaries, anything named for tiles before anything not.
 const yearOf = n => +((n.match(/(?:19|20)\d{2}/) || [0])[0]);
@@ -141,7 +141,7 @@ const byPreference = (a, b) => {
   return 0;
 };
 
-// a numbered folder is a zoom level — start low, there are fewer tiles — but
+// a numbered folder is a zoom level (start low, there are fewer tiles) but
 // the same site numbers folders by year, and there the newest is the one worth
 // having. the range tells them apart.
 const isYear = n => +n >= 1900 && +n <= 2100;
@@ -160,7 +160,7 @@ async function findSample(dir, depth = 0) {
   if (!entries) return null;
   const files = entries.filter(e => e.type === 'file');
   const dirs = entries.filter(e => e.type === 'dir');
-  console.log(`  ${dir}/ — ${dirs.length} folder(s), ${files.length} file(s)` +
+  console.log(`  ${dir}/: ${dirs.length} folder(s), ${files.length} file(s)` +
     (depth === 0 || entries.length <= 12 ? `: ${entries.map(e => e.name).slice(0, 12).join(', ')}` : ''));
 
   const hit = files.find(f => TILEISH.test(f.name));
@@ -178,7 +178,7 @@ async function findSample(dir, depth = 0) {
   }
   const named = dirs.filter(d => !NUMERIC.test(d.name)).sort(byPreference);
   const years = [...new Set(named.map(d => yearOf(d.name)).filter(Boolean))].sort((a, b) => b - a);
-  if (years.length > 1) console.log(`    years here: ${years.join(', ')} — taking ${years[0]}`);
+  if (years.length > 1) console.log(`    years here: ${years.join(', ')}, taking ${years[0]}`);
   for (const d of (WANT_YEAR ? named.filter(d => yearOf(d.name) === WANT_YEAR || !yearOf(d.name)) : named).slice(0, 4)) {
     const deeper = await findSample(`${dir}/${d.name}`, depth + 1);
     if (deeper) return deeper;
@@ -237,7 +237,7 @@ async function readSite(fromCode) {
     if (!r.ok) continue;
     if (/^image\//.test(r.type)) continue;
     const body = await r.res.text();
-    console.log(`  read ${url} — ${(body.length / 1024).toFixed(1)} kB`);
+    console.log(`  read ${url}: ${(body.length / 1024).toFixed(1)} kB`);
     // a page this small is a signpost, not content. print it whole: that is
     // the thing the first version of this script threw away.
     if (body.length < DUMP_UNDER)

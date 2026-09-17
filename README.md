@@ -19,8 +19,8 @@ will be clear, and where to drive.
   phone, and the tab you were last on is remembered between visits.
 - **Moon phase calendar.** True phase times from the Meeus algorithm
   (*Astronomical Algorithms*, ch. 49), converted to your local time zone, so
-  dates match published almanacs to the day. Phases are drawn at 9pm local —
-  roughly when you'd be looking up — and the lit limb flips for the southern
+  dates match published almanacs to the day. Phases are drawn at 9pm local,
+  roughly when you'd be looking up, and the lit limb flips for the southern
   hemisphere.
 - **Dark-sky windows.** A 3, 5 or 7 day band centred on each new moon,
   highlighted on the calendar and listed for the next twelve months, with the
@@ -32,8 +32,8 @@ will be clear, and where to drive.
   cloud cover.
 - **40 dark-sky spots.** Overlooks, balds and campgrounds across western
   North Carolina, from the Cherohala Skyway to Doughton Park, on a topo map.
-  Set a home point — a town from the list, a click on the map, or your own
-  location — and everything reorders around it, ranked by estimated drive
+  Set a home point (a town from the list, a click on the map, or your own
+  location) and everything reorders around it, ranked by estimated drive
   time or straight-line distance. Each spot links to its Clear Outside
   forecast, light-pollution map and driving directions.
 
@@ -90,7 +90,7 @@ python3 -m http.server 8000   # then open http://localhost:8000
 ```
 
 The map (Leaflet, from cdnjs) and the forecast (Open-Meteo) need network
-access; everything else — the phase maths, the calendar, the spot list —
+access; everything else (the phase maths, the calendar, the spot list)
 works offline, and the map degrades to the list with a note.
 
 The tabs have a check, since a hidden panel cannot be measured and both the
@@ -172,8 +172,8 @@ horizon and a light-pollution reading: see
 The **light pollution** overlay in the map's layers control draws D. Lorenz's
 world atlas of artificial night sky brightness over the topo. That is somebody else's static
 tile set on GitHub Pages, and it is the one part of the page that can break on
-its own: he republishes under a new folder every few years — `lp2016`, `lp2020`,
-`lp2022` — and when the old folder goes, every tile comes back 404.
+its own: he republishes under a new folder every few years (`lp2016`, `lp2020`,
+`lp2022`) and when the old folder goes, every tile comes back 404.
 
 The page notices. After four misses with nothing loaded it switches the layer
 off and says so, rather than leaving a live-looking overlay that does nothing. Every spot still links to its own light map, which is
@@ -188,7 +188,7 @@ node tools/find-lp-tiles.mjs --fix     # ... and write the winner into index.htm
 
 It works from most certain to least. A GitHub Pages site is served straight
 out of a public repo, so the first pass *reads* the file layout through the
-contents API rather than guessing at it — one real tile filename is enough.
+contents API rather than guessing at it: one real tile filename is enough.
 Failing that it reads the site's own pages, printing the small ones whole,
 because a 300-byte page is a signpost rather than content; it follows meta
 refreshes, frames and links, and turns any `getTileUrl` it finds into a
@@ -199,7 +199,7 @@ is y, so the last step is always the same: put them in every way round and let
 the network decide. Nothing is believed until it returns real images at three
 zooms over two places far apart, which is what rules out x and y being right
 the wrong way round. It also reports how deep the set goes, so `maxNativeZoom`
-matches — get that wrong and the layer looks broken at exactly the zoom you'd
+matches. Get that wrong and the layer looks broken at exactly the zoom you'd
 use to pick a spot.
 
 If both passes come up empty, open the overlay in a browser, take one working
@@ -221,21 +221,21 @@ node tools/build-skyglow.mjs --json sky.json
 ```
 
 The atlas is coloured PNG tiles, so reading it means reading pixels.
-`tools/png.mjs` does that with nothing but Node's own zlib — a PNG is a zlib
-stream plus five row filters — so this runs on a bare Node install like every
+`tools/png.mjs` does that with nothing but Node's own zlib (a PNG is a zlib
+stream plus five row filters), so this runs on a bare Node install like every
 other tool here, with no `npm install` and no browser download. It is checked
 against fixtures covering every colour type, bit depths 1 to 16 and all five
 filters, plus a tile whose 65,536 pixels each encode their own coordinates.
 
 Each tile ships its own palette holding only the colours that tile happens to
 use, in whatever order they were written, so a palette index means nothing
-outside the tile it came from — index 9 is near-black in Nevada and near-white
+outside the tile it came from: index 9 is near-black in Nevada and near-white
 in Charlotte. Everything keys on the colour itself.
 
 The order of those colours is not a guess about what they look like. A transect
 walking from Mount Mitchell into Asheville fixes the middle of the scale, and a
-dozen places whose skies are not in question — the Sahara, Great Basin, the
-Boundary Waters, Cherry Springs, then Knoxville, Charlotte, Manhattan — fix the
+dozen places whose skies are not in question (the Sahara, Great Basin, the
+Boundary Waters, Cherry Springs, then Knoxville, Charlotte, Manhattan) fix the
 ends. Every run re-checks that reading them in order never steps backwards, and
 says so loudly if it does, or if a colour turns up that the scale does not list.
 The atlas ships no tile at all over open ocean or the Greenland ice sheet, which
@@ -254,7 +254,7 @@ under the hand-written note and visibly apart from it: one is measured, the
 other is remembered, and they age differently. Each line carries its band as a
 swatch, and the block also holds the scale itself, so the map key is drawn from
 the atlas's own sixteen colours as hard stops rather than from an impression of
-them — the key it replaced was a seven-stop blend with one green in it, and the
+them: the key it replaced was a seven-stop blend with one green in it, and the
 atlas has two. The hand-written notes are never touched, so re-running this
 cannot eat somebody's local knowledge. It refuses to write at all if a colour
 turned up that the scale cannot place, or if any spot came back without a
@@ -266,7 +266,7 @@ green* rather than *dark green* and *green*: the second pair is no use when you
 are looking at two greens and working out which one you are standing in.
 
 `--replay` takes the samples back out of a `--json` run instead of fetching, so
-the wording — the part most likely to need another pass — can be worked on, and
+the wording, the part most likely to need another pass, can be worked on, and
 tested, without re-reading ten tiles off somebody else's server to repunctuate a
 sentence. Before 2026-09-17, `--json` did not write the `samples` field this
 reads, so `--replay` could not have worked no matter what this said; both do
@@ -292,7 +292,7 @@ node tools/check-spots.mjs --osm --fix
 
 Anything tagged with a milepost is, by definition, on the parkway, so once the
 centreline is in the page an overlook sitting a mile off it is wrong by
-construction — `--snap` moves those, and only those, onto the line. A summit or
+construction, so `--snap` moves those, and only those, onto the line. A summit or
 a campground up a side road is left alone: its milepost is where you leave the
 parkway, not where the spot is.
 
@@ -304,7 +304,7 @@ after a snap the moved ones agree with them too.
 
 For everything away from the parkway there is no reference line, so `--osm`
 compares each spot to the OpenStreetMap feature of the same name and reports the
-distance. `--fix` applies only point features — never the centroid of a park the
+distance. `--fix` applies only point features, never the centroid of a park the
 size of a county, which is a spot in the woods rather than the parking.
 
 ### Keeping a skyline attached to its coordinate
@@ -324,7 +324,7 @@ It needs no DEM and no rasterio, because it reads the cache
 `build_horizons.py` leaves behind: every spot has a horizon, every horizon was
 raycast from the coordinate the page uses *now*, and the encoded string in the
 page is still that raycast. Then it compares the model's ground elevation
-against the listed one, reading the two kinds of spot differently — a drive-up
+against the listed one, reading the two kinds of spot differently: a drive-up
 should agree within about 20 m, while a walk-in spot's gap is the climb to its
 `view:` coordinate, where a *negative* gap means the viewpoint never left the
 trailhead. The four listings that disagree on purpose are named in the script
@@ -342,8 +342,8 @@ python tools/sweep_road.py --spot "Cove Field" --south --radius 1500
 python tools/sweep_road.py 35.4309 -83.0357 --sector 45 135      # score the east instead
 ```
 
-It walks the `PARKWAY` polyline, takes every vertex within the radius — the line
-is simplified to about 120 m, which is roughly a pull-off apart — and measures
+It walks the `PARKWAY` polyline, takes every vertex within the radius (the line
+is simplified to about 120 m, which is roughly a pull-off apart) and measures
 each, scoring a sector you choose. Both tools need the DEM tiles and the
 far-field grid, so run `build_horizons.py` once first.
 
@@ -351,7 +351,7 @@ Both are bare earth. 3DEP models no vegetation, and the raycast starts 150 m
 out, so a pull-off's own bank and treeline are invisible to either tool. For an
 overlook whose note says the view has grown in, the model is the best case.
 
-The npm dependencies exist for that generator alone — the site itself ships
+The npm dependencies exist for that generator alone: the site itself ships
 nothing from `node_modules`. To rebuild the card by hand:
 
 ```sh
@@ -366,11 +366,11 @@ and the camping, fire and access notes were true when written and may not be
 true tonight. Gates close for ice, forest orders change, permits appear, roads
 wash out, campgrounds run seasonally.
 
-Confirm anything you are relying on with whoever manages the land —
+Confirm anything you are relying on with whoever manages the land:
 [parkway road closures](https://www.nps.gov/blri/planyourvisit/roadclosures.htm),
 [Smokies road status](https://www.nps.gov/grsm/planyourvisit/temproadclose.htm),
 [National Forests in NC](https://www.fs.usda.gov/r08/nfsnc),
-[NC State Parks](https://www.ncparks.gov/) — and treat the forecast as a model
+[NC State Parks](https://www.ncparks.gov/). Treat the forecast as a model
 rather than a promise. These are remote places at four to six thousand feet,
 often on gravel, usually with no signal.
 
@@ -381,7 +381,7 @@ often on gravel, usually with no signal.
   crescent doesn't rise until the small hours; those edge days are often
   darker than they look.
 - Drive times assume the Blue Ridge Parkway is open. The high sections close
-  for ice from November into April — check
+  for ice from November into April, so check
   [NPS road status](https://www.nps.gov/blri/planyourvisit/roadclosures.htm)
   before committing to a gate.
 - Data, imagery, map and font credits are documented in [ATTRIBUTION.md](ATTRIBUTION.md)

@@ -60,7 +60,7 @@ const parkway = html.includes('const PARKWAY = [];') ? []
       .replace('const PARKWAY = [', '').replace(/,\s*$/, '') + ']');
 console.log(`${spots.length} spots, ${parkway.length} parkway segments, ` +
   `${parkway.reduce((n, s) => n + s.length, 0)} points\n`);
-if (!spots.length) throw new Error('no spots parsed — the SPOTS format changed');
+if (!spots.length) throw new Error('no spots parsed: the SPOTS format changed');
 
 // ---------- geometry ----------
 
@@ -129,7 +129,7 @@ const onRoad = spots.filter(s => s.mp).map(s => Object.assign(s, { near: nearest
 for (const s of onRoad) {
   const verdict = !isRoadside(s) ? 'off-road by design'
     : s.near.d < SNAP_MIN ? 'on the road'
-    : s.near.d > SNAP_MAX ? 'TOO FAR TO TRUST — check by hand'
+    : s.near.d > SNAP_MAX ? 'TOO FAR TO TRUST, check by hand'
     : 'ROADSIDE, OFF THE ROAD';
   console.log(pad(s.name, 32) + pad(s.mp, 9) + `${Math.round(s.near.d)} m`.padStart(11) + '   ' + verdict);
 }
