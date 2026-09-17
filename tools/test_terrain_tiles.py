@@ -60,10 +60,17 @@ class Naming(unittest.TestCase):
 
     def test_the_tile_that_holds_a_point(self):
         self.assertEqual(tt.tile_name(*tt.tile_of(35.4641, -83.1377)), 'n35.25_w083.25')
-        # a point on the south west corner belongs to that tile
-        self.assertEqual(tt.tile_of(35.25, -83.25), (35.25, -83.25))
         # floor, not truncation toward zero, on both axes
         self.assertEqual(tt.tile_of(-0.1, -0.1), (-0.25, -0.25))
+
+    def test_a_point_on_a_tile_edge_goes_where_the_lattice_puts_it(self):
+        # rows count down from the north, so Lattice.sample floors a point on a
+        # parallel into the row below it. the tile has to be the one holding that row.
+        lat, lon = 35.25, -83.25
+        south, west = tt.tile_of(lat, lon)
+        self.assertEqual((south, west), (35.0, -83.25))
+        row = int(np.floor((90.0 - lat) * 3600)) - int((90 - south - 0.25) * 3600)
+        self.assertEqual(row, 0)
 
 
 class Encoding(unittest.TestCase):

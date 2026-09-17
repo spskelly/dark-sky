@@ -51,9 +51,10 @@ DEFAULT_BBOX = (34.75, -84.50, 36.75, -80.75)
 FAR_BOUNDS = (bh.GRID_LAT0, bh.GRID_LON0, bh.GRID_LAT1, bh.GRID_LON1)
 
 NAMING = ("near/{n|s}DD.DD_{w|e}DDD.DD.i16, the south west corner of a 0.25 degree square, absolute "
-          "degrees zero padded to two decimals. for a point: south = floor(lat * 4) / 4, west = "
-          "floor(lon * 4) / 4. in the tile, row = floor((south + 0.25 - lat) * 3600), "
-          "col = floor((lon - west) * 3600), index = row * 900 + col.")
+          "degrees zero padded to two decimals. for a point, on the global 1 arc-second lattice: "
+          "R = floor((90 - lat) * 3600), C = floor((lon + 180) * 3600), south = 90 - (floor(R / 900) + 1) / 4, "
+          "west = floor(C / 900) / 4 - 180, and in the tile row = R % 900, col = C % 900, "
+          "index = row * 900 + col.")
 
 
 # ---------- naming ----------
@@ -70,7 +71,13 @@ def tile_corner(name):
 
 
 def tile_of(lat, lon):
-    return (math.floor(lat * 4) / 4, math.floor(lon * 4) / 4)
+    """the corner of the tile that holds a point, by the same floor on the global
+    lattice that Lattice.sample uses, so the two can never disagree about a
+    point that sits exactly on a tile edge: rows count down from the north, so
+    a point on a tile's south edge belongs to the tile below it."""
+    r = math.floor((90.0 - lat) * NEAR_CPD) // TILE_CELLS
+    c = math.floor((lon + 180.0) * NEAR_CPD) // TILE_CELLS
+    return (90 - (r + 1) / 4, c / 4 - 180)
 
 
 # ---------- encoding ----------
