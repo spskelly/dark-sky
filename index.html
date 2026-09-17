@@ -341,6 +341,41 @@
      matter more there than 170px of extra ridge does. */
   @media (max-width: 720px) { .ovl .pano.open canvas.skyline { height: 100px; } }
   .ovl-caveat { font-size: 11px; opacity: .7; margin: 6px 0; }
+  /* the sky viewer dialog: one canvas that fills whatever height is left,
+     a control row, the two sentences, a close button. showModal gives the
+     focus trap, Escape and the backdrop for free. */
+  #sky-viewer { padding: 0; border: none; border-radius: 14px; background: var(--night-2); color: var(--ink);
+    width: min(1100px, 96vw); height: min(760px, 92vh); max-width: none; max-height: none;
+    display: none; flex-direction: column; overflow: hidden; }
+  #sky-viewer[open] { display: flex; }
+  #sky-viewer::backdrop { background: rgba(6,10,20,0.72); }
+  .sky-viewer-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 14px 18px 0; }
+  .sky-viewer-head h3 { margin: 0; font-family: var(--serif); font-weight: 400; font-size: 19px; color: var(--moon); }
+  .sky-viewer-elev { margin: 3px 0 0; font-size: 12.5px; color: var(--ink-dim); }
+  .sky-viewer-close { background: none; border: 1px solid var(--line); color: var(--ink-dim); border-radius: 8px;
+    width: 30px; height: 30px; font-size: 16px; line-height: 1; cursor: pointer; flex: none; }
+  .sky-viewer-close:hover { color: var(--ink); border-color: var(--ink-dim); }
+  .sky-viewer-canvas { flex: 1; min-height: 0; width: 100%; margin-top: 10px; background: #070c18;
+    touch-action: none; cursor: grab; }
+  .sky-viewer-canvas:active { cursor: grabbing; }
+  .sky-viewer-canvas:focus-visible { outline: 2px solid var(--accent, #5fc2ad); outline-offset: -2px; }
+  .sky-viewer-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 18px; font-size: 12.5px; color: var(--ink-dim); }
+  .sky-viewer-controls input[type="date"] { background: var(--night-3); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 6px; padding: 3px 6px; font-size: 12.5px; }
+  .sky-viewer-time { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 160px; }
+  .sky-viewer-time span { min-width: 58px; font-variant-numeric: tabular-nums; }
+  .sky-viewer-time input { flex: 1; accent-color: var(--accent, #5fc2ad); cursor: pointer; }
+  .sky-viewer-compass { white-space: nowrap; }
+  .sky-viewer-reset { background: none; border: 1px solid var(--line); color: var(--ink-dim); border-radius: 999px;
+    padding: 4px 12px; font-size: 12px; cursor: pointer; }
+  .sky-viewer-reset:hover { color: var(--ink); }
+  .sky-viewer-foot { padding: 0 18px 14px; }
+  .sky-viewer-foot p { margin: 4px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-dim); }
+  .sky-viewer-foot p:first-child { margin-top: 0; }
+  .sky-viewer-foot p:empty { display: none; }
+  @media (max-width: 720px) {
+    #sky-viewer { width: 100vw; height: 100vh; height: 100dvh; border-radius: 0; }
+  }
   .spot .links a { color: var(--moon-dim); text-decoration: none; margin-right: 12px; }
   .spot .links a:hover { color: var(--moon); text-decoration: underline; }
   .leaflet-container { font-family: var(--sans); }
@@ -701,6 +736,31 @@
 </section>
 
 </div><!-- /panel-where -->
+
+<!-- the sky viewer: one dialog for a card's thumbnail, an overlook's popup
+     and, later, any picked point. lives outside every tab panel on purpose --
+     a dialog inside a hidden ancestor will not showModal. -->
+<dialog id="sky-viewer" aria-labelledby="sky-viewer-title">
+  <div class="sky-viewer-head">
+    <div>
+      <h3 id="sky-viewer-title"></h3>
+      <p class="sky-viewer-elev"></p>
+    </div>
+    <button type="button" class="sky-viewer-close" aria-label="close">&times;</button>
+  </div>
+  <canvas class="sky-viewer-canvas" tabindex="0" aria-label="the sky, drag or use the arrow keys to look around"></canvas>
+  <div class="sky-viewer-controls">
+    <label>date <input type="date" class="sky-viewer-date"></label>
+    <label class="sky-viewer-time"><span></span><input type="range" min="0" max="1" step="1" value="0" aria-label="time of night"></label>
+    <span class="sky-viewer-compass" aria-live="polite"></span>
+    <button type="button" class="sky-viewer-reset">reset view</button>
+  </div>
+  <div class="sky-viewer-foot">
+    <p class="sky-viewer-sum"></p>
+    <p class="sky-viewer-sky"></p>
+    <p class="sky-viewer-caveat"></p>
+  </div>
+</dialog>
 
 <!-- reference reading, not a task: nine hundred pixels of it sat between the
      spot list and the footer on a phone. open on a wide screen, folded on a
@@ -4555,13 +4615,7 @@ function bindSkylineToggle() {
     const cv = ev.target.closest && ev.target.closest('canvas.skyline');
     if (!cv) return;
     ev.stopPropagation();   // the card selects the spot; the canvas does not
-    // a drag that just turned the open view also ends in a click, on mouse:
-    // bindPanoRotate marks the canvas as the drag happens, so the click that
-    // follows it can be told apart from one that never moved
-    if (cv.dataset.panoDragged) { delete cv.dataset.panoDragged; return; }
-    spotState.pano = spotState.pano === cv.dataset.pano ? null : cv.dataset.pano;
-    remember('darksky.pano', spotState.pano || '');
-    renderSpotList();
+    openSkyViewerForSpot(cv.dataset.pano);
   };
   // captured, not bubbled, for both listeners below: the card's own click and
   // keydown listeners sit on .spot, a closer ancestor of the canvas than this
@@ -4574,6 +4628,232 @@ function bindSkylineToggle() {
     }
   }, true);
 }
+
+// ---------- the sky viewer dialog ----------
+// one dialog, opened from a card's thumbnail (and, once the popup slims
+// down, an overlook's own button, and in phase 2 a picked point).
+// showModal gives the focus trap, Escape and the backdrop for free; this is
+// the canvas, the controls and the one shared heading/zoom the reader turns.
+
+const SKY_VIEW_KEY = 'darksky.skyView';
+const SKY_VIEW_DEFAULT = { az: 180, alt: 25, fov: 100 };
+
+// darksky.panoAz is read once, as a fallback for the heading alone, and
+// never written again: a reader who had turned the old inline view keeps
+// facing the same way the first time they open the dialog, but from here on
+// the heading lives under its own key, alongside the altitude and zoom that
+// key never had a slot for.
+function loadSkyView() {
+  const v = recall(SKY_VIEW_KEY, null);
+  if (v && isFinite(v.az) && isFinite(v.alt) && isFinite(v.fov)) {
+    return { az: ((v.az % 360) + 360) % 360, alt: Math.max(-10, Math.min(90, v.alt)), fov: Math.max(40, Math.min(140, v.fov)) };
+  }
+  return { az: loadPanoAz(), alt: SKY_VIEW_DEFAULT.alt, fov: SKY_VIEW_DEFAULT.fov };
+}
+function saveSkyView() { remember(SKY_VIEW_KEY, skyView); }
+
+// the one shared heading, altitude and zoom every viewer opens to, same
+// posture as the old panoState.az0
+let skyView = loadSkyView();
+
+// what is currently open, if anything: the canvas paints from this, not from
+// whatever openSkyViewer was called with, so a date or scrubber change has
+// somewhere to write back to. sky/caveat are pre-built html/text -- what a
+// spot's model can and cannot see differs by kind, and the viewer itself has
+// no opinion on it.
+const viewerState = { key: null, title: '', sub: '', horizon: null, lat: 0, lon: 0, elevM: 0,
+  sky: '', caveat: '', date: null, returnFocus: null };
+
+function skyViewerEls() {
+  const d = document.getElementById('sky-viewer');
+  if (!d) return {};
+  return {
+    dialog: d, canvas: d.querySelector('.sky-viewer-canvas'),
+    title: d.querySelector('#sky-viewer-title'), elev: d.querySelector('.sky-viewer-elev'),
+    date: d.querySelector('.sky-viewer-date'),
+    time: d.querySelector('.sky-viewer-time input'), clock: d.querySelector('.sky-viewer-time span'),
+    compass: d.querySelector('.sky-viewer-compass'),
+    sum: d.querySelector('.sky-viewer-sum'), sky: d.querySelector('.sky-viewer-sky'), caveat: d.querySelector('.sky-viewer-caveat'),
+  };
+}
+
+const isoDate = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+function openSkyViewer(o) {
+  const els = skyViewerEls();
+  if (!els.dialog) return;
+  viewerState.key = o.key;
+  viewerState.title = o.title || '';
+  viewerState.sub = o.sub || '';
+  viewerState.horizon = o.horizon || null;
+  viewerState.lat = o.lat;
+  viewerState.lon = o.lon;
+  viewerState.elevM = o.elevM || 0;
+  viewerState.sky = o.sky || '';
+  viewerState.caveat = o.caveat || '';
+  // the date picker lands in the next slice; every viewer opens on tonight
+  // until then, same as the card it replaces
+  viewerState.date = new Date();
+  viewerState.returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  remember('darksky.pano', o.key || '');
+  if (!els.dialog.open) els.dialog.showModal();
+  els.date.value = isoDate(viewerState.date);
+  paintSkyViewer();
+}
+
+function openSkyViewerForSpot(name) {
+  const s = SPOTS.find(x => x.name === name);
+  const enc = s && HORIZONS[s.name];
+  if (!s || !enc) return;
+  let horizon;
+  try { horizon = decodeHorizon(enc); } catch (e) { return; }
+  const lat = s.view ? s.view[0] : s.lat, lon = s.view ? s.view[1] : s.lon;
+  openSkyViewer({
+    key: s.name, title: s.name, sub: elevTag(s), horizon, lat, lon, elevM: s.elev * 0.3048,
+    sky: SKY[s.name] ? skySwatch(SKY[s.name][0]) + SKY[s.name][1] : '',
+  });
+}
+
+function closeSkyViewer() {
+  const els = skyViewerEls();
+  if (els.dialog && els.dialog.open) els.dialog.close();
+}
+
+// draws the canvas and every text control from viewerState + skyView. called
+// on open, and again on anything that changes what is shown: the scrubber,
+// a drag, a zoom.
+function paintSkyViewer() {
+  const els = skyViewerEls();
+  if (!els.dialog || !els.dialog.open) return;
+  const { title, sub, horizon, lat, lon, elevM, sky, caveat, date } = viewerState;
+  els.title.textContent = title;
+  els.elev.textContent = sub;
+  els.sky.innerHTML = sky;
+  els.caveat.textContent = caveat;
+
+  const nights = panoNight(lat, lon);
+  els.time.max = String(nights.length - 1);
+  const idx = nearestSlice(nights, panoState.when.get(viewerState.key) || '21:00');
+  els.time.value = String(idx);
+  const when = nights[idx];
+
+  try {
+    drawPanorama(els.canvas, { horizon, lat, lon, elevM, date: when, mode: 'view', az0: skyView.az, alt0: skyView.alt, fov: skyView.fov });
+  } catch (e) {
+    if (!window.__panoWarned) { window.__panoWarned = true; console.warn('sky viewer:', e); }
+  }
+  els.clock.textContent = fmtClock(when);
+  els.compass.textContent = 'looking ' + panDir16(skyView.az) + ', '
+    + (skyView.alt >= 0 ? Math.round(skyView.alt) + ' degrees up' : Math.round(-skyView.alt) + ' degrees down');
+  try { els.sum.textContent = horizon ? horizonSummary({ horizon, lat, lon, elevM, date: when }) : ''; }
+  catch (e) { els.sum.textContent = ''; }
+}
+
+function setSkyView(az, alt, fov) {
+  skyView = { az: ((az % 360) + 360) % 360, alt: Math.max(-10, Math.min(90, alt)), fov: Math.max(40, Math.min(140, fov)) };
+  saveSkyView();
+  paintSkyViewer();
+}
+
+function bindSkyViewer() {
+  const els = skyViewerEls();
+  if (!els.dialog || els.dialog.dataset.bound) return;
+  els.dialog.dataset.bound = '1';
+
+  // fires on the close button, Escape (native to showModal) and a click on
+  // the backdrop below -- whatever closed it, the key stops being "open" and
+  // the thumbnail that opened it gets focus back
+  els.dialog.addEventListener('close', () => {
+    remember('darksky.pano', '');
+    const rf = viewerState.returnFocus;
+    viewerState.key = null;
+    if (rf && document.contains(rf)) rf.focus();
+  });
+  els.dialog.querySelector('.sky-viewer-close').addEventListener('click', closeSkyViewer);
+  // a click that lands on the dialog element itself, not on anything inside
+  // it, is a click on the backdrop -- ::backdrop takes no listener of its own
+  els.dialog.addEventListener('click', ev => { if (ev.target === els.dialog) closeSkyViewer(); });
+
+  els.date.addEventListener('change', () => {
+    const [y, m, d] = els.date.value.split('-').map(Number);
+    if (y && m && d) { viewerState.date = new Date(y, m - 1, d); paintSkyViewer(); }
+  });
+  els.time.addEventListener('input', () => {
+    const nights = panoNight(viewerState.lat, viewerState.lon);
+    const when = nights[Number(els.time.value)];
+    panoState.when.set(viewerState.key, hhmm(when));
+    remember('darksky.panoWhen', Object.fromEntries(panoState.when));
+    paintSkyViewer();
+  });
+  els.dialog.querySelector('.sky-viewer-reset').addEventListener('click', () => {
+    skyView = { ...SKY_VIEW_DEFAULT };
+    saveSkyView();
+    paintSkyViewer();
+  });
+
+  // pointer drag turns the view; two pointers at once pinch the zoom instead.
+  // touch-action: none on the canvas (css) is what keeps a phone from also
+  // trying to scroll a dialog that has no scroll of its own to fight.
+  const pointers = new Map();
+  let dragging = false, lastX = 0, lastY = 0, pinchDist = null;
+  els.canvas.addEventListener('pointerdown', ev => {
+    pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    els.canvas.setPointerCapture(ev.pointerId);
+    if (pointers.size === 1) { dragging = true; lastX = ev.clientX; lastY = ev.clientY; }
+    else { dragging = false; pinchDist = null; }
+  });
+  els.canvas.addEventListener('pointermove', ev => {
+    if (!pointers.has(ev.pointerId)) return;
+    pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    if (pointers.size >= 2) {
+      const [a, b] = [...pointers.values()];
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      // fingers spreading apart: dist grows, ratio < 1, fov shrinks (zooms in)
+      if (pinchDist) setSkyView(skyView.az, skyView.alt, skyView.fov * (pinchDist / dist));
+      pinchDist = dist;
+      return;
+    }
+    if (!dragging) return;
+    const dx = ev.clientX - lastX, dy = ev.clientY - lastY;
+    lastX = ev.clientX; lastY = ev.clientY;
+    if (!dx && !dy) return;
+    const w = els.canvas.clientWidth || 900, h = els.canvas.clientHeight || 500;
+    setSkyView(skyView.az - dx / w * skyView.fov, skyView.alt + dy / h * (skyView.fov * h / w), skyView.fov);
+  });
+  const release = ev => {
+    pointers.delete(ev.pointerId);
+    if (pointers.size < 2) pinchDist = null;
+    if (pointers.size === 0) dragging = false;
+  };
+  els.canvas.addEventListener('pointerup', release);
+  els.canvas.addEventListener('pointercancel', release);
+
+  els.canvas.addEventListener('wheel', ev => {
+    ev.preventDefault();
+    setSkyView(skyView.az, skyView.alt, skyView.fov + (ev.deltaY > 0 ? 5 : -5));
+  }, { passive: false });
+
+  els.canvas.addEventListener('keydown', ev => {
+    const step = 5;
+    if (ev.key === 'ArrowLeft') { ev.preventDefault(); setSkyView(skyView.az - step, skyView.alt, skyView.fov); }
+    else if (ev.key === 'ArrowRight') { ev.preventDefault(); setSkyView(skyView.az + step, skyView.alt, skyView.fov); }
+    else if (ev.key === 'ArrowUp') { ev.preventDefault(); setSkyView(skyView.az, skyView.alt + step, skyView.fov); }
+    else if (ev.key === 'ArrowDown') { ev.preventDefault(); setSkyView(skyView.az, skyView.alt - step, skyView.fov); }
+    else if (ev.key === '+' || ev.key === '=') { ev.preventDefault(); setSkyView(skyView.az, skyView.alt, skyView.fov - step); }
+    else if (ev.key === '-' || ev.key === '_') { ev.preventDefault(); setSkyView(skyView.az, skyView.alt, skyView.fov + step); }
+    else if (ev.key === 'Home') { ev.preventDefault(); skyView = { ...SKY_VIEW_DEFAULT }; saveSkyView(); paintSkyViewer(); }
+  });
+
+  // the canvas has no size until the dialog is shown, so a resize (a phone
+  // rotated, a window dragged wider) repaints it rather than trying to catch
+  // every layout change that could affect it up front
+  window.addEventListener('resize', () => paintSkyViewer());
+}
+bindSkyViewer();
+
+// a viewer left open reopens on return, same key as the card toggle it
+// replaces used; the heading, altitude and zoom come back from their own key
+if (spotState.pano) openSkyViewerForSpot(spotState.pano);
 
 // lot and view, off the dem, where there is a walk between them; the listed
 // figure where there is not
@@ -4594,10 +4874,10 @@ function renderSpotList() {
     </div>
     <div class="note">${s.note}</div>
     ${SKY[s.name] ? `<div class="sky">${skySwatch(SKY[s.name][0])}${SKY[s.name][1]}</div>` : ''}
-    ${HORIZONS[s.name] ? `<div class="pano${spotState.pano === s.name ? ' open' : ''}">
+    ${HORIZONS[s.name] ? `<div class="pano">
       <canvas class="skyline" data-pano="${s.name}" role="button" tabindex="0"
-        aria-expanded="${spotState.pano === s.name}"
-        aria-label="skyline and sky from ${s.name}, select to enlarge"></canvas>
+        aria-haspopup="dialog"
+        aria-label="skyline and sky from ${s.name}, select to open"></canvas>
       <p class="pano-sum"></p>
       <label class="pano-time"><span></span><input type="range" min="0" max="1" step="1" value="0" aria-label="time of night"></label>
     </div>` : ''}

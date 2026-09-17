@@ -143,19 +143,19 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   ok(inside.length === 0, `no card note is written to the maintainer (${inside.join(' | ') || 'none'})`);
 
   // this panel is drawn twice: once by renderSpotList at load, once when the
-  // tab first opens. a skyline has to take one click to open and one to close,
-  // not two of each, which is what a listener bound per draw would cost.
+  // tab first opens. a listener bound per draw would open the sky viewer
+  // twice on one click; bindSkylineToggle only binds once, so one click
+  // opens it cleanly and Escape, native to showModal, closes it.
   if (cv !== null) {
-    const box = '#spot-list .pano';
-    await page.click(`${box} canvas.skyline`);
-    ok(await page.$eval(box, b => b.classList.contains('open')), 'one click opens a skyline');
-    await page.click(`${box} canvas.skyline`);
-    ok(await page.$eval(box, b => !b.classList.contains('open')), 'and one closes it again');
+    await page.click('#spot-list .pano canvas.skyline');
+    ok(await page.evaluate(() => document.getElementById('sky-viewer').open), 'one click opens the sky viewer');
+    await page.keyboard.press('Escape');
+    ok(await page.evaluate(() => !document.getElementById('sky-viewer').open), 'and Escape closes it');
   }
   await page.close();
 }
 
-// --- the open panorama is a window that turns, and remembers where ---
+// --- the sky viewer dialog: opens from a card, turns, remembers where, closes ---
 {
   const ctx = await browser.newContext({ viewport: DESKTOP });
   await quiet(ctx);
@@ -165,84 +165,85 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
     for (let i = 0; i < d.length; i += 97) h = (h * 31 + d[i]) >>> 0;
     return h;
   });
+  const thumb = '#spot-list .pano canvas.skyline';
 
   const a = await ctx.newPage();
   await a.goto(URL_ + '#where');
   await a.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
-  await a.click('#spot-list .pano canvas.skyline');
-  const box = '#spot-list .pano.open';
-  await a.waitForSelector(box);
+  const opener = await a.$eval(thumb, c => c.dataset.pano);
+  await a.click(thumb);
+  await a.waitForSelector('#sky-viewer[open]');
 
-  // default heading is south, dead centre; a full turn would put every
-  // compass point somewhere on screen, a 120 degree window does not. drawn
-  // fresh here, and PAN_AZ0/panX read in the same call, because drawSkylines
-  // paints every thumbnail on the list too and leaves those module globals
-  // set from whichever canvas it drew last, not necessarily this one.
-  const centred = await a.evaluate(() => {
-    const cv = document.querySelector('#spot-list .pano.open canvas.skyline');
-    const s = SPOTS.find(x => x.name === cv.dataset.pano);
-    const horizon = decodeHorizon(HORIZONS[s.name]);
-    const lat = s.view ? s.view[0] : s.lat, lon = s.view ? s.view[1] : s.lon;
-    drawPanorama(cv, { horizon, lat, lon, elevM: s.elev * 0.3048, date: new Date(), mode: 'full', az0: panoState.az0 });
-    return { az0: PAN_AZ0, s: panX(180, 900), n: panX(0, 900) };
-  });
-  ok(centred.az0 === 180, 'the open view defaults to south');
-  ok(Math.abs(centred.s - 450) < 1e-6, `south sits at the centre of the canvas (x=${centred.s})`);
-  ok(centred.n < 0 || centred.n > 900, `north is outside the default 120 degree window (x=${centred.n})`);
+  // default heading is south, 25 degrees up, 100 degree field, the same
+  // default openSkyViewer falls back to with nothing remembered yet
+  const centred = await a.evaluate(() => ({ az: skyView.az, alt: skyView.alt, fov: skyView.fov }));
+  ok(centred.az === 180 && centred.alt === 25 && centred.fov === 100,
+    `the viewer opens facing south, 25 degrees up, 100 degree field (${JSON.stringify(centred)})`);
+  ok(await a.$eval('#sky-viewer-title', e => e.textContent) === opener, 'and its title is the spot that opened it');
 
-  const thumbBefore = await pixHash(a, '#spot-list .pano:not(.open) canvas.skyline');
-  const openBefore = await pixHash(a, box + ' canvas.skyline');
-  const cvBox = await a.$eval(box + ' canvas.skyline', c => {
+  const before = await pixHash(a, '.sky-viewer-canvas');
+  const cvBox = await a.$eval('.sky-viewer-canvas', c => {
     const r = c.getBoundingClientRect();
     return { x: r.x, y: r.y, w: r.width, h: r.height };
   });
 
-  // drag most of the way across the open canvas: mouse down, move, up. the
-  // synthetic pointer events chromium fires alongside these are what
-  // bindPanoRotate listens for, so this exercises the same path a touch drag
-  // would.
+  // drag most of the way across the canvas: mouse down, move, up. the
+  // synthetic pointer events chromium fires alongside these are what the
+  // viewer's own drag handler listens for, the same path a touch drag would
+  // take.
   await a.mouse.move(cvBox.x + cvBox.w * 0.85, cvBox.y + cvBox.h / 2);
   await a.mouse.down();
   await a.mouse.move(cvBox.x + cvBox.w * 0.15, cvBox.y + cvBox.h / 2, { steps: 8 });
   await a.mouse.up();
 
-  const az = await a.evaluate(() => panoState.az0);
+  const az = await a.evaluate(() => skyView.az);
   ok(az !== 180, `dragging left turned the heading off the default (now ${az.toFixed(1)})`);
-  ok(await pixHash(a, box + ' canvas.skyline') !== openBefore, 'and redrew the open canvas');
-  ok(await a.evaluate(k => JSON.parse(localStorage.getItem(k)), 'darksky.panoAz') === az, 'and stored the new heading');
+  ok(await pixHash(a, '.sky-viewer-canvas') !== before, 'and redrew the canvas');
+  ok(await a.evaluate(() => JSON.parse(localStorage.getItem('darksky.skyView')).az) === az, 'and stored the new heading');
   ok(await a.evaluate(() => spotState.active) === null, 'the drag did not select the card');
-  ok(await pixHash(a, '#spot-list .pano:not(.open) canvas.skyline') === thumbBefore,
-    'a closed thumbnail elsewhere on the list is unaffected by the drag');
+
+  // Escape, native to showModal, closes it, and focus returns to the
+  // thumbnail that opened it
+  await a.keyboard.press('Escape');
+  ok(await a.evaluate(() => !document.getElementById('sky-viewer').open), 'Escape closes the viewer');
+  ok(await a.evaluate(() => document.activeElement === document.querySelector('#spot-list canvas.skyline')),
+    'and focus returns to the thumbnail that opened it');
   await a.close();
 
   // a reload brings the heading back; the key is shared, not per spot
   const b = await ctx.newPage();
   await b.goto(URL_ + '#where');
   await b.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
-  ok(await b.evaluate(() => panoState.az0) === az, `a reload restores the shared heading (${az.toFixed(1)})`);
+  ok(await b.evaluate(() => skyView.az) === az, `a reload restores the shared heading (${az.toFixed(1)})`);
 
-  // garbage under the key falls back to the same south the page opens on
-  await b.evaluate(() => localStorage.setItem('darksky.panoAz', 'not a heading'));
+  // garbage under the key falls back to the same default the page opens on
+  await b.evaluate(() => localStorage.setItem('darksky.skyView', 'not a view'));
   await b.close();
   const c = await ctx.newPage();
   await c.goto(URL_ + '#where');
   await c.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
-  ok(await c.evaluate(() => panoState.az0) === 180, 'garbage under the heading key falls back to south');
+  ok(await c.evaluate(() => skyView.az === 180 && skyView.alt === 25 && skyView.fov === 100),
+    'garbage under the heading key falls back to the default view');
 
-  // arrow keys turn the view when the open canvas has focus. darksky.pano
-  // may already have this card open, restored from the earlier visit, so
-  // only click if it is not -- clicking an already-open one would close it
-  if (!(await c.$(box))) await c.click('#spot-list .pano canvas.skyline');
-  await c.waitForSelector(box);
-  await c.focus(box + ' canvas.skyline');
-  const before = await c.evaluate(() => panoState.az0);
+  // arrow keys turn the view when the canvas has focus. darksky.pano may
+  // already have a viewer open, restored from the earlier visit, so only
+  // click if it is not open yet
+  if (!(await c.evaluate(() => document.getElementById('sky-viewer').open))) await c.click(thumb);
+  await c.waitForSelector('#sky-viewer[open]');
+  await c.focus('.sky-viewer-canvas');
+  const rightBefore = await c.evaluate(() => skyView.az);
   await c.keyboard.press('ArrowRight');
-  const afterRight = await c.evaluate(() => panoState.az0);
-  ok(afterRight !== before, `the right arrow key turns the view (${before} to ${afterRight})`);
+  const afterRight = await c.evaluate(() => skyView.az);
+  ok(afterRight !== rightBefore, `the right arrow key turns the view (${rightBefore} to ${afterRight})`);
   await c.keyboard.press('ArrowLeft');
   await c.keyboard.press('ArrowLeft');
-  const afterLeft = await c.evaluate(() => panoState.az0);
+  const afterLeft = await c.evaluate(() => skyView.az);
   ok(afterLeft !== afterRight, 'and the left arrow key turns it back the other way');
+
+  // Home resets the view, whatever it has been dragged or turned to
+  await c.keyboard.press('Home');
+  ok(await c.evaluate(() => skyView.az === 180 && skyView.alt === 25 && skyView.fov === 100),
+    'Home resets to the default view');
   await ctx.close();
 }
 
@@ -415,17 +416,26 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   await a.click('[data-sort="dist"]');
   await a.click('.leaflet-control-layers-base label:has-text("imagery")');
   await a.evaluate(() => spotState.map.setView([35.33, -82.88], 13, { animate: false }));
-  // opening a panorama re-renders the list; it must not reframe the map
+  // opening the sky viewer re-renders the list; it must not reframe the map
   await a.click('#spot-list .pano canvas.skyline');
-  ok(await a.evaluate(() => spotState.map.getZoom()) === 13, 'opening a panorama leaves the map where it was');
+  await a.waitForSelector('#sky-viewer[open]');
+  ok(await a.evaluate(() => spotState.map.getZoom()) === 13, 'opening the sky viewer leaves the map where it was');
+  ok(await a.evaluate(() => spotState.active) === null, 'and does not select the card either');
+  // closed before the keyboard check: an open modal makes everything outside
+  // it inert, so a card canvas cannot take focus while this one is open
+  await a.keyboard.press('Escape');
+  await a.waitForFunction(() => !document.getElementById('sky-viewer').open);
+
   // the same has to hold for a keyboard toggle: tab to the canvas, press enter
   await a.evaluate(() => spotState.map.setView([35.33, -82.88], 13, { animate: false }));
   await a.focus('#spot-list .pano canvas.skyline');
   await a.keyboard.press('Enter');
-  await a.waitForTimeout(800); // flyTo runs 600ms; let it finish either way
+  await a.waitForSelector('#sky-viewer[open]');
   const kb = await a.evaluate(() => ({ zoom: spotState.map.getZoom(), active: spotState.active }));
   ok(kb.zoom === 13, 'a keyboard toggle leaves the map where it was too');
   ok(kb.active === null, 'and does not select the card either');
+  await a.keyboard.press('Escape');
+  await a.waitForFunction(() => !document.getElementById('sky-viewer').open);
   await a.close();
 
   const b = await ctx.newPage();
@@ -481,7 +491,7 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   await ctx.close();
 }
 
-// --- the selected spot, its open panorama and the scrubber come back ---
+// --- the selected spot, its open sky viewer and the scrubber come back ---
 {
   const ctx = await browser.newContext({ viewport: DESKTOP });
   await quiet(ctx);
@@ -491,11 +501,12 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   const name = await a.$eval('#spot-list .spot:nth-child(2)', el => el.dataset.name);
   await a.click('#spot-list .spot:nth-child(2) .name');
   await a.click('#spot-list .spot:nth-child(2) canvas.skyline');
+  await a.waitForSelector('#sky-viewer[open]');
   const clock = await a.evaluate(() => {
-    const s = document.querySelector('#spot-list .pano.open input');
+    const s = document.querySelector('.sky-viewer-time input');
     s.value = String(Math.max(0, Number(s.max) - 3));
     s.dispatchEvent(new Event('input', { bubbles: true }));
-    return document.querySelector('#spot-list .pano.open .pano-time span').textContent;
+    return document.querySelector('.sky-viewer-time span').textContent;
   });
   await a.close();
 
@@ -504,11 +515,11 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   await b.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
   const got = await b.evaluate(() => ({
     active: spotState.active, card: document.querySelector('#spot-list .spot.active')?.dataset.name,
-    open: document.querySelector('#spot-list .pano.open canvas')?.dataset.pano,
-    clock: document.querySelector('#spot-list .pano.open .pano-time span')?.textContent,
+    open: document.getElementById('sky-viewer').open, title: document.getElementById('sky-viewer-title')?.textContent,
+    clock: document.querySelector('.sky-viewer-time span')?.textContent,
   }));
   ok(got.active === name && got.card === name, 'the selected spot comes back selected');
-  ok(got.open === name, 'with its panorama open');
+  ok(got.open && got.title === name, 'with its sky viewer open');
   ok(got.clock === clock, `and the scrubber at the same clock time (${got.clock})`);
 
   ok(await b.evaluate(() => nearestSlice([new Date(2026, 8, 17, 20, 0), new Date(2026, 8, 17, 23, 50), new Date(2026, 8, 18, 0, 10)], '00:05')) === 2,
