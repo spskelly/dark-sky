@@ -28,13 +28,29 @@ function ok(cond, what) {
   if (!cond) failed++;
 }
 
-// the page draws from the network (open-meteo) and from tiles; neither is
-// needed for layout, so a run offline still has to pass
+// a 1x1 transparent png, served locally in place of every light pollution
+// tile. the weather and basemap hosts are simply aborted, since nothing here
+// reads their response; the atlas tiles cannot be, because the light
+// pollution layer is on by default and its own tileerror handler removes the
+// layer and posts a visible message after four failures, which is a change
+// in the behaviour under test, not a quiet no-op.
+const LP_BLANK = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+
+// works on a page or a browser context alike: both expose .route with the
+// same signature, and routing a context covers every page it opens after.
+async function quiet(target) {
+  await target.route('**://api.open-meteo.com/**', r => r.abort());
+  await target.route('**://*.tile.opentopomap.org/**', r => r.abort());
+  await target.route('**://basemap.nationalmap.gov/**', r => r.abort());
+  await target.route('**://djlorenz.github.io/**', r => r.fulfill({ status: 200, contentType: 'image/png', body: LP_BLANK }));
+}
+
+// the page draws from the network (open-meteo, basemap tiles, atlas tiles);
+// none of it is needed for layout, so a run offline still has to pass
 async function open(browser, viewport, hash = '') {
   const page = await browser.newPage({ viewport });
-  await page.route('**://api.open-meteo.com/**', r => r.abort());
-  await page.route('**://*.tile.opentopomap.org/**', r => r.abort());
-  await page.route('**://basemap.nationalmap.gov/**', r => r.abort());
+  await quiet(page);
   await page.goto(URL_ + hash);
   await page.waitForFunction(() => document.querySelectorAll('[role="tabpanel"]').length === 3);
   return page;
@@ -137,6 +153,7 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
 {
   // one context, so the two loads share a localStorage the way two visits do
   const ctx = await browser.newContext({ viewport: DESKTOP });
+  await quiet(ctx);
   const first = await ctx.newPage();
   await first.goto(URL_);
   await first.click('#tab-tonight');
@@ -158,6 +175,7 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
 // --- values saved by the page before recall/remember existed still load ---
 {
   const ctx = await browser.newContext({ viewport: DESKTOP });
+  await quiet(ctx);
   const seed = await ctx.newPage();
   await seed.goto(URL_);
   await seed.evaluate(() => {
@@ -220,12 +238,8 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
 // --- how the where tab was left comes back ---
 {
   const ctx = await browser.newContext({ viewport: DESKTOP });
-  const routeAll = async p => {
-    await p.route('**://api.open-meteo.com/**', r => r.abort());
-    await p.route('**://*.tile.opentopomap.org/**', r => r.abort());
-    await p.route('**://basemap.nationalmap.gov/**', r => r.abort());
-  };
-  const a = await ctx.newPage(); await routeAll(a);
+  await quiet(ctx);
+  const a = await ctx.newPage();
   await a.goto(URL_ + '#where');
   await a.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
   await a.click('[data-filter="camp"]');
@@ -245,7 +259,7 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   ok(kb.active === null, 'and does not select the card either');
   await a.close();
 
-  const b = await ctx.newPage(); await routeAll(b);
+  const b = await ctx.newPage();
   await b.goto(URL_ + '#where');
   await b.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
   const got = await b.evaluate(() => ({
@@ -271,7 +285,7 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
     localStorage.setItem('darksky.mapView', JSON.stringify({ lat: 5, lon: 5, zoom: 99 }));
   });
   await b.close();
-  const c = await ctx.newPage(); await routeAll(c);
+  const c = await ctx.newPage();
   await c.goto(URL_ + '#where');
   await c.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
   const bad = await c.evaluate(() => ({ filter: spotState.filter, sort: spotState.sort,
@@ -285,8 +299,8 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
 // --- the selected spot, its open panorama and the scrubber come back ---
 {
   const ctx = await browser.newContext({ viewport: DESKTOP });
+  await quiet(ctx);
   const a = await ctx.newPage();
-  await a.route('**://api.open-meteo.com/**', r => r.abort());
   await a.goto(URL_ + '#where');
   await a.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
   const name = await a.$eval('#spot-list .spot:nth-child(2)', el => el.dataset.name);
@@ -301,7 +315,6 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   await a.close();
 
   const b = await ctx.newPage();
-  await b.route('**://api.open-meteo.com/**', r => r.abort());
   await b.goto(URL_ + '#where');
   await b.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
   const got = await b.evaluate(() => ({
@@ -319,6 +332,113 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   await b.reload();
   await b.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
   ok(await b.evaluate(() => spotState.active === null && spotState.pano === null), 'a remembered spot that no longer exists is dropped');
+  await ctx.close();
+}
+
+// --- the parkway overlooks layer ---
+{
+  const ctx = await browser.newContext({ viewport: DESKTOP });
+  await quiet(ctx);
+  const a = await ctx.newPage();
+  await a.goto(URL_ + '#where');
+  await a.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
+  const n = await a.evaluate(() => OVERLOOKS.length);
+  ok(n > 50, `the page carries the overlooks (${n})`);
+  ok(await a.$$eval('.ovl-pin', e => e.length) === 0, 'the layer is off on a first visit');
+  await a.click('.leaflet-control-layers-overlays label:has-text("parkway overlooks")');
+  ok(await a.$$eval('.ovl-pin', e => e.length) === n, 'switching it on draws one marker per overlook');
+  ok(await a.$$eval('#spot-list .spot', e => e.length) === 40, 'and the 40 cards are still 40');
+
+  // open one from the middle of the list, not an end of it
+  const id = await a.evaluate(() => OVERLOOKS[Math.floor(OVERLOOKS.length / 2)].id);
+  await a.evaluate(i => OVL_open(i), id);
+  await a.waitForSelector('.leaflet-popup .ovl canvas.skyline');
+  const pop = await a.evaluate(() => {
+    const c = document.querySelector('.leaflet-popup .ovl canvas.skyline');
+    const px = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    // a filled sky-wash background alone (no stars, moon or labels) tops out
+    // well under 600 for r+g+b, so counting only genuinely bright pixels
+    // tells a real panorama apart from a background a solid fill could also
+    // produce; distinct sampled colours is a cheap second signal against a
+    // uniform fill specifically. thresholds measured against the flattest and
+    // most enclosed overlook in tools/.shots/measure-canvas-signal.mjs.
+    let bright = 0;
+    const colours = new Set();
+    for (let i = 0; i < px.length; i += 4) {
+      if (px[i] + px[i + 1] + px[i + 2] > 600) bright++;
+      if ((i / 4) % 37 === 0) colours.add(px[i] + ',' + px[i + 1] + ',' + px[i + 2]);
+    }
+    return { sized: c.width === Math.round(c.clientWidth * devicePixelRatio) && c.clientWidth > 200, bright, colours: colours.size,
+             text: document.querySelector('.leaflet-popup .ovl').textContent };
+  });
+  ok(pop.sized, 'the popup panorama is painted at its real width');
+  ok(pop.bright > 1, `and paints real stars, moon or labels, not just a filled background (${pop.bright} bright px)`);
+  ok(pop.colours >= 30, `with more than a flat wash of colour (${pop.colours} distinct, sampled)`);
+  ok(/\d,?\d{3} ft/.test(pop.text), 'the popup lists the elevation');
+  ok(pop.text.includes('modelled from bare earth, not visited; trees and the cut bank are not in it'), 'and says what the model cannot see');
+  await a.close();
+
+  const b = await ctx.newPage();
+  await b.goto(URL_ + '#where');
+  await b.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
+  ok(await b.$$eval('.ovl-pin', e => e.length) === n, 'the layer comes back on');
+  ok(await b.evaluate(i => spotState.active === 'ov:' + i, id), 'and the overlook that was open is still the selected one');
+  ok(await b.$('.leaflet-popup .ovl canvas.skyline') !== null, 'with its popup open');
+  await ctx.close();
+}
+
+// --- the overlook popup fits a phone ---
+{
+  const ctx = await browser.newContext({ viewport: PHONE });
+  await quiet(ctx);
+  const page = await ctx.newPage();
+  await page.goto(URL_ + '#where');
+  await page.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
+  // the layers control collapses to an icon under 720px and only expands on
+  // real hover, which a synthetic click does not reliably trigger; a direct
+  // dom click on the checkbox sidesteps that and still fires leaflet's toggle
+  await page.evaluate(() => {
+    const label = [...document.querySelectorAll('.leaflet-control-layers-overlays label')]
+      .find(l => l.textContent.includes('parkway overlooks'));
+    label.querySelector('input').click();
+  });
+  const id = await page.evaluate(() => OVERLOOKS[Math.floor(OVERLOOKS.length / 2)].id);
+  await page.evaluate(i => OVL_open(i), id);
+  await page.waitForSelector('.leaflet-popup .ovl canvas.skyline');
+  await page.waitForTimeout(500); // let leaflet's autopan finish settling
+  const fit = await page.evaluate(() => {
+    const map = document.getElementById('map').getBoundingClientRect();
+    const wrap = document.querySelector('.leaflet-popup').getBoundingClientRect();
+    const title = document.querySelector('.leaflet-popup .ovl b').getBoundingClientRect();
+    const c = document.querySelector('.leaflet-popup .ovl canvas.skyline');
+    const within = (r, box) => r.left >= box.left && r.right <= box.right && r.top >= box.top && r.bottom <= box.bottom;
+    return { wrapWithin: within(wrap, map), titleWithin: within(title, map),
+             sized: c.width === Math.round(c.clientWidth * devicePixelRatio) && c.clientWidth > 0,
+             wrap, map };
+  });
+  ok(fit.wrapWithin, `the popup sits inside the map on a phone (popup ${Math.round(fit.wrap.width)}x${Math.round(fit.wrap.height)}, map ${Math.round(fit.map.width)}x${Math.round(fit.map.height)})`);
+  ok(fit.titleWithin, 'and the title is inside the map too, not clipped above it');
+  ok(fit.sized, 'and the canvas is still painted at its real width');
+
+  // sitting inside the map's own box is not the same as being paintable: the
+  // map's corner controls live in leaflet's control pane, above the popup
+  // pane regardless of any z-index on the popup, and can still cover it
+  const painted = await page.evaluate(() => {
+    const r = document.querySelector('.leaflet-popup .ovl b').getBoundingClientRect();
+    const insidePopup = el => !!el && !!el.closest('.leaflet-popup');
+    return { left: insidePopup(document.elementFromPoint(r.left + 3, r.top + r.height / 2)),
+             right: insidePopup(document.elementFromPoint(r.right - 3, r.top + r.height / 2)) };
+  });
+  ok(painted.left, 'the left edge of the title paints as itself, not a map control sitting over it');
+  ok(painted.right, 'and so does the right edge');
+
+  await page.evaluate(() => spotState.map.closePopup());
+  await page.waitForTimeout(100);
+  const back = await page.evaluate(() => ({
+    narrow: document.getElementById('map').classList.contains('ovl-popup-narrow'),
+    zoomVisible: getComputedStyle(document.querySelector('.leaflet-control-zoom')).visibility !== 'hidden',
+  }));
+  ok(!back.narrow && back.zoomVisible, 'and the zoom control is back once the popup closes');
   await ctx.close();
 }
 

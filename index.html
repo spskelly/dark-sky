@@ -300,27 +300,44 @@
                      box-shadow: 0 0 0 1px rgba(255,255,255,0.28); }
   .spot .links { margin-top: 6px; font-size: 12px; }
   /* the skyline panorama. collapsed it is a comparison strip, open it is the
-     sky over the ridge with a scrubber across the dark part of tonight. */
-  .spot .pano { margin-top: 8px; }
-  .spot .pano canvas.skyline { display: block; width: 100%; height: 54px; border-radius: 5px;
+     sky over the ridge with a scrubber across the dark part of tonight. the
+     overlook popup uses the same box, always in its open state, so every
+     rule below is shared with .ovl rather than duplicated for it. */
+  .spot .pano, .ovl .pano { margin-top: 8px; }
+  .spot .pano canvas.skyline, .ovl canvas.skyline { display: block; width: 100%; height: 54px; border-radius: 5px;
     background: #070c18; cursor: zoom-in; border: 1px solid rgba(255,255,255,0.06);
     transition: height .18s ease; }
   .spot .pano canvas.skyline:hover { border-color: rgba(95,194,173,0.45); }
   .spot .pano canvas.skyline:focus-visible { outline: 2px solid var(--accent, #5fc2ad); outline-offset: 2px; }
-  .spot .pano.open canvas.skyline { height: 230px; cursor: zoom-out; }
-  .spot .pano-sum { margin: 6px 0 0; font-size: 12px; line-height: 1.5; color: var(--ink-dim); }
-  .spot .pano-time { display: none; align-items: center; gap: 8px; margin-top: 6px;
+  .spot .pano.open canvas.skyline, .ovl .pano.open canvas.skyline { height: 230px; cursor: zoom-out; }
+  /* the popup never toggles, so it gets no zoom cursor */
+  .ovl .pano.open canvas.skyline { cursor: default; }
+  .spot .pano-sum, .ovl .pano-sum { margin: 6px 0 0; font-size: 12px; line-height: 1.5; color: var(--ink-dim); }
+  .spot .pano-time, .ovl .pano-time { display: none; align-items: center; gap: 8px; margin-top: 6px;
     font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-dim); }
-  .spot .pano.open .pano-time { display: flex; }
-  .spot .pano-time span { min-width: 58px; font-variant-numeric: tabular-nums; }
-  .spot .pano-time input { flex: 1; accent-color: var(--accent, #5fc2ad); cursor: pointer; }
-  @media (max-width: 720px) { .spot .pano.open canvas.skyline { height: 170px; } }
+  .spot .pano.open .pano-time, .ovl .pano.open .pano-time { display: flex; }
+  .spot .pano-time span, .ovl .pano-time span { min-width: 58px; font-variant-numeric: tabular-nums; }
+  .spot .pano-time input, .ovl .pano-time input { flex: 1; accent-color: var(--accent, #5fc2ad); cursor: pointer; }
+  @media (max-width: 720px) { .spot .pano.open canvas.skyline, .ovl .pano.open canvas.skyline { height: 170px; } }
+  /* the popup's own maxHeight (set from the map's size when it opens) is a
+     lot less generous than a card's height, so on a narrow map the canvas
+     gives up more of itself than the card does: the title and the scrubber
+     matter more there than 170px of extra ridge does. */
+  @media (max-width: 720px) { .ovl .pano.open canvas.skyline { height: 100px; } }
+  .ovl-caveat { font-size: 11px; opacity: .7; margin: 6px 0; }
   .spot .links a { color: var(--moon-dim); text-decoration: none; margin-right: 12px; }
   .spot .links a:hover { color: var(--moon); text-decoration: underline; }
   .leaflet-container { font-family: var(--sans); }
   .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--night-2); color: var(--ink); box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
   .leaflet-popup-content { margin: 10px 14px; font-size: 13px; line-height: 1.4; }
   .leaflet-popup-content b { color: var(--moon); font-weight: 500; }
+  /* leaflet's control pane sits above the popup pane no matter what z-index
+     the popup gets, so on a narrow map an open overlook popup instead pushes
+     the top corner controls out of the way, in code, on open and off on
+     close. hidden rather than removed, so nothing reflows; the bottom
+     attribution is left alone, since several tile sources' licences require
+     it stay visible. */
+  .ovl-popup-narrow .leaflet-top { visibility: hidden; }
   .pin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--night); box-shadow: 0 0 0 1px rgba(255,255,255,0.15); }
   .pin.camp { background: var(--dark-sky); }
   .pin.view { background: var(--moon); }
@@ -330,6 +347,9 @@
      reads as secondary to the pin you drive to. */
   .pin.viewpoint { background: transparent; border: 2px dashed var(--moon); width: 12px; height: 12px;
     box-shadow: none; opacity: .85; }
+  /* an unnamed pull-off, not a checked spot: small and outlined rather than a
+     full pin, filled with its own sky glow band */
+  .ovl-pin { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--moon); opacity: .9; }
   /* what the map draws, as opposed to which spots it draws: kept next to the
      map rather than up in the spot toolbar, and reachable on a phone without
      opening leaflet's own layer control */
@@ -3937,6 +3957,48 @@ function fmtClock(d) {
   return h + ':' + m + ap;
 }
 
+// paints one panorama box: the canvas, the summary line and the scrubber. the
+// cards and the overlook popups both come through here, so a fix to one is a
+// fix to both.
+function paintPano(box, o) {
+  const { key, horizon, lat, lon, elevM, open } = o;
+  const cv = box.querySelector('canvas.skyline');
+  const nights = panoNight(lat, lon);
+  const slider = box.querySelector('input');
+  slider.max = String(nights.length - 1);
+  // opens at 9pm, the hour the calendar already draws its phases at
+  const idx = nearestSlice(nights, panoState.when.get(key) || '21:00');
+  slider.value = String(idx);
+
+  // a frame that fails falls back to the strip rather than taking the whole
+  // panorama out. only missing or undecodable data removes the box, above.
+  const paint = () => {
+    const date = nights[Number(slider.value)];
+    try {
+      drawPanorama(cv, { horizon, lat, lon, elevM, date, mode: open ? 'full' : 'thumb' });
+    } catch (e) {
+      if (!window.__panoWarned) { window.__panoWarned = true; console.warn('panorama:', e); }
+      box.classList.remove('open');
+      try { drawPanorama(cv, { horizon, lat, lon, elevM, date, mode: 'thumb' }); } catch (e2) {}
+    }
+    box.querySelector('.pano-time span').textContent = fmtClock(date);
+  };
+  paint();
+
+  // the summary is the canvas's accessible text and the most useful line on
+  // the card, so it shows whether the panorama is open or not
+  const sum = box.querySelector('.pano-sum');
+  try { sum.textContent = horizonSummary({ horizon, lat, lon, elevM, date: nights[idx] }); }
+  catch (e) { sum.remove(); }
+
+  slider.oninput = () => {
+    panoState.when.set(key, hhmm(nights[Number(slider.value)]));
+    remember('darksky.panoWhen', Object.fromEntries(panoState.when));
+    paint();
+  };
+  slider.onclick = ev => ev.stopPropagation();
+}
+
 function drawSkylines() {
   if (typeof drawPanorama !== 'function') return;
   // the spot list starts life inside a hidden tab panel, where a canvas has no
@@ -3960,41 +4022,7 @@ function drawSkylines() {
     const lon = s.view ? s.view[1] : s.lon;
     const elevM = s.elev * 0.3048;
 
-    const nights = panoNight(lat, lon);
-    const slider = box.querySelector('input');
-    slider.max = String(nights.length - 1);
-    // a card opens at 9pm, the hour the calendar already draws its phases at
-    const idx = nearestSlice(nights, panoState.when.get(s.name) || '21:00');
-    slider.value = String(idx);
-
-    // a frame that fails falls back to the strip rather than taking the whole
-    // panorama out. only missing or undecodable data removes the box, above.
-    const paint = () => {
-      const date = nights[Number(slider.value)];
-      try {
-        drawPanorama(cv, { horizon, lat, lon, elevM, date, mode: open ? 'full' : 'thumb' });
-      } catch (e) {
-        if (!window.__panoWarned) { window.__panoWarned = true; console.warn('panorama:', e); }
-        box.classList.remove('open');
-        try { drawPanorama(cv, { horizon, lat, lon, elevM, date, mode: 'thumb' }); } catch (e2) {}
-      }
-      box.querySelector('.pano-time span').textContent = fmtClock(date);
-    };
-    paint();
-
-    // the summary is the canvas's accessible text and the most useful line on
-    // the card, so it shows whether the panorama is open or not
-    const sum = box.querySelector('.pano-sum');
-    try { sum.textContent = horizonSummary({ horizon, lat, lon, elevM, date: nights[idx] }); }
-    catch (e) { sum.remove(); }
-
-    slider.oninput = () => {
-      panoState.when.set(s.name, hhmm(nights[Number(slider.value)]));
-      remember('darksky.panoWhen', Object.fromEntries(panoState.when));
-      paint();
-    };
-    slider.onclick = ev => ev.stopPropagation();
-
+    paintPano(box, { key: s.name, horizon, lat, lon, elevM, open });
   });
 }
 
@@ -4610,6 +4638,96 @@ const OVERLOOKS = [
 ];
 // --- overlooks:end ---
 
+// ---------- parkway overlooks ----------
+
+// an overlay of its own, off until asked for: nobody has stood at these the
+// way the curated spots were checked, and the model starts 150 m out, so a
+// pull-off that has grown in draws far more open than it is. the marker is
+// filled with the overlook's sky glow band, which makes the map itself the
+// answer to "which one near me is darkest" before anything is clicked.
+const OVL_KEY = 'darksky.overlooks';
+const OVL_markers = new Map();
+
+// osm names, and the sentences generated off them, are untrusted text landing
+// in html: anyone can edit an osm name. escaped everywhere one is interpolated
+// into a popup, never where leaflet sets it as a dom attribute itself.
+const OVL_esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function OVL_popup(o) {
+  const h = OVERLOOK_HORIZONS[o.id], sky = OVERLOOK_SKY[o.id];
+  const gm = `https://www.google.com/maps/dir/?api=1&destination=${o.lat},${o.lon}`;
+  return `<div class="ovl"><b>${OVL_esc(o.name)}</b><br>${[o.mp !== undefined ? 'parkway mp ' + o.mp : '', h ? h[0].toLocaleString() + ' ft' : ''].filter(Boolean).join(' &middot; ')}
+    ${h ? `<div class="pano open"><canvas class="skyline" aria-label="skyline and sky from ${OVL_esc(o.name)}"></canvas>
+      <p class="pano-sum"></p>
+      <label class="pano-time"><span></span><input type="range" min="0" max="1" step="1" value="0" aria-label="time of night"></label></div>` : ''}
+    ${sky ? `<div class="sky">${skySwatch(sky[0])}${OVL_esc(sky[1])}</div>` : ''}
+    <p class="ovl-caveat">modelled from bare earth, not visited; trees and the cut bank are not in it</p>
+    <div class="links"><a href="${gm}" target="_blank" rel="noopener">directions</a></div></div>`;
+}
+
+function OVL_layer() {
+  const group = L.layerGroup();
+  for (const o of OVERLOOKS) {
+    const sky = OVERLOOK_SKY[o.id];
+    const mk = L.marker([o.lat, o.lon], { title: o.name, zIndexOffset: -200, icon: L.divIcon({ className: '',
+      html: `<div class="ovl-pin" style="background:${sky ? sky[0] : 'transparent'}"></div>`, iconSize: [10, 10], iconAnchor: [5, 5] }) })
+      .bindPopup(() => OVL_popup(o), { minWidth: 280, maxWidth: 420 });
+    // the horizon is decoded when a popup opens, not for all of them at load
+    mk.on('popupopen', e => {
+      spotState.active = 'ov:' + o.id;
+      remember('darksky.active', spotState.active);
+      // the bound options above are a phone-shaped popup's undoing: fixed
+      // regardless of viewport, they can lay out wider and taller than the
+      // map itself. size from the map's own box instead, so a rotated phone
+      // is covered too, not just the one width tested. leaflet has already
+      // laid the popup out once by the time popupopen fires, so the options
+      // are corrected here and update() tells it to redo that layout,
+      // including the autopan, against the new numbers. leaflet also clamps
+      // minWidth/maxWidth against the inner content box, not the outer popup
+      // that actually has to fit inside the map: this page's own
+      // .leaflet-popup-content margin (10px 14px) plus leaflet's default 1px
+      // wrapper padding and +1px rounding put the outer box about 31px wider
+      // than that, so the option is asked for what it actually means.
+      const sz = spotState.map.getSize();
+      const chromeW = 32;
+      const maxW = Math.max(200, Math.min(420, sz.x - 40 - chromeW));
+      e.popup.options.minWidth = Math.min(280, maxW);
+      e.popup.options.maxWidth = maxW;
+      // taller than this and leaflet scrolls the content instead of letting
+      // it run off the map; a modest pad keeps the popup off the map's edge
+      e.popup.options.maxHeight = Math.max(120, sz.y - 40);
+      e.popup.options.autoPanPadding = [16, 16];
+      e.popup.update();
+
+      // on the same narrow map the popup itself just shrank for, the zoom
+      // and layers controls sit in leaflet's own control pane, above the
+      // popup pane no matter what z-index the popup gets, and land right
+      // over its top corners. narrow is the same width check that shrank
+      // the popup above, not a second breakpoint: below 420 the popup was
+      // already asked to give something up.
+      spotState.map.getContainer().classList.toggle('ovl-popup-narrow', maxW < 420);
+
+      const box = e.popup.getElement().querySelector('.pano');
+      const h = OVERLOOK_HORIZONS[o.id];
+      if (!box || !h) return;
+      let horizon;
+      try { horizon = decodeHorizon(h[1]); } catch (err) { box.remove(); return; }
+      paintPano(box, { key: 'ov:' + o.id, horizon, lat: o.lat, lon: o.lon, elevM: h[0] * 0.3048, open: true });
+    });
+    // whatever closes this popup (its own button, a tap on the map, another
+    // marker's popup opening, or the overlay being switched off, which
+    // removes the marker and leaflet closes its popup as part of that) puts
+    // the controls back
+    mk.on('popupclose', () => spotState.map.getContainer().classList.remove('ovl-popup-narrow'));
+    OVL_markers.set(o.id, mk);
+    group.addLayer(mk);
+  }
+  return group;
+}
+
+// used by the restore below and by the browser check
+function OVL_open(id) { OVL_markers.get(id)?.openPopup(); }
+
 function drawParkway(map) {
   if (!PARKWAY.length) return;
   document.querySelector('.road-key').hidden = false;
@@ -4673,6 +4791,7 @@ function initMap() {
   // one, so it belongs in the same control as an overlay, not in a toolbar of
   // its own beside the map
   const lp = lightPollutionLayer();
+  const ovl = OVL_layer();
   const bases = { topo, imagery };
   bases[oneOf(recall('darksky.basemap', 'topo'), ['topo', 'imagery'], 'topo')].addTo(map);
   map.on('baselayerchange', e => remember('darksky.basemap', e.name));
@@ -4684,7 +4803,7 @@ function initMap() {
   // open on a wide screen, where it costs nothing; an icon on a phone, where
   // an always-open box covers a corner of a map that is already small
   const narrow = window.matchMedia('(max-width: 720px)').matches;
-  L.control.layers({ 'topo': topo, 'imagery': imagery }, { 'light pollution': lp },
+  L.control.layers({ 'topo': topo, 'imagery': imagery }, { 'light pollution': lp, 'parkway overlooks': ovl },
     { position: 'topright', collapsed: narrow }).addTo(map);
   spotState.map = map;
   for (const s of SPOTS) {
@@ -4704,6 +4823,9 @@ function initMap() {
   drawParkway(map);
   // after the control exists, so switching it on fires the control's own event
   initLightPollution(map, lp);
+  map.on('overlayadd', e => { if (e.layer === ovl) remember(OVL_KEY, '1'); });
+  map.on('overlayremove', e => { if (e.layer === ovl) remember(OVL_KEY, '0'); });
+  if (String(recall(OVL_KEY, '0')) === '1') ovl.addTo(map);
   placeHome();
   // the markers were all just added; a remembered filter has to take the
   // filtered-out ones off again. this render does not reframe: fitKey is null.
@@ -4712,6 +4834,10 @@ function initMap() {
   // remembered separately and is where the reader left it
   const back = SPOTS.find(s => s.name === spotState.active);
   if (back) { loadSpotForecast(back); spotState.markers.get(back.name)?.openPopup(); }
+  // an overlook id in darksky.active was dropped by spotState's own initialiser,
+  // since OVERLOOKS is declared below it in the file; recover it here instead
+  const ovBack = String(recall('darksky.active', '')).startsWith('ov:') ? String(recall('darksky.active', '')).slice(3) : null;
+  if (ovBack && OVL_markers.has(ovBack) && map.hasLayer(ovl)) { spotState.active = 'ov:' + ovBack; OVL_open(ovBack); }
   // after everything that moves the map on its own account, so only the
   // reader's own panning and zooming is what gets remembered
   map.on('moveend', () => {
