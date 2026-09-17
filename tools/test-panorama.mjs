@@ -18,6 +18,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { join, dirname } from 'node:path';
 
 const src = readFileSync(new URL('./sky-panorama.js', import.meta.url), 'utf8');
 // the sky-panorama.js source assumes HORIZON_ALT_MIN/RANGE from the generated
@@ -25,7 +28,7 @@ const src = readFileSync(new URL('./sky-panorama.js', import.meta.url), 'utf8');
 const ctx = { Math, HORIZON_ALT_MIN: -10, HORIZON_ALT_RANGE: 90 };
 vm.createContext(ctx);
 vm.runInContext(src, ctx);
-const { azToX, wrapNear, panProject } = ctx;
+const { azToX, wrapNear, panProject, easternInstant, easternParts } = ctx;
 
 test('azToX is a plain affine map: the window edges land on 0 and w', () => {
   // centre 180, a 120 degree window: the edges are 120 and 240
@@ -169,4 +172,44 @@ test('panProject: fov is a true angular field, not an azimuth degree count', () 
   assert.ok(trueEdge.y < 300, 'and moves toward the top of the canvas');
   const radius = Math.hypot(trueEdge.x - 500, trueEdge.y - 300);
   assert.ok(Math.abs(radius - 500) < 1e-6, `fov/2 of true angular distance lands exactly on the edge radius (${radius})`);
+});
+
+// eastern-date anchoring: which evening a picked date or "tonight" means has
+// to come from the eastern civil calendar, DST-safe, and never from the
+// reader's own device clock.
+// ponytail: {...x} rather than x itself in every deepEqual below -- x comes
+// back from the vm context sky-panorama.js runs in, a different realm with
+// its own Object.prototype, and deepEqual's strict mode treats that as "not
+// the same kind of object" even when every field matches. spreading it into
+// a literal built in this realm is the cheap fix; panProject's own tests
+// above sidestep the same issue by comparing plain numbers instead.
+test('easternInstant: a January evening (standard time) round-trips to 17:00 eastern', () => {
+  assert.deepEqual({ ...easternParts(easternInstant(2026, 1, 15, 17)) }, { y: 2026, mo: 1, d: 15, h: 17, mi: 0 });
+});
+test('easternInstant: a July evening (daylight time) round-trips to 17:00 eastern', () => {
+  assert.deepEqual({ ...easternParts(easternInstant(2026, 7, 15, 17)) }, { y: 2026, mo: 7, d: 15, h: 17, mi: 0 });
+});
+test('easternInstant: the 2026 spring-forward date (clocks jump at 2am eastern) still round-trips to 17:00', () => {
+  assert.deepEqual({ ...easternParts(easternInstant(2026, 3, 8, 17)) }, { y: 2026, mo: 3, d: 8, h: 17, mi: 0 });
+});
+test('easternInstant: the 2026 fall-back date (clocks jump at 2am eastern) still round-trips to 17:00', () => {
+  assert.deepEqual({ ...easternParts(easternInstant(2026, 11, 1, 17)) }, { y: 2026, mo: 11, d: 1, h: 17, mi: 0 });
+});
+test('easternInstant: the four dates above are not all the same UTC offset (DST actually moved something)', () => {
+  const utcHours = [[2026, 1, 15], [2026, 7, 15], [2026, 3, 8], [2026, 11, 1]]
+    .map(([y, mo, d]) => easternInstant(y, mo, d, 17).getUTCHours());
+  assert.deepEqual(utcHours, [22, 21, 21, 22], `UTC hour of 5pm eastern on each date: ${utcHours}`);
+});
+
+test('easternInstant/easternParts do not depend on the process\'s own timezone: TZ=Asia/Tokyo gives the same instants and eastern parts', () => {
+  const child = join(dirname(fileURLToPath(import.meta.url)), 'eastern-tz-child.mjs');
+  const out = execFileSync(process.execPath, [child], { env: { ...process.env, TZ: 'Asia/Tokyo' }, encoding: 'utf8' });
+  const fromTokyo = JSON.parse(out);
+  const dates = [[2026, 1, 15], [2026, 7, 15], [2026, 3, 8], [2026, 11, 1]];
+  const fromHere = dates.map(([y, mo, d]) => {
+    const t = easternInstant(y, mo, d, 17);
+    return { iso: t.toISOString(), parts: { ...easternParts(t) } };
+  });
+  assert.deepEqual(fromTokyo, fromHere,
+    'a Tokyo process timezone must not change which instant or which eastern date these resolve to');
 });

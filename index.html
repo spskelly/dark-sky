@@ -3036,7 +3036,8 @@ const CONSTELLATION_LINES = [
                         horizons block, which is why they are not declared here
 
    public: decodeHorizon(s), drawPanorama(canvas, opts), horizonSummary(opts),
-            panProject(alt, az, view), panDir16(az)
+            panProject(alt, az, view), panDir16(az),
+            easternParts(instant), easternInstant(y, mo, d, hour, minute)
 */
 
 const PAN_D2R = Math.PI / 180;
@@ -3866,17 +3867,58 @@ const PAN_DIR16 = ['north', 'north-northeast', 'northeast', 'east-northeast', 'e
   'west', 'west-northwest', 'northwest', 'north-northwest'];
 const panDir16 = az => PAN_DIR16[Math.round((((az % 360) + 360) % 360) / 22.5) % 16];
 
+// ---------- eastern civil date, DST-safe and independent of the reader's own clock ----------
+// every spot is in north carolina; "which evening" is always an eastern
+// question, so the reader's device timezone cannot be part of the answer --
+// a browser set to Tokyo has to land on the same night a browser set to
+// Eastern does, for the same instant, and the same calendar date picked in
+// either one has to open the same evening's dark hours.
+
+// the eastern wall-clock date and time an instant reads as
+function easternParts(instant) {
+  const p = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(instant);
+  const v = t => Number(p.find(x => x.type === t).value);
+  return { y: v('year'), mo: v('month'), d: v('day'), h: v('hour'), mi: v('minute') };
+}
+
+// the calendar day before y-mo-d, as plain numbers rather than an instant:
+// a Date built and read back with its own local getters never crosses a
+// timezone boundary, so this is safe on any device regardless of DST.
+function prevCivilDay(y, mo, d) {
+  const t = new Date(y, mo - 1, d - 1);
+  return { y: t.getFullYear(), mo: t.getMonth() + 1, d: t.getDate() };
+}
+
+// the UTC instant whose eastern civil clock reads hour:00 on y-mo-d, found
+// by trying eastern's two possible whole-hour offsets from UTC and checking
+// which one actually reads back that way, rather than assuming which one
+// applies. arithmetic that assumed a fixed offset would land an hour off on
+// the two days a year the offset changes; this does not, because it never
+// assumes -- it asks the timezone database, through Intl, and checks.
+function easternInstant(y, mo, d, hour, minute = 0) {
+  for (const offset of [5, 4]) {   // standard time (UTC-5), then daylight (UTC-4)
+    const guess = new Date(Date.UTC(y, mo - 1, d, hour + offset, minute, 0));
+    const p = easternParts(guess);
+    if (p.y === y && p.mo === mo && p.d === d && p.h === hour && p.mi === minute) return guess;
+  }
+  // every real date matches one of the two tries above; this is only reached
+  // by a y-mo-d that does not exist, and standard time is as good a guess as any
+  return new Date(Date.UTC(y, mo - 1, d, hour + 5, minute, 0));
+}
+
 // dusk to dawn, civil twilight either side. stepped rather than solved: this
 // runs once per card, not per frame.
 // ponytail: no crossing found means the sun never left civil twilight, which
 // does not happen in the carolinas. the fallback keeps the card from going
 // blank if the function is ever pointed somewhere arctic.
 function nightWindow(opts) {
-  const noon = new Date(opts.date);
-  // 1am belongs to the evening before it, which is the night the card is
-  // showing, so anchor on that day's noon rather than on the calendar date
-  if (noon.getHours() < 12) noon.setDate(noon.getDate() - 1);
-  noon.setHours(12, 0, 0, 0);
+  // 1am (eastern) belongs to the evening before it, which is the night the
+  // card is showing, so anchor on that day's eastern noon rather than on the
+  // instant's own eastern calendar date
+  const ep = easternParts(opts.date);
+  const day = ep.h < 12 ? prevCivilDay(ep.y, ep.mo, ep.d) : ep;
+  const noon = easternInstant(day.y, day.mo, day.d, 12);
   const alt = function (t) {
     const jd = Sky.julianDay(t);
     const s = Sky.sunPosition(jd);
@@ -4448,7 +4490,11 @@ function loadPanoAz() {
   return isFinite(v) ? ((v % 360) + 360) % 360 : 180;
 }
 const panoState = { when: new Map(Object.entries(recall('darksky.panoWhen', {}) || {})), az0: loadPanoAz() };
-const hhmm = d => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+// eastern clock time, not the reader's own device clock: the slices below
+// are anchored on the eastern evening, so the label that picks one out of
+// them has to be read on the same clock or a Tokyo reader's scrubber would
+// never line up with the slice it is meant to select.
+const hhmm = d => { const p = easternParts(d); return String(p.h).padStart(2, '0') + ':' + String(p.mi).padStart(2, '0'); };
 // minutes since 5pm, so 00:10 sorts after 23:50 rather than before 20:00
 const sinceFive = s => { const [h, m] = String(s).split(':').map(Number); return ((h * 60 + m) - 17 * 60 + 1440) % 1440; };
 function nearestSlice(nights, want) {
@@ -4461,11 +4507,18 @@ function nearestSlice(nights, want) {
   return best;
 }
 
-// the dark part of tonight, in ten minute slices, sunset to sunrise. a card
-// opens at 9pm, the hour the calendar already draws its phases at.
-function panoNight(lat, lon) {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 17, 0, 0);
+// the dark part of one evening, in ten minute slices, sunset to sunrise. a
+// card opens at 9pm, the hour the calendar already draws its phases at.
+// date, if given, is a plain Date whose year/month/day (read with its own
+// local getters, safe: nothing here crosses a timezone boundary with it)
+// name the eastern evening to show; with nothing given, that evening is
+// tonight, found from the eastern civil date of the current instant rather
+// than the reader's own -- "tonight" cannot depend on which clock asked.
+function panoNight(lat, lon, date) {
+  const day = date
+    ? { y: date.getFullYear(), mo: date.getMonth() + 1, d: date.getDate() }
+    : (({ y, mo, d }) => ({ y, mo, d }))(easternParts(new Date()));
+  const start = easternInstant(day.y, day.mo, day.d, 17);
   const out = [];
   for (let i = 0; i <= 84; i++) {
     const t = new Date(start.getTime() + i * 600000);
@@ -4474,7 +4527,7 @@ function panoNight(lat, lon) {
     // astronomical-ish twilight: below -6 the brighter stars are out
     if (Sky.equatorialToHorizontal(sun.ra, sun.dec, Sky.lmst(jd, lon), lat).alt < -6) out.push(t);
   }
-  return out.length ? out : [new Date(now.getFullYear(), now.getMonth(), now.getDate(), 21, 0, 0)];
+  return out.length ? out : [new Date(start.getTime() + 4 * 3600000)];
 }
 
 // Eastern, same as panTime and for the same reason: getHours/getMinutes read
@@ -4677,7 +4730,11 @@ function skyViewerEls() {
   };
 }
 
-const isoDate = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const isoDate = (y, mo, d) => `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+// today, on the eastern civil calendar: "tonight" cannot depend on which
+// calendar the reader's own device happens to be showing
+const easternTodayISO = () => { const p = easternParts(new Date()); return isoDate(p.y, p.mo, p.d); };
+const fmtEasternDay = (y, mo, d) => new Date(y, mo - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
 function openSkyViewer(o) {
   const els = skyViewerEls();
@@ -4691,13 +4748,15 @@ function openSkyViewer(o) {
   viewerState.elevM = o.elevM || 0;
   viewerState.sky = o.sky || '';
   viewerState.caveat = o.caveat || '';
-  // the date picker lands in the next slice; every viewer opens on tonight
-  // until then, same as the card it replaces
-  viewerState.date = new Date();
+  // null means tonight: panoNight finds tonight itself, from the eastern
+  // civil date of "now", not from this Date's. the chosen date is never
+  // remembered between visits -- returning next week to last week's sky
+  // would be a bug, not a feature.
+  viewerState.date = null;
   viewerState.returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   remember('darksky.pano', o.key || '');
   if (!els.dialog.open) els.dialog.showModal();
-  els.date.value = isoDate(viewerState.date);
+  els.date.value = easternTodayISO();
   paintSkyViewer();
 }
 
@@ -4726,12 +4785,14 @@ function paintSkyViewer() {
   const els = skyViewerEls();
   if (!els.dialog || !els.dialog.open) return;
   const { title, sub, horizon, lat, lon, elevM, sky, caveat, date } = viewerState;
-  els.title.textContent = title;
+  // a date other than tonight is named in the title itself, so a screenshot
+  // or a link cannot be mistaken for what the sky looks like tonight
+  els.title.textContent = date ? `${title}, ${fmtEasternDay(date.getFullYear(), date.getMonth() + 1, date.getDate())}` : title;
   els.elev.textContent = sub;
   els.sky.innerHTML = sky;
   els.caveat.textContent = caveat;
 
-  const nights = panoNight(lat, lon);
+  const nights = panoNight(lat, lon, date);
   els.time.max = String(nights.length - 1);
   const idx = nearestSlice(nights, panoState.when.get(viewerState.key) || '21:00');
   els.time.value = String(idx);
@@ -4776,10 +4837,14 @@ function bindSkyViewer() {
 
   els.date.addEventListener('change', () => {
     const [y, m, d] = els.date.value.split('-').map(Number);
-    if (y && m && d) { viewerState.date = new Date(y, m - 1, d); paintSkyViewer(); }
+    if (!y || !m || !d) return;
+    // picking tonight's own eastern date back is picking "tonight" again,
+    // not a distinct date the title needs to call out
+    viewerState.date = isoDate(y, m, d) === easternTodayISO() ? null : new Date(y, m - 1, d);
+    paintSkyViewer();
   });
   els.time.addEventListener('input', () => {
-    const nights = panoNight(viewerState.lat, viewerState.lon);
+    const nights = panoNight(viewerState.lat, viewerState.lon, viewerState.date);
     const when = nights[Number(els.time.value)];
     panoState.when.set(viewerState.key, hhmm(when));
     remember('darksky.panoWhen', Object.fromEntries(panoState.when));

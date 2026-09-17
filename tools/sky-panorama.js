@@ -12,7 +12,8 @@
                         horizons block, which is why they are not declared here
 
    public: decodeHorizon(s), drawPanorama(canvas, opts), horizonSummary(opts),
-            panProject(alt, az, view), panDir16(az)
+            panProject(alt, az, view), panDir16(az),
+            easternParts(instant), easternInstant(y, mo, d, hour, minute)
 */
 
 const PAN_D2R = Math.PI / 180;
@@ -842,17 +843,58 @@ const PAN_DIR16 = ['north', 'north-northeast', 'northeast', 'east-northeast', 'e
   'west', 'west-northwest', 'northwest', 'north-northwest'];
 const panDir16 = az => PAN_DIR16[Math.round((((az % 360) + 360) % 360) / 22.5) % 16];
 
+// ---------- eastern civil date, DST-safe and independent of the reader's own clock ----------
+// every spot is in north carolina; "which evening" is always an eastern
+// question, so the reader's device timezone cannot be part of the answer --
+// a browser set to Tokyo has to land on the same night a browser set to
+// Eastern does, for the same instant, and the same calendar date picked in
+// either one has to open the same evening's dark hours.
+
+// the eastern wall-clock date and time an instant reads as
+function easternParts(instant) {
+  const p = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(instant);
+  const v = t => Number(p.find(x => x.type === t).value);
+  return { y: v('year'), mo: v('month'), d: v('day'), h: v('hour'), mi: v('minute') };
+}
+
+// the calendar day before y-mo-d, as plain numbers rather than an instant:
+// a Date built and read back with its own local getters never crosses a
+// timezone boundary, so this is safe on any device regardless of DST.
+function prevCivilDay(y, mo, d) {
+  const t = new Date(y, mo - 1, d - 1);
+  return { y: t.getFullYear(), mo: t.getMonth() + 1, d: t.getDate() };
+}
+
+// the UTC instant whose eastern civil clock reads hour:00 on y-mo-d, found
+// by trying eastern's two possible whole-hour offsets from UTC and checking
+// which one actually reads back that way, rather than assuming which one
+// applies. arithmetic that assumed a fixed offset would land an hour off on
+// the two days a year the offset changes; this does not, because it never
+// assumes -- it asks the timezone database, through Intl, and checks.
+function easternInstant(y, mo, d, hour, minute = 0) {
+  for (const offset of [5, 4]) {   // standard time (UTC-5), then daylight (UTC-4)
+    const guess = new Date(Date.UTC(y, mo - 1, d, hour + offset, minute, 0));
+    const p = easternParts(guess);
+    if (p.y === y && p.mo === mo && p.d === d && p.h === hour && p.mi === minute) return guess;
+  }
+  // every real date matches one of the two tries above; this is only reached
+  // by a y-mo-d that does not exist, and standard time is as good a guess as any
+  return new Date(Date.UTC(y, mo - 1, d, hour + 5, minute, 0));
+}
+
 // dusk to dawn, civil twilight either side. stepped rather than solved: this
 // runs once per card, not per frame.
 // ponytail: no crossing found means the sun never left civil twilight, which
 // does not happen in the carolinas. the fallback keeps the card from going
 // blank if the function is ever pointed somewhere arctic.
 function nightWindow(opts) {
-  const noon = new Date(opts.date);
-  // 1am belongs to the evening before it, which is the night the card is
-  // showing, so anchor on that day's noon rather than on the calendar date
-  if (noon.getHours() < 12) noon.setDate(noon.getDate() - 1);
-  noon.setHours(12, 0, 0, 0);
+  // 1am (eastern) belongs to the evening before it, which is the night the
+  // card is showing, so anchor on that day's eastern noon rather than on the
+  // instant's own eastern calendar date
+  const ep = easternParts(opts.date);
+  const day = ep.h < 12 ? prevCivilDay(ep.y, ep.mo, ep.d) : ep;
+  const noon = easternInstant(day.y, day.mo, day.d, 12);
   const alt = function (t) {
     const jd = Sky.julianDay(t);
     const s = Sky.sunPosition(jd);

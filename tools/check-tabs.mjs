@@ -247,6 +247,45 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   await ctx.close();
 }
 
+// --- the sky viewer's date picker ---
+{
+  const ctx = await browser.newContext({ viewport: DESKTOP });
+  await quiet(ctx);
+  const page = await ctx.newPage();
+  await page.goto(URL_ + '#where');
+  await page.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
+  await page.click('#spot-list .pano canvas.skyline');
+  await page.waitForSelector('#sky-viewer[open]');
+
+  const setDate = v => page.evaluate(val => {
+    const el = document.querySelector('.sky-viewer-date');
+    el.value = val;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }, v);
+  const read = () => page.evaluate(() => ({
+    title: document.getElementById('sky-viewer-title').textContent,
+    sum: document.querySelector('.sky-viewer-sum').textContent,
+  }));
+
+  const before = await read();
+  // six months out: far enough that the moon and the galactic core sentence
+  // are not tonight's, whatever tonight happens to be
+  const picked = await page.evaluate(() => {
+    const p = easternParts(new Date(Date.now() + 183 * 86400000));
+    return `${p.y}-${String(p.mo).padStart(2, '0')}-${String(p.d).padStart(2, '0')}`;
+  });
+  await setDate(picked);
+  const after = await read();
+  ok(after.title !== before.title && after.title.includes(','), `picking a date names it in the title (${after.title})`);
+  ok(after.sum !== before.sum, 'and changes the moon and core sentence');
+
+  // picking tonight's own eastern date back is picking "tonight" again
+  const today = await page.evaluate(() => easternTodayISO());
+  await setDate(today);
+  ok((await read()).title === before.title, 'and picking tonight again drops the date from the title');
+  await ctx.close();
+}
+
 // --- the summary sentence and the scrubber are always Carolina time ---
 {
   // a viewer's own device clock is the wrong clock for a page about North
@@ -280,6 +319,15 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   const tokyoLocalHour = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Tokyo', hour: '2-digit', hourCycle: 'h23' })
     .format(new Date(fixed));
   ok(Number(tokyoLocalHour) !== h, `Tokyo's own hour differs from Eastern's for this instant (${tokyoLocalHour} vs ${h}), so the match above is not a coincidence`);
+
+  // "tonight" in the sky viewer has to be the eastern evening too, not the
+  // Tokyo calendar date it may already have turned over to
+  const eToday = await page.evaluate(() => easternTodayISO());
+  const nowParts = new Intl.DateTimeFormat('en-US',
+    { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+  const val = t => nowParts.find(p => p.type === t).value;
+  const wantToday = `${val('year')}-${val('month')}-${val('day')}`;
+  ok(eToday === wantToday, `the sky viewer's "tonight" is the eastern evening (got ${eToday}, want ${wantToday}) even from a Tokyo browser`);
   await ctx.close();
 }
 
