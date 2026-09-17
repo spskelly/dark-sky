@@ -28,6 +28,18 @@ for the rendered tiles on the atlas page or in the repository audit below.
 EOG's CC BY 4.0 input-data license does not establish the terms of Lorenz's
 separate rendered product.
 
+How that sentence is read here, as of 2026-09-17. The atlas page says: "If you
+use my maps on your site, I ask that you do not conflate the Bortle Scale with
+my maps." That presumes reuse and sets one condition on it, so it is taken as
+conditional permission given informally, and relied on for a non-commercial
+site that credits and links the atlas. It is not a license: it says nothing of
+terms, redistribution, direct tile requests, or sampling the tiles into a
+per-spot reading, which is what `tools/build-skyglow.mjs` does. The condition
+is met: the page uses the word Bortle once, in the credits, to say the colors
+"describe modelled artificial sky brightness at zenith, not Bortle classes",
+which is his own point restated. The only other occurrence in the repository
+is the URL of his legend page inside that script. Keep it that way.
+
 The follow-up repository check examined the complete current file tree
 (24,151 entries, not truncated), the 24 README/homepage/astronomy text files,
 all four issues/pull requests and their comments, and available commit messages.
