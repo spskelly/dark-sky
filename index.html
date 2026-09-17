@@ -348,8 +348,11 @@
   .pin.viewpoint { background: transparent; border: 2px dashed var(--moon); width: 12px; height: 12px;
     box-shadow: none; opacity: .85; }
   /* an unnamed pull-off, not a checked spot: small and outlined rather than a
-     full pin, filled with its own sky glow band */
-  .ovl-pin { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--moon); opacity: .9; }
+     full pin, filled with its own sky glow band. the dot stays 10px and the
+     margin centres it in a 24px icon box, so what a finger has to hit is the
+     24px minimum while what the eye sees is unchanged */
+  .ovl-pin { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--moon); opacity: .9;
+    margin: 7px; }
   /* what the map draws, as opposed to which spots it draws: kept next to the
      map rather than up in the spot toolbar, and reachable on a phone without
      opening leaflet's own layer control */
@@ -4653,11 +4656,15 @@ const OVL_markers = new Map();
 // into a popup, never where leaflet sets it as a dom attribute itself.
 const OVL_esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// the marker fill is generated data landing in a style attribute, so it gets
+// the same #rrggbb test the card swatch uses rather than being trusted
+const OVL_fill = hex => (/^#[0-9a-f]{6}$/.test(hex || '') ? hex : 'transparent');
+
 function OVL_popup(o) {
   const h = OVERLOOK_HORIZONS[o.id], sky = OVERLOOK_SKY[o.id];
   const gm = `https://www.google.com/maps/dir/?api=1&destination=${o.lat},${o.lon}`;
   return `<div class="ovl"><b>${OVL_esc(o.name)}</b><br>${[o.mp !== undefined ? 'parkway mp ' + o.mp : '', h ? h[0].toLocaleString() + ' ft' : ''].filter(Boolean).join(' &middot; ')}
-    ${h ? `<div class="pano open"><canvas class="skyline" aria-label="skyline and sky from ${OVL_esc(o.name)}"></canvas>
+    ${h ? `<div class="pano open"><canvas class="skyline" role="img" aria-label="skyline and sky from ${OVL_esc(o.name)}"></canvas>
       <p class="pano-sum"></p>
       <label class="pano-time"><span></span><input type="range" min="0" max="1" step="1" value="0" aria-label="time of night"></label></div>` : ''}
     ${sky ? `<div class="sky">${skySwatch(sky[0])}${OVL_esc(sky[1])}</div>` : ''}
@@ -4670,12 +4677,15 @@ function OVL_layer() {
   for (const o of OVERLOOKS) {
     const sky = OVERLOOK_SKY[o.id];
     const mk = L.marker([o.lat, o.lon], { title: o.name, zIndexOffset: -200, icon: L.divIcon({ className: '',
-      html: `<div class="ovl-pin" style="background:${sky ? sky[0] : 'transparent'}"></div>`, iconSize: [10, 10], iconAnchor: [5, 5] }) })
+      html: `<div class="ovl-pin" style="background:${OVL_fill(sky && sky[0])}"></div>`, iconSize: [24, 24], iconAnchor: [12, 12] }) })
       .bindPopup(() => OVL_popup(o), { minWidth: 280, maxWidth: 420 });
     // the horizon is decoded when a popup opens, not for all of them at load
     mk.on('popupopen', e => {
       spotState.active = 'ov:' + o.id;
       remember('darksky.active', spotState.active);
+      // one selection at a time: darksky.active holds either a spot name or an
+      // overlook id, so a card that was selected has to stop looking selected
+      document.querySelectorAll('.spot').forEach(e => e.classList.remove('active'));
       // the bound options above are a phone-shaped popup's undoing: fixed
       // regardless of viewport, they can lay out wider and taller than the
       // map itself. size from the map's own box instead, so a rotated phone
@@ -4718,7 +4728,14 @@ function OVL_layer() {
     // marker's popup opening, or the overlay being switched off, which
     // removes the marker and leaflet closes its popup as part of that) puts
     // the controls back
-    mk.on('popupclose', () => spotState.map.getContainer().classList.remove('ovl-popup-narrow'));
+    mk.on('popupclose', () => {
+      spotState.map.getContainer().classList.remove('ovl-popup-narrow');
+      // a popup the reader closed is a popup they want closed, so the
+      // selection goes with it and the next visit opens nothing. the equality
+      // guard keeps this from undoing another marker's popup opening, whichever
+      // order the close and open events arrive in.
+      if (spotState.active === 'ov:' + o.id) { spotState.active = null; remember('darksky.active', ''); }
+    });
     OVL_markers.set(o.id, mk);
     group.addLayer(mk);
   }
@@ -4806,6 +4823,13 @@ function initMap() {
   L.control.layers({ 'topo': topo, 'imagery': imagery }, { 'light pollution': lp, 'parkway overlooks': ovl },
     { position: 'topright', collapsed: narrow }).addTo(map);
   spotState.map = map;
+  // leaflet slides a popup that opens off the edge into view, and that is an
+  // animated panBy whose moveend lands long after it starts. autopanstart
+  // fires as the slide begins, which is how a move the map started for itself
+  // is told apart from the reader's own panning below. it is registered here,
+  // ahead of the popups restored further down, because those fire it too.
+  let selfPan = false;
+  map.on('autopanstart', () => { selfPan = true; });
   for (const s of SPOTS) {
     const mk = L.marker([s.lat, s.lon], { icon: pinIcon(s.kind), title: s.name })
       .bindPopup(`<b>${s.name}</b><br>${elevTag(s)} &middot; ~${fmtDur(driveMins(haversine(spotState.home, s), s))} from home<br>${s.tags.join(', ')}`);
@@ -4838,9 +4862,10 @@ function initMap() {
   // since OVERLOOKS is declared below it in the file; recover it here instead
   const ovBack = String(recall('darksky.active', '')).startsWith('ov:') ? String(recall('darksky.active', '')).slice(3) : null;
   if (ovBack && OVL_markers.has(ovBack) && map.hasLayer(ovl)) { spotState.active = 'ov:' + ovBack; OVL_open(ovBack); }
-  // after everything that moves the map on its own account, so only the
-  // reader's own panning and zooming is what gets remembered
+  // attached after the framing above, so nothing this function does on load is
+  // remembered; a popup's own autopan is skipped by the flag set above.
   map.on('moveend', () => {
+    if (selfPan) { selfPan = false; return; }
     const c = map.getCenter();
     remember('darksky.mapView', { lat: +c.lat.toFixed(5), lon: +c.lng.toFixed(5), zoom: map.getZoom() });
   });

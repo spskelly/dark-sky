@@ -387,6 +387,71 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   await ctx.close();
 }
 
+// --- one selection at a time, and a closed overlook stays closed ---
+{
+  const ctx = await browser.newContext({ viewport: DESKTOP });
+  await quiet(ctx);
+  const a = await ctx.newPage();
+  await a.goto(URL_ + '#where');
+  await a.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
+  await a.evaluate(() => {
+    [...document.querySelectorAll('.leaflet-control-layers-overlays label')]
+      .find(l => l.textContent.includes('parkway overlooks')).querySelector('input').click();
+  });
+  const id = await a.evaluate(() => OVERLOOKS[Math.floor(OVERLOOKS.length / 2)].id);
+
+  // selecting a card and then an overlook must not leave two things selected
+  await a.click('#spot-list .spot:nth-child(2) .name');
+  ok(await a.$$eval('#spot-list .spot.active', e => e.length) === 1, 'a card click selects that card');
+  await a.evaluate(i => OVL_open(i), id);
+  await a.waitForSelector('.leaflet-popup .ovl');
+  ok(await a.$$eval('#spot-list .spot.active', e => e.length) === 0, 'opening an overlook drops the card highlight');
+
+  // the reader closing the popup is the reader deselecting it. a direct dom
+  // click, because leaflet is still autopanning the popup and a real mouse
+  // click keeps missing a target that is moving under it
+  await a.waitForTimeout(600);
+  await a.evaluate(() => document.querySelector('.leaflet-popup-close-button').click());
+  await a.waitForTimeout(100);
+  ok(await a.evaluate(() => spotState.active) === null, 'closing the popup clears the selection');
+  await a.close();
+
+  const b = await ctx.newPage();
+  await b.goto(URL_ + '#where');
+  await b.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
+  await b.waitForTimeout(300);
+  ok(await b.$('.leaflet-popup') === null, 'and a popup closed last visit does not come back');
+  ok(await b.evaluate(() => spotState.active) === null, 'with nothing selected either');
+  await ctx.close();
+}
+
+// --- a restored popup panning itself into view is not the reader's map view ---
+{
+  const ctx = await browser.newContext({ viewport: PHONE });
+  await quiet(ctx);
+  const a = await ctx.newPage();
+  await a.goto(URL_ + '#where');
+  await a.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
+  // an overlook a little north of centre: its popup opens off the top of a
+  // phone-sized map, so leaflet autopans to bring it in
+  const seeded = await a.evaluate(() => {
+    const o = OVERLOOKS[Math.floor(OVERLOOKS.length / 2)];
+    const view = { lat: +(o.lat - 0.002).toFixed(5), lon: +o.lon.toFixed(5), zoom: 13 };
+    localStorage.setItem('darksky.overlooks', '1');
+    localStorage.setItem('darksky.active', 'ov:' + o.id);
+    localStorage.setItem('darksky.mapView', JSON.stringify(view));
+    return JSON.stringify(view);
+  });
+  await a.close();
+  const b = await ctx.newPage();
+  await b.goto(URL_ + '#where');
+  await b.waitForSelector('.leaflet-popup .ovl');
+  await b.waitForTimeout(800); // leaflet's autopan is animated; let it land
+  ok(await b.evaluate(() => localStorage.getItem('darksky.mapView')) === seeded,
+    'the remembered map view survives a restored popup autopanning');
+  await ctx.close();
+}
+
 // --- the overlook popup fits a phone ---
 {
   const ctx = await browser.newContext({ viewport: PHONE });

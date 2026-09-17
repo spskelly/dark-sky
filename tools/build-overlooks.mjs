@@ -60,6 +60,16 @@ export function baseName(name) {
   return name.toLowerCase().replace(/\s*\((?:mp\s*)?\d{1,3}(?:\.\d+)?\)\s*$/i, '').replace(/\s+/g, ' ').trim();
 }
 
+// one row of the generated block. osm names are anybody's to edit, and this
+// lands inside the page's own <script>: JSON.stringify leaves "</script>"
+// alone, so a name carrying one would close the element. escaping every "<"
+// costs nothing and every reader of this block (build_horizons.py,
+// check_alignment.py, build-skyglow.mjs) parses it as real JSON, which reads
+// < back as <.
+export function row(o) {
+  return JSON.stringify(o).replace(/</g, '\\u003c');
+}
+
 export function parseSpots(html) {
   const block = html.split('const SPOTS = [', 2)[1].split('\n];', 1)[0];
   const re = /\{ name: (?:'([^']+)'|"([^"]+)"), lat: (-?[\d.]+), lon: (-?[\d.]+),([^\n]*)/g;
@@ -123,7 +133,7 @@ async function main() {
   // a run that comes back nearly empty is overpass having a bad day, and
   // writing it would quietly delete the layer
   if (kept.length < 50) throw new Error(`refusing to write: only ${kept.length} overlooks, expected over a hundred`);
-  const block = [START, 'const OVERLOOKS = [', ...kept.map(o => '  ' + JSON.stringify(o) + ','), '];', END].join('\n');
+  const block = [START, 'const OVERLOOKS = [', ...kept.map(o => '  ' + row(o) + ','), '];', END].join('\n');
   console.log(`  block: ${(block.length / 1024).toFixed(1)} kB`);
   if (dry) { console.log('dry run, index.html left alone'); return; }
   const a = html.indexOf(START), b = html.indexOf(END);

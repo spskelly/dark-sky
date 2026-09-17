@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { milepost, metres, pick, parseSpots, baseName } from './build-overlooks.mjs';
+import { milepost, metres, pick, parseSpots, baseName, row } from './build-overlooks.mjs';
 
 const node = (id, name, lat, lon) => ({ type: 'node', id, lat, lon, tags: name ? { tourism: 'viewpoint', name } : { tourism: 'viewpoint' } });
 const way = (id, name, lat, lon) => ({ type: 'way', id, center: { lat, lon }, tags: { tourism: 'viewpoint', name } });
@@ -75,6 +75,16 @@ test('one overlook mapped twice under two spellings collapses, and the one that 
 test('coordinates are cut to four decimals', () => {
   const [o] = pick([node(1, 'X Overlook', 35.123456, -82.987654)], []).kept;
   assert.deepEqual([o.lat, o.lon], [35.1235, -82.9877]);
+});
+
+test('a name that tries to close the page script is escaped, and still reads back whole', () => {
+  const name = 'Bad Fork </script><script>alert(1)</script> Overlook';
+  const line = row({ id: 'n1', name, lat: 35.5, lon: -82.9 });
+  assert.equal(line.includes('<'), false, 'no raw < survives into the inline script');
+  // the line-wise readers in build_horizons.py, check_alignment.py and
+  // build-skyglow.mjs hand the row to a real JSON parser, which reads <
+  // back as <, so the name is not altered for them
+  assert.equal(JSON.parse(line).name, name);
 });
 
 test('spots parse with both quote styles and an optional view', () => {
