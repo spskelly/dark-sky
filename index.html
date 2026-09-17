@@ -5189,10 +5189,12 @@ function renderHomeHeadline(panel) {
   const { preDawn, idx } = weatherWindow(panel.data);
   if (!idx.length) { el.textContent = 'no forecast hours left in the current night.'; return; }
   const h = panel.data.hourly;
-  const clearHrs = idx.filter(i => h.cloud_cover[i] < 25).length;
-  const verdict = clearHrs >= idx.length * 0.7 ? 'mostly clear' : clearHrs >= 3 ? 'partly clear' : 'cloudy';
+  // the calendar's own three words and thresholds, so the strip and the
+  // night cells never disagree about the same sky
+  const mean = Math.round(idx.reduce((s, i) => s + h.cloud_cover[i], 0) / idx.length);
+  const verdict = cloudClass(mean);
   const low = Math.round(Math.min(...idx.map(i => h.temperature_2m[i])));
-  el.innerHTML = `${preDawn ? 'rest of the night' : 'tonight'} at home: <b>${verdict}</b>, low ${low}°F &middot; <a href="#tonight">hour by hour</a>`;
+  el.innerHTML = `${preDawn ? 'rest of the night' : 'tonight'} at home: <b>${verdict}</b>, ${mean}% cloud, low ${low}°F &middot; <a href="#tonight">hour by hour</a>`;
 }
 
 async function loadPanel(panel, target) {
