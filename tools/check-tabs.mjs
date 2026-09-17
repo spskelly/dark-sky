@@ -368,6 +368,42 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   await page.close();
 }
 
+// --- the home strip above the tabs ---
+{
+  // a made-up forecast, flat on purpose: 10 per cent cloud and 50 degrees every
+  // hour, so the headline has one right answer whatever time this runs
+  const pad = n => String(n).padStart(2, '0');
+  const iso = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:00`;
+  const day0 = new Date(); day0.setHours(0, 0, 0, 0);
+  const time = Array.from({ length: 8 * 24 }, (_, i) => iso(new Date(day0.getTime() + i * 3600000)));
+  const flat = v => time.map(() => v);
+  const at = (k, hr) => iso(new Date(day0.getTime() + (k * 24 + hr) * 3600000));
+  const fake = {
+    hourly: { time, cloud_cover: flat(10), cloud_cover_low: flat(10), cloud_cover_mid: flat(0), cloud_cover_high: flat(0),
+      temperature_2m: flat(50), wind_speed_10m: flat(5), dew_point_2m: flat(40), precipitation_probability: flat(0) },
+    daily: { sunrise: [0, 1, 2, 3, 4, 5, 6, 7].map(k => at(k, 7)), sunset: [0, 1, 2, 3, 4, 5, 6, 7].map(k => at(k, 19)) },
+  };
+  const ctx = await browser.newContext({ viewport: DESKTOP });
+  await quiet(ctx);
+  await ctx.route('**://api.open-meteo.com/**', r => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(fake) }));
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', e => errors.push(e.message));
+  await page.goto(URL_);
+  await page.waitForFunction(() => /cloud/.test(document.getElementById('home-sky')?.textContent || ''), null, { timeout: 5000 }).catch(() => {});
+  const line = await page.$eval('#home-sky', e => e.textContent);
+  ok(/at home: clear, 10% cloud, low 50/.test(line), `the home strip reads the forecast in the calendar's own words (${line})`);
+  const above = await page.evaluate(() => document.querySelector('.home-strip').getBoundingClientRect().bottom
+    <= document.querySelector('[role="tablist"]').getBoundingClientRect().top);
+  ok(above, 'and it sits above the tabs');
+  // picking needs the map, and the map has no size inside a hidden panel
+  await page.click('#home-pick');
+  ok((await selected(page)).join() === 'tab-where', 'pick on map opens the where tab first');
+  ok(await page.$eval('#home-pick', b => b.getAttribute('aria-pressed')) === 'true', 'and arms the pick');
+  ok(errors.length === 0, `nothing threw while the page loaded (${errors.join(' | ') || 'none'})`);
+  await ctx.close();
+}
+
 // --- how the where tab was left comes back ---
 {
   const ctx = await browser.newContext({ viewport: DESKTOP });

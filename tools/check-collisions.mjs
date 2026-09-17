@@ -10,7 +10,7 @@
 //   node tools/check-collisions.mjs tools/sky-astro.js tools/stars.js
 import fs from 'node:fs';
 
-const DECL = /^(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/;
+const DECL = /^(?:const|let|var|(?:async\s+)?function\*?|class)\s+([A-Za-z_$][\w$]*)/;
 
 function topLevel(text) {
   const m = new Map();
@@ -37,6 +37,10 @@ const owner = new Map();
 const clashes = [];
 for (const [file, names] of Object.entries(sources)) {
   for (const [name, lines] of names) {
+    // twice in one file counts too. two functions of one name are not even an
+    // error: the later one silently wins, everywhere, which is how a weather
+    // helper once replaced the panorama's nightWindow
+    if (lines.length > 1) clashes.push({ name, a: { file, lines: lines.slice(0, 1) }, b: { file, lines: lines.slice(1) } });
     const prev = owner.get(name);
     if (prev) clashes.push({ name, a: prev, b: { file, lines } });
     else owner.set(name, { file, lines });

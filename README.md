@@ -17,6 +17,12 @@ will be clear, and where to drive.
   `#where`, or any id inside a panel such as `#check-before-you-go`, opens the
   tab that owns it. Cards on a wide screen, a sticky strip of short labels on a
   phone, and the tab you were last on is remembered between visits.
+- **Home, above the tabs.** Where home is answers none of the three questions
+  on its own, so it sits in its own strip above them: the town picker, pick
+  on map, use my location and exact coordinates, plus a one-line read on
+  tonight's sky there with a link to the full hour-by-hour breakdown on
+  *will it be clear?*. Picking on the map switches to *where do i go?* first,
+  since the map only has a real size once that panel has been shown.
 - **Moon phase calendar.** True phase times from the Meeus algorithm
   (*Astronomical Algorithms*, ch. 49), converted to your local time zone, so
   dates match published almanacs to the day. Phases are drawn at 9pm local,
@@ -32,10 +38,9 @@ will be clear, and where to drive.
   cloud cover.
 - **40 dark-sky spots.** Overlooks, balds and campgrounds across western
   North Carolina, from the Cherohala Skyway to Doughton Park, on a topo map.
-  Set a home point (a town from the list, a click on the map, or your own
-  location) and everything reorders around it, ranked by estimated drive
-  time or straight-line distance. Each spot links to its Clear Outside
-  forecast, light-pollution map and driving directions.
+  Everything reorders around home, ranked by estimated drive time or
+  straight-line distance. Each spot links to its Clear Outside forecast,
+  light-pollution map and driving directions.
 
   Drive time is estimated rather than routed: each spot carries the minutes
   of slow going once you are off the highway (gravel, the parkway detour,

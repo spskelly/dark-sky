@@ -262,6 +262,18 @@
   .spot-controls details .group { margin-top: 8px; }
   /* armed for a click that sets home */
   #map.picking { cursor: crosshair; }
+
+  /* home used to be set inside the "where do i go" tab, with its own tonight
+     forecast a tab away in "will it be clear". both belong above the tabs:
+     home is one thing, asked once, not a setting buried in one of the three
+     questions. */
+  .home-strip { max-width: 1100px; margin: 0 auto 26px; }
+  .home-strip .spot-controls { margin-bottom: 6px; }
+  .home-sky { margin: 0; font-size: 14px; line-height: 1.5; color: var(--ink-dim); }
+  .home-sky:empty { display: none; }
+  .home-sky b { color: var(--ink); font-weight: 500; }
+  .home-sky a { color: var(--moon-dim); }
+  .home-sky a:hover { color: var(--moon); }
   #map.picking .leaflet-grab { cursor: crosshair; }
   .spot-layout { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 14px; }
   #map { height: 560px; border-radius: 12px; background: var(--night-2); overflow: hidden; }
@@ -546,6 +558,32 @@
   </div>
 </section>
 
+<!-- home used to be a setting inside "where do i go", with its forecast a tab
+     away in "will it be clear". it answers neither question on its own, so it
+     sits above them instead: where home is, how to change it, and a one-line
+     read on tonight's sky there. the hour-by-hour detail still lives in the
+     tab, one click from the link below. -->
+<section class="home-strip" aria-label="home location and tonight's sky at home">
+  <div class="spot-controls">
+    <div class="group" role="group" aria-label="home location">
+      <span>home</span>
+      <select id="home-town" aria-label="home town"></select>
+      <button id="home-pick" aria-pressed="false">pick on map</button>
+      <button id="home-geo">use my location</button>
+    </div>
+    <details class="coords">
+      <summary>exact coordinates</summary>
+      <div class="group">
+        <input id="home-lat" type="number" step="0.0001" aria-label="home latitude">
+        <input id="home-lon" type="number" step="0.0001" aria-label="home longitude">
+        <button id="home-set">update</button>
+      </div>
+    </details>
+  </div>
+  <p class="spot-msg" id="spot-msg" role="status"></p>
+  <p class="home-sky" id="home-sky" aria-live="polite"></p>
+</section>
+
 <!-- the three questions used to be jump links down an eight-screen page. they
      are the page's tabs now: one question answered at a time, and the other two
      always one tap away instead of a blind scroll. -->
@@ -601,7 +639,7 @@
 
 <section class="spots" id="where">
   <h3>where to look up</h3>
-  <p class="lede">forty high, open, dark places across western north carolina, from the cherohala skyway to doughton park. set your home town and the map and the list reorder around it, nearest first. drive times are estimates, and <a href="#check-before-you-go">all of it needs checking before you drive</a>.</p>
+  <p class="lede">forty high, open, dark places across western north carolina, from the cherohala skyway to doughton park, ranked by drive time from home. drive times are estimates, and <a href="#check-before-you-go">all of it needs checking before you drive</a>.</p>
   <div class="spot-controls">
     <div class="group" role="group" aria-label="filter spots">
       <span>show</span>
@@ -614,22 +652,7 @@
       <button data-sort="mins" aria-pressed="true" title="estimated driving time from your home point">drive time</button>
       <button data-sort="dist" aria-pressed="false" title="straight-line distance from your home point">distance</button>
     </div>
-    <div class="group" role="group" aria-label="home location">
-      <span>home</span>
-      <select id="home-town" aria-label="home town"></select>
-      <button id="home-pick" aria-pressed="false">pick on map</button>
-      <button id="home-geo">use my location</button>
-    </div>
-    <details class="coords">
-      <summary>exact coordinates</summary>
-      <div class="group">
-        <input id="home-lat" type="number" step="0.0001" aria-label="home latitude">
-        <input id="home-lon" type="number" step="0.0001" aria-label="home longitude">
-        <button id="home-set">update</button>
-      </div>
-    </details>
   </div>
-  <p class="spot-msg" id="spot-msg" role="status"></p>
   <div class="legend">
     <span><i class="pin camp"></i> overnight camping allowed</span>
     <span><i class="pin view"></i> viewing only</span>
@@ -5026,15 +5049,26 @@ function setPicking(on) {
   spotMsg(on ? 'tap anywhere on the map to set home, or press “pick on map” again to cancel' : '');
 }
 
+// picking needs a click on the map, which only has a real size once the where
+// panel has been shown at least once (leaflet reads 0x0 from a hidden one).
+// the strip that arms picking sits above every tab, so jump to the map's tab
+// first; a real click on it is what the tab bar already listens for.
+function armPicking() {
+  document.getElementById('tab-where').click();
+  setPicking(true);
+}
+
 (function initHomeControls() {
   const sel = document.getElementById('home-town');
   sel.innerHTML = TOWNS.map(([n]) => `<option value="${n}">${n}</option>`).join('')
     + '<option value="__custom">custom\u2026</option>';
   sel.addEventListener('change', () => {
     const t = TOWNS.find(([n]) => n === sel.value);
-    if (t) setHome(t[1], t[2], t[0]); else setPicking(true);
+    if (t) setHome(t[1], t[2], t[0]); else armPicking();
   });
-  document.getElementById('home-pick').addEventListener('click', () => setPicking(!spotState.picking));
+  document.getElementById('home-pick').addEventListener('click', () => {
+    if (spotState.picking) setPicking(false); else armPicking();
+  });
   document.getElementById('home-set').addEventListener('click', () =>
     setHome(parseFloat(document.getElementById('home-lat').value), parseFloat(document.getElementById('home-lon').value)));
   document.getElementById('home-geo').addEventListener('click', () => {
@@ -5166,6 +5200,25 @@ const skeletonLabel = name => new Date().getHours() < 7
   ? `rest of the night at <b>${name}</b> · sunrise <i class="sk-t"></i>`
   : `tonight at <b>${name}</b> · sunset <i class="sk-t"></i> to sunrise <i class="sk-t"></i>`;
 
+// the slice of an 8-day fetch that counts as "the rest of tonight": now (or
+// sunset) through the next sunrise. shared by the hour-by-hour panel and the
+// home strip's one-line summary, so the two never disagree about which hours
+// they are describing.
+function weatherWindow(d) {
+  const h = d.hourly, now = new Date();
+  // before dawn: the rest of the current night, now through this morning's sunrise.
+  // otherwise: tonight, from sunset through tomorrow's sunrise
+  const preDawn = now < new Date(d.daily.sunrise[0]);
+  const start = preDawn ? now : new Date(d.daily.sunset[0]);
+  const sunriseNext = new Date(preDawn ? d.daily.sunrise[0] : d.daily.sunrise[1]);
+  const idx = [];
+  for (let i = 0; i < h.time.length; i++) {
+    const t = new Date(h.time[i]);
+    if (t >= new Date(start.getTime() - 30 * 60000) && t <= sunriseNext) idx.push(i);
+  }
+  return { preDawn, start, sunriseNext, idx };
+}
+
 function renderPanel(panel) {
   const el = document.getElementById(panel.el);
   if (!panel.target) { el.innerHTML = ''; return; }
@@ -5188,17 +5241,7 @@ function renderPanel(panel) {
     return;
   }
   const d = panel.data, h = d.hourly;
-  const now = new Date();
-  // before dawn: the rest of the current night, now through this morning's sunrise.
-  // otherwise: tonight, from sunset through tomorrow's sunrise
-  const preDawn = now < new Date(d.daily.sunrise[0]);
-  const start = preDawn ? now : new Date(d.daily.sunset[0]);
-  const sunriseNext = new Date(preDawn ? d.daily.sunrise[0] : d.daily.sunrise[1]);
-  const idx = [];
-  for (let i = 0; i < h.time.length; i++) {
-    const t = new Date(h.time[i]);
-    if (t >= new Date(start.getTime() - 30 * 60000) && t <= sunriseNext) idx.push(i);
-  }
+  const { preDawn, start, sunriseNext, idx } = weatherWindow(d);
   if (!idx.length) {
     el.innerHTML = `<div class="head"><span>tonight at <b>${name}</b></span><span class="sub">cloud cover and temperature by hour</span></div>
       <div class="sky-empty">no forecast hours left in the current night.</div>`;
@@ -5256,15 +5299,36 @@ function renderPanel(panel) {
   if (hrs.length) select(0);
 }
 
+// the strip above the tabs is not the place for an hour-by-hour breakdown,
+// only enough to know whether to look up. the full picture is one click away
+// on "will it be clear?", linked from the same line.
+function renderHomeHeadline(panel) {
+  const el = document.getElementById('home-sky');
+  if (!panel.target) { el.innerHTML = ''; return; }
+  if (panel.status === 'loading') { el.textContent = 'checking tonight’s sky at home…'; return; }
+  if (panel.status === 'error' || !panel.data) { el.textContent = 'tonight’s forecast is unavailable right now.'; return; }
+  const { preDawn, idx } = weatherWindow(panel.data);
+  if (!idx.length) { el.textContent = 'no forecast hours left in the current night.'; return; }
+  const h = panel.data.hourly;
+  // the calendar's own three words and thresholds, so the strip and the
+  // night cells never disagree about the same sky
+  const mean = Math.round(idx.reduce((s, i) => s + h.cloud_cover[i], 0) / idx.length);
+  const verdict = cloudClass(mean);
+  const low = Math.round(Math.min(...idx.map(i => h.temperature_2m[i])));
+  el.innerHTML = `${preDawn ? 'rest of the night' : 'tonight'} at home: <b>${verdict}</b>, ${mean}% cloud, low ${low}°F &middot; <a href="#tonight">hour by hour</a>`;
+}
+
 async function loadPanel(panel, target) {
   panel.target = target;
   panel.status = 'loading'; renderPanel(panel);
+  if (panel === fc.home) renderHomeHeadline(panel);
   try { panel.data = await fetchForecast(target); panel.status = 'ok'; }
   catch (e) { panel.data = null; panel.status = 'error'; }
   renderPanel(panel);
   if (panel === fc.home) {
     fc.nightly = panel.data ? summarizeNights(panel.data) : new Map();
     renderCalendar();
+    renderHomeHeadline(panel);
   }
 }
 
