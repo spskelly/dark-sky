@@ -4,6 +4,8 @@
 //
 //   node tools/build-skyglow.mjs              # sample and report
 //   node tools/build-skyglow.mjs --json sky.json
+//   node tools/build-skyglow.mjs --refetch     # ignore the cache: tiles, tiles
+//                                               # recorded missing, and the legend pages
 //
 // the atlas ships as png tiles coloured by sky brightness, so reading it means
 // reading pixels. that is what tools/png.mjs is for: node ships zlib, a png is
@@ -73,13 +75,23 @@ const COMPASS = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'];
 const RINGS = [10, 25, 50];
 const key = (name, part) => `${name}|${part}`;
 
+// the overlooks ride the same path as the spots: same samples, same wording.
+// their tag is the osm id behind a prefix no spot name can start with, since
+// two overlooks can share a name. when the atlas is replaced by a computed
+// model (2026-09-13-skyglow-model-design.md) they follow with no second change.
+const OV = 'ov:';
+const ovBlock = html.includes('const OVERLOOKS = [') ? html.split('const OVERLOOKS = [')[1].split('];')[0] : '';
+const overlooks = ovBlock.split('\n').map(l => l.trim().replace(/,$/, '')).filter(l => l.startsWith('{'))
+  .map(l => JSON.parse(l)).map(o => ({ name: OV + o.id, label: o.name, lat: o.lat, lon: o.lon }));
+const points = [...spots, ...overlooks];
+
 // --- what to sample ---------------------------------------------------------
 const want = [];
 const at = (lat, lon, tag) => {
   const p = place(lat, lon, ZOOM);
   want.push({ key: `${ZOOM}/${p.x}/${p.y}`, u: p.u, v: p.v, tag, x: p.x, y: p.y });
 };
-for (const s of spots) {
+for (const s of points) {
   at(s.lat, s.lon, key(s.name, 'self'));
   for (const km of RINGS)
     COMPASS.forEach((dir, i) => {
@@ -176,17 +188,43 @@ console.log(`${spots.length} spots, ${want.length} samples, ${Object.keys(tiles)
 
 // --- fetch and read the tiles ----------------------------------------------
 const UA = { 'user-agent': 'dark-sky-calendar tools (+https://github.com/spskelly/dark-sky)' };
+const TILE_CACHE = path.join(ROOT, 'tools', '.skyglow-cache');
+fs.mkdirSync(TILE_CACHE, { recursive: true });
+// a cached file is named from the url's own path, not a hand-built z/x/y key,
+// so a future atlas year (a new LP_TILES template) misses the cache on its
+// own instead of silently reading last year's bytes for the same tile.
+const cacheFile = url => path.join(TILE_CACHE, new URL(url).pathname.replace(/[^A-Za-z0-9.]+/g, '_').replace(/^_+/, ''));
+let hit = 0;
 const planes = {};
 for (const [k, url] of replay ? [] : Object.entries(tiles)) {
-  let img = null, why = '';
+  let img = null, why = '', known = false;
   try {
-    const r = await fetch(url, { headers: UA });
-    if (r.ok) img = decodePng(Buffer.from(await r.arrayBuffer()));
-    else why = `${r.status} ${r.statusText}`;
+    // a tile is fetched once and kept. the atlas changes once a year, and its
+    // host owes this project nothing, so --refetch is the only way to ask twice.
+    const file = cacheFile(url);
+    const gone = file + '.missing';
+    if (!has('--refetch') && fs.existsSync(file)) { img = decodePng(fs.readFileSync(file)); hit++; }
+    else if (!has('--refetch') && fs.existsSync(gone)) { known = true; hit++; }
+    else {
+      const r = await fetch(url, { headers: UA });
+      if (r.ok) {
+        const buf = Buffer.from(await r.arrayBuffer());
+        img = decodePng(buf);                       // decode first: never keep a tile that will not read
+        fs.writeFileSync(file + '.tmp', buf);
+        fs.renameSync(file + '.tmp', file);
+      } else {
+        why = `${r.status} ${r.statusText}`;
+        // a 404 means the atlas has no tile there, ever, which is worth
+        // remembering. any other failure says nothing about the tile, so it
+        // is not cached and the next run asks again.
+        if (r.status === 404) { fs.writeFileSync(gone + '.tmp', ''); fs.renameSync(gone + '.tmp', gone); }
+      }
+    }
   } catch (e) { why = e.message; }
   planes[k] = img;
-  console.log(`  ${img ? `got  ${img.width}x${img.height}, colour type ${img.color}, depth ${img.depth}` : `MISS ${why}`}  ${url}`);
+  console.log(`  ${known ? 'known missing (404, cached)' : img ? `got  ${img.width}x${img.height}, colour type ${img.color}, depth ${img.depth}` : `MISS ${why}`}  ${url}`);
 }
+if (!replay) console.log(`  ${hit} tile(s) from the cache, ${Object.keys(tiles).length - hit} asked of the host`);
 if (replay) console.log(`  (replaying ${Object.keys(replay).length} saved samples, nothing fetched)`);
 const missing = Object.values(planes).filter(p => !p).length;
 if (missing) console.log(`  (${missing} tile(s) absent. the atlas ships none over open water or empty ice, ` +
@@ -265,7 +303,7 @@ console.log(seenWalk.length < 3 ? '  -> not enough of the walk was read to say a
 // second matters more on a ridge: the sky overhead can be fine while one
 // horizon is a dome of orange, and that decides which way to point a camera.
 const summary = [];
-for (const s of spots) {
+for (const s of points) {
   const here = rank(key(s.name, 'self'));
   const ring = [];
   for (const km of RINGS) for (const d of COMPASS) {
@@ -289,18 +327,18 @@ for (const s of spots) {
 }
 
 console.log('\nsky glow by rank, 1 darkest (see the scale above):\n');
-const WIDE = Math.max(...spots.map(s => s.name.length)) + 2;
+const WIDE = Math.max(...points.map(s => (s.label || s.name).length)) + 2;
 console.log('spot'.padEnd(WIDE) + 'here  ' + RINGS.map(km => `${km} km: ` + COMPASS.join(' ')).join('   '));
 for (const { s, here } of summary) {
   const ring = RINGS.map(km => COMPASS.map(d => pad(rank(key(s.name, d + km)))).join(' ')).join('   ');
-  console.log(s.name.padEnd(WIDE) + pad(here) + '    ' + ring);
+  console.log((s.label || s.name).padEnd(WIDE) + pad(here) + '    ' + ring);
 }
 
 console.log('\nwhere the glow comes from, and where it does not:\n');
 const side = w => (w ? `${w.dirs.join('/').padEnd(8)} (${pad(w.r)})` : '-'.padEnd(13));
 for (const { s, here, worst, best } of summary) {
   const h = got.get(key(s.name, 'self'));
-  console.log(s.name.padEnd(WIDE) +
+  console.log((s.label || s.name).padEnd(WIDE) +
     `${pad(here)} ${(NAME.get(h) || '?').padEnd(11)}` +
     ` glow from ${side(worst)}${worst ? ` at ${String(worst.km).padStart(2)} km` : '      '}` +
     `   darkest horizon ${side(best)}`);
@@ -319,8 +357,15 @@ const text = h => h
   .replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n').trim();
 
 if (!replay) console.log('\nwhat the atlas says its colours mean:');
+let legendHit = 0;
 for (const url of replay ? [] : LEGEND) {
-  const body = await fetch(url, { headers: UA }).then(r => r.ok ? r.text() : '').catch(() => '');
+  const file = cacheFile(url);
+  let body;
+  if (!has('--refetch') && fs.existsSync(file)) { body = fs.readFileSync(file, 'utf8'); legendHit++; }
+  else {
+    body = await fetch(url, { headers: UA }).then(r => r.ok ? r.text() : '').catch(() => '');
+    if (body) { fs.writeFileSync(file + '.tmp', body); fs.renameSync(file + '.tmp', file); }
+  }
   if (!body) { console.log(`  ${url} -- could not read`); continue; }
   console.log(`\n  ${url} (${(body.length / 1024).toFixed(1)} kB)`);
   console.log(text(body).split('\n').map(l => '    | ' + l).join('\n'));
@@ -330,6 +375,7 @@ for (const url of replay ? [] : LEGEND) {
   const imgs = [...body.matchAll(/<img[^>]+src=["']([^"']+)["']/gi)].map(m => new URL(m[1], url).href);
   if (imgs.length) console.log('    legend image(s): ' + imgs.join(' '));
 }
+if (!replay) console.log(`\n  ${legendHit} legend page(s) from the cache, ${LEGEND.length - legendHit} asked of the host`);
 
 // --- and what a card gets to say about it -----------------------------------
 // the wording is generated rather than written by hand for forty spots, and it
@@ -406,7 +452,10 @@ const block = [START,
   ...SCALE.map(([h, n]) => `  [${JSON.stringify(h)}, ${JSON.stringify(n)}],`),
   '];',
   'const SKY = {',
-  ...notes.map(([n, h, t]) => `  ${JSON.stringify(n)}: [${JSON.stringify(h)},\n    ${JSON.stringify(t)}],`),
+  ...notes.filter(([n]) => !n.startsWith(OV)).map(([n, h, t]) => `  ${JSON.stringify(n)}: [${JSON.stringify(h)},\n    ${JSON.stringify(t)}],`),
+  '};',
+  'const OVERLOOK_SKY = {',
+  ...notes.filter(([n]) => n.startsWith(OV)).map(([n, h, t]) => `  ${JSON.stringify(n.slice(OV.length))}: [${JSON.stringify(h)},\n    ${JSON.stringify(t)}],`),
   '};', END].join('\n');
 
 if (has('--fix')) {
@@ -416,9 +465,12 @@ if (has('--fix')) {
   // cards are the whole point, so refuse rather than write something plausible
   if (unknown.length) throw new Error(`refusing to write: ${unknown.length} colour(s) are not on the scale`);
   // a run where nothing came back would otherwise quietly empty the block
-  if (notes.length < spots.length)
-    throw new Error(`refusing to write: only ${notes.length} of ${spots.length} spots got a reading`);
-  fs.writeFileSync(FILE, html.slice(0, a) + block + html.slice(b + END.length));
+  if (notes.length < points.length)
+    throw new Error(`refusing to write: only ${notes.length} of ${points.length} spots got a reading`);
+  // index.html is CRLF; html was read without newline translation, so a plain
+  // \n block would mix line endings. match what the file already uses.
+  const eol = html.includes('\r\n') ? '\r\n' : '\n';
+  fs.writeFileSync(FILE, html.slice(0, a) + block.replace(/\n/g, eol) + html.slice(b + END.length));
   console.log(`\nwrote ${notes.length} sky lines into index.html`);
 } else {
   console.log('\nwhat each card would say (pass --fix to write it in):\n');
@@ -428,6 +480,7 @@ if (has('--fix')) {
 const out = opt('--json');
 if (out) {
   fs.writeFileSync(out, JSON.stringify({
+    samples: Object.fromEntries(got),
     scale: SCALE.map(([h, n], i) => ({ rank: i + 1, hex: h, name: n })),
     transect: walk,
     reference: REFERENCE.map(([n, lat, lon, why]) => ({ name: n, why, hex: got.get(`ref|${n}`), rank: rank(`ref|${n}`) })),
