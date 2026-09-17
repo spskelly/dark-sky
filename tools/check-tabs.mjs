@@ -136,6 +136,12 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   ok(tags.includes('3,890 ft lot · 5,835 ft view'), 'mount sterling shows lot and view elevation');
   ok(tags.includes('4,620 ft'), 'cove field, with no walk, shows one');
 
+  // the notes are for somebody planning a night, not for whoever keeps the
+  // page: nothing about what an entry used to say or how it was measured
+  const inside = await page.$$eval('#spot-list .note', els => els.map(e => e.textContent)
+    .filter(t => /this page used to|used to say|the model|the listed|this entry|\u2014/.test(t)).map(t => t.slice(0, 40)));
+  ok(inside.length === 0, `no card note is written to the maintainer (${inside.join(' | ') || 'none'})`);
+
   // this panel is drawn twice: once by renderSpotList at load, once when the
   // tab first opens. a skyline has to take one click to open and one to close,
   // not two of each, which is what a listener bound per draw would cost.
