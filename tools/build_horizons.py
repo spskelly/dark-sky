@@ -8,7 +8,7 @@ asks, which is not "what does it look like" but "how high is the ridge to the
 southeast, and is the moon behind it at 10pm".
 
   python tools/build_horizons.py                 # resume, then rewrite index.html
-  python tools/build_horizons.py --dry-run       # stats only, nothing written
+  python tools/build_horizons.py --dry-run       # say what a run would do, compute nothing
   python tools/build_horizons.py --force         # discard the cache and recompute
   python tools/build_horizons.py --only cowee    # one spot, by name substring
 
@@ -67,6 +67,33 @@ ALT_RANGE = 90.0      # degrees of span, so -10 .. +80
 EYE = 1.7             # metres of person above the dem
 MAX_RANGE = 100000.0  # metres; past this a ridge is haze
 NEAR = 5000.0         # metres; inside this, full resolution
+
+# where the ray starts. this is a real tunable and it was measured, not picked.
+#
+# starting at one dem post, 10 m, makes the skyline a fiction: a neighbouring
+# cell 2 m higher subtends 11 degrees, so every road cut, parking berm and
+# half metre of vertical noise becomes a ridge. the first run had 23 per cent
+# of all azimuths finding their skyline closer than 100 m, a median range of
+# 428 m, and maxima of 38 to 43 degrees at open overlooks. that is not terrain,
+# that is the ground the observer is standing on.
+#
+# measured across five spots at 10, 50, 150 and 400 m:
+#
+#   start   sub-100 m azimuths   black balsam max   devil's courthouse max
+#    10 m          16 to 48%           12.3 deg              33.7 deg
+#    50 m           9 to 35%           11.7 deg              33.7 deg
+#   150 m                  0%            5.8 deg              32.0 deg
+#   400 m                  0%            1.0 deg              17.4 deg
+#
+# 150 m is the knee. it clears every sub-100 m artifact while keeping the
+# features that are really there: devil's courthouse holds its 32 degree rock
+# face and big bald holds its 23 degree summit. by 400 m real ground is being
+# deleted, black balsam falling to a 1 degree horizon it does not have.
+#
+# 150 m is about 15 dem cells. below that a 1/3 arc-second grid cannot tell a
+# ridge from a road cut, and neither could you without stepping ten paces
+# sideways. retune against a photograph taken from a known overlook.
+MIN_RANGE = 150.0
 
 SRC_CPD = 10800       # source cells per degree, ie 1/3 arc-second
 COARSE_CPD = 3600     # far field cells per degree, ie 1 arc-second
@@ -162,7 +189,16 @@ def coarse_lattice(force):
     print('building the 1 arc-second far field grid, %d tiles off S:, sequential' % n_tiles,
           flush=True)
     lat = read_lattice(COARSE_CPD, row0, row1, col0, col1)
-    save_atomic(path, lambda p: np.save(p, lat.arr))
+
+    # np.save appends .npy to a path that does not already end in it, so
+    # np.save('x.npy.tmp', a) writes x.npy.tmp.npy and the rename that follows
+    # looks for a file that was never created. handing it an open file object
+    # instead makes it write exactly where it is told.
+    def save_npy(p):
+        with open(p, 'wb') as f:
+            np.save(f, lat.arr)
+
+    save_atomic(path, save_npy)
     print('far field grid %d x %d in %.0fs' % (lat.arr.shape + (time.time() - t,)), flush=True)
     return lat
 
@@ -182,7 +218,7 @@ def fine_lattice(lat, lon):
 def ray_ranges():
     """the step grows with range: close in, the 10 m posts of the dem are the
     limit; far out, a 10 m step just reads the same cell over and over."""
-    out, r = [], 10.0
+    out, r = [], MIN_RANGE
     while r <= MAX_RANGE:
         out.append(r)
         r += max(10.0, r / 500.0)
@@ -258,7 +294,7 @@ def write_json(rec):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--dry-run', action='store_true', help='stats only, index.html untouched')
+    ap.add_argument('--dry-run', action='store_true', help='say what the real run would do, compute nothing')
     ap.add_argument('--force', action='store_true', help='discard the cache and recompute')
     ap.add_argument('--only', help='run one spot, by case-insensitive name substring')
     args = ap.parse_args()
@@ -275,6 +311,31 @@ def main():
     todo = [s for s in spots if not args.only or args.only.lower() in s['name'].lower()]
     if not todo:
         sys.exit('--only %r matched nothing' % args.only)
+
+    # a dry run says what the real run would do and then stops. it deliberately
+    # computes nothing: a dry run that does the whole 4 to 6 minutes and throws
+    # the answer away is not a preview of the work, it is the work with the
+    # ending cut off, and the name lies about what it costs.
+    if args.dry_run:
+        cached = [s for s in todo if os.path.exists(os.path.join(CACHE, slug(s['name']) + '.json'))]
+        fresh = [s for s in todo if s not in cached] if not args.force else todo
+        if args.force:
+            cached = []
+        grid = os.path.join(CACHE, 'coarse_1as.npy')
+        have_grid = os.path.exists(grid) and not args.force
+        print('%d spots in index.html, %d selected' % (len(spots), len(todo)))
+        print('  %d already cached, %d to compute' % (len(cached), len(fresh)))
+        print('  far field grid: %s' % ('cached, %.0f MB' % (os.path.getsize(grid) / 1e6)
+                                        if have_grid else 'not built, about 2 minutes and 777 MB'))
+        secs = (0 if have_grid else 120) + 2 * len(fresh)
+        print('  estimated %s' % ('nothing to do, index.html rewritten from cache'
+                                  if not fresh and have_grid else 'about %d min %02d s' % (secs // 60, secs % 60)))
+        for m, label in ((START, 'start'), (END, 'end')):
+            if m not in html:
+                print('  MISSING the horizons:%s marker; the real run would refuse to write' % label)
+        print('  writes: %s' % ('nothing, --only never rewrites index.html' if args.only
+                                else 'tools/.horizon-cache/, then the horizons block in index.html'))
+        return
 
     # built on first use, so a resumed run that only has to rewrite index.html
     # never pays for the far field grid at all
@@ -337,9 +398,6 @@ def main():
              + '\nconst HORIZONS = {\n' + body + '\n};\n' + END)
 
     print('\n%d spots, %.1f kB of index.html' % (len(results), len(block.encode()) / 1024))
-    if args.dry_run:
-        print('dry run, nothing written')
-        return
     if args.only:
         print('--only run, index.html left alone so a partial set cannot replace the full one')
         return
