@@ -32,9 +32,27 @@ Refreshing the parkway overlooks is three commands, in this order:
 
 ```sh
 node tools/build-overlooks.mjs           # needs the network (Overpass); --replay re-filters tools/.overlooks-raw.json instead, no network
-python tools/build_horizons.py           # no network: reads the DEM tiles and the cached far field grid. 27.1 s with the grid cached (2026-09-17), 3.4 s on a re-run with nothing moved
+python tools/build_horizons.py           # no network: reads the DEM tiles and the cached far field grid. 27.1 s with the grid cached (2026-09-17), 2.6 s on a re-run with nothing moved
 node tools/build-skyglow.mjs --fix       # no network once tools/.skyglow-cache/ is warm; a cold cache fetches from the atlas
+node tools/build-skyglow.mjs --check     # then: does the page's sky block still match? exit 0 yes, exit 1 no
 ```
+
+`--check` builds the block `--fix` would write and compares it with the one in
+the page, line endings normalised, then names the spots and overlooks whose
+entries differ. It is the staleness check for both `SKY` and `OVERLOOK_SKY`:
+neither block records what it was generated from, so this is the only thing
+that notices a spot that moved or an overlook list that was rebuilt underneath
+them. It needs `tools/.skyglow-cache/` warm, or `--replay <samples.json>`,
+since a check that asks the atlas for ten tiles is a check nobody runs; with
+`--replay` it takes about 0.1 s. `--html <path>` points it at a copy of the
+page instead of `index.html`. `--check` and `--fix` together is an error.
+
+`node tools/check-tabs.mjs` also asserts, in the page itself, that the six
+generated blocks still name the same places: every `OVERLOOKS` id has an
+`OVERLOOK_HORIZONS` and an `OVERLOOK_SKY` entry, neither map holds a key the
+overlook list does not, the `SKY` keys are exactly the `SPOTS` names, and every
+spot has a `HORIZONS` entry. Regenerating one block and forgetting the others
+shows up there and nowhere else.
 
 Of the three, only the first touches the network, and not even that one with
 `--replay`. Run all three, in this order, whenever OSM is refreshed or a
@@ -56,8 +74,8 @@ redoing finished work.
 - `tools/.overlooks-raw.json`: the raw Overpass response from the last real
   `build-overlooks.mjs` run. `--replay` re-filters from it with no network,
   which is how the filter and dedupe logic gets tested without asking Overpass
-  again. Known gap: `--replay` with no raw file yet throws a bare `ENOENT`
-  rather than a clear message.
+  again. With no raw file yet, `--replay` names the file it wanted and the
+  command that records one.
 - `tools/.skyglow-cache/`: one file per atlas tile and per legend page,
   fetched once and kept, named from the tile URL's own path, so a new year's
   `LP_TILES` template misses the cache by itself. A tile the atlas answers 404
@@ -84,9 +102,10 @@ again: it needs `playwright`, which the elevation work does not.
 | A spot is added or removed | `build_horizons.py` | Cached spots are skipped, so this only costs the new ones |
 | `ALT_MIN`, `ALT_RANGE`, or the azimuth count | `build_horizons.py --force` | The encoding changes, so every profile has to be re-encoded |
 | `MAG_LIMIT` in `build-starcat.mjs` | `node tools/build-starcat.mjs` | Changes which stars ship and which figures can close |
-| The DEM tiles on `S:` | `build_horizons.py --force` | The far field grid caches the old heights |
+| The DEM tiles in the tile directory (`TILES` in `build_horizons.py`) | `build_horizons.py --force` | The far field grid caches the old heights |
 | A spot's `lat, lon` changes | `node tools/build-skyglow.mjs --fix` | The `SKY` block is derived from the coordinate, same as the horizon, and nothing was re-running it. Found stale 2026-09-17: `SKY` was last generated 2026-09-12, the spots' coordinates were moved 2026-09-17, and nobody re-ran the skyglow build. Re-running it changed 8 sentences; 7 are explained by the moved pin (Sam Knob, Fryingpan Mountain tower, Hooper Bald, Craggy Pinnacle, Doughton Park, Bearwallow Mountain, Gorges State Park). The eighth, Elk Knob State Park, has the same coordinate before and after the move; why its sentence changed is not established |
 | OSM refreshed, or a curated spot added or moved near the parkway | all three, in order: `build-overlooks.mjs`, `build_horizons.py`, `build-skyglow.mjs --fix` | The 300 m dedupe in `build-overlooks.mjs` only sees the spot list as it stood when it last ran; a spot that moves or is added afterward can leave a duplicate overlook pin standing beside it |
+| `SKY` or `OVERLOOK_SKY` might be stale | `node tools/build-skyglow.mjs --check` | Neither block records what it was generated from, so nothing else notices. Exit 1 names the entries that differ. Run it after any spot move and after every overlook rebuild |
 | An overlook's OSM id changes | nothing required | Orphans the old `tools/.horizon-cache/ov-<old-id>.json`, harmlessly; the new id gets its own cache file on the next `build_horizons.py` run |
 
 Nothing downstream of `index.html` needs regenerating. `build-og.mjs` and
@@ -107,8 +126,9 @@ Nothing downstream of `index.html` needs regenerating. `build-og.mjs` and
 | `MAG_LIMIT` | 4.5 | Plus the 121 fainter stars the constellation figures need to close, admitted for that reason alone and drawn at their true magnitude |
 | Thumbnail scale | -3 to +24 degrees | The expanded view's -10..+80 over 60 px is 0.67 px per degree, which reads as a dark smear. Same window for every spot, so thumbnails stay comparable |
 | `NEAR_ROAD_M` (`build-overlooks.mjs`) | 400 m | A viewpoint farther than this from the parkway is treated as a trail summit, not a pull-off. Not a count from the dry run: it is baked into the Overpass query itself (`around.bp:400`), so all 164 raw results are inside it by construction |
-| `NEAR_SPOT_M` (`build-overlooks.mjs`) | 300 m | Dropped 9 of 135 named, non-generic viewpoints as duplicates of a curated spot's `lat, lon` or `view:` (2026-09-17 dry run), leaving 126. The spec guessed roughly 15; 9 is the measurement. Names such as "Craggy Pinnacle Summit" and "View Devils Courthouse (MP 422.4)" are typical: many curated parkway spots are trailheads OSM does not tag as viewpoints |
-| `SAME_M` (`build-overlooks.mjs`) | 150 m | Collapsed 4 node/way pairs mapping the same overlook twice (126 to 122): Bad Fork Valley (9 m apart), Big Ridge (13 m), Caney Fork (13 m), Ballhoot Scar (67 m). The first version compared names exactly and merged none; it now compares a normalised `baseName()` and keeps the spelling that carries the milepost |
+| `NC_NORTH` (`build-overlooks.mjs`) | 36.56 N | Added 2026-09-17, after Pilot Mountain Overlook (36.6419 N, about 28 road miles into Virginia) shipped in the list and was cited here as the second flattest overlook. The grid box above stops at 37 N, so a Virginia overlook's northward rays run off it and its horizon is not a measurement. The parkway crosses the state line at about 36.55 N and runs north-east from there, so nothing on this road in North Carolina lies north of 36.56. The filter is a latitude test rather than a narrower Overpass box because `--replay` re-filters a response that was fetched with the wider box. Dropped 1 of 135 named, non-generic viewpoints |
+| `NEAR_SPOT_M` (`build-overlooks.mjs`) | 300 m | Dropped 9 of the 134 named, non-generic viewpoints inside North Carolina as duplicates of a curated spot's `lat, lon` or `view:` (2026-09-17 dry run), leaving 125. The spec guessed roughly 15; 9 is the measurement. Names such as "Craggy Pinnacle Summit" and "View Devils Courthouse (MP 422.4)" are typical: many curated parkway spots are trailheads OSM does not tag as viewpoints |
+| `SAME_M` (`build-overlooks.mjs`) | 150 m | Collapsed 6 pairs mapping the same pull-off twice (125 to 119): Bad Fork Valley (9 m apart), Big Ridge (13 m), Caney Fork (13 m), Ballhoot Scar (67 m), Hominy Valley (14 m), Beaver Dam (22 m). Retuned 2026-09-17: the first version compared names exactly and merged none, the second compared a normalised name and merged 4, and this one does not compare names at all. The last two pairs are why: OSM carries them as "View Hominy Valley" against "Hominy Valley (MP 404.2)", and "Beaver Dam Overlook Parking" against "Beaver Dam Gap Overlook (MP 401.7)". Inside 150 m the raycast already starts further out than the gap and the elevation cell is 10 m, so both entries draw the same horizon under two names. The spelling that carries the milepost is still the one kept |
 | `GENERIC` (`build-overlooks.mjs`) | `{'scenic overlook'}` | Combined with dropping unnamed elements, cuts the 164 Overpass results to 135; the two filters run together in one step, so this does not isolate how many were the generic name alone |
 
 ## Stated limits
@@ -155,14 +175,16 @@ inlining anything new, sweep for collisions across every top-level declaration
 in the page and in whatever is being added.
 
 **Unchecked pull-offs.** The 40 curated spots have been stood at or researched.
-Nobody has checked the 122 parkway overlooks, and Cove Field Ridge showed what
+Nobody has checked the 119 parkway overlooks, and Cove Field Ridge showed what
 an unchecked one looks like: the model starts 150 m out, so a grown-in
 overlook draws far more open than it really is. Hence the caveat line in every
 overlook popup, the smaller marker, and the layer being off by default.
 
 **North Carolina only.** The elevation grid stops at 37 N. Virginia's parkway
 overlooks would need more 3DEP tiles fetched and the far field grid rebuilt
-to cover them; not attempted here.
+to cover them; not attempted here. The Overpass box runs to 36.7 N and so
+crosses the state line, which let one Virginia overlook through until
+`NC_NORTH` was added on 2026-09-17; the filter is in `pick`, not in the query.
 
 ## Behaviours worth keeping
 
@@ -227,7 +249,7 @@ wrong side on a night nobody happens to be checking.
 |---|---|---|
 | 2026-09-16 | Star catalogue build, warm cache | 1.1 s, byte-identical output |
 | 2026-09-16 | `tools/stars.js` | 29,868 bytes, 12,854 gzipped |
-| 2026-09-16 | Far field grid build, 15 tiles off `S:` | about 2 min, 777 MB, 10800 x 18000 float32. Max cell 2036.9 m, which is Mount Mitchell, so the mosaic georeferences correctly |
+| 2026-09-16 | Far field grid build, 15 DEM tiles | about 2 min, 777 MB, 10800 x 18000 float32. Max cell 2036.9 m, which is Mount Mitchell, so the mosaic georeferences correctly |
 | 2026-09-16 | 40 spots, grid cached | 0.1 to 0.2 s each, under 10 s total |
 | 2026-09-16 | Generated `HORIZONS` block | 29.5 kB for 40 spots |
 | 2026-09-17 | 19 coordinate moves plus 24 viewpoints, recompute | 0.1 s per changed spot, everything else served from cache |
@@ -238,6 +260,13 @@ wrong side on a night nobody happens to be checking.
 | 2026-09-17 | Atlas tiles at zoom 6, before and after adding the overlooks | 10 both times: the overlooks ride the same tiles the 40 spots already cover, so they cost nothing extra. 122 of 122 got a reading |
 | 2026-09-17 | Generated `OVERLOOK_SKY` block | 27.1 kB, against the spec's estimate of about 35 kB |
 | 2026-09-17 | `index.html`, start of this branch to now | 262,462 bytes to 410,877, close to the spec's rough 265 kB starting estimate. About 148 kB added: horizons about 89 kB, skyglow about 27 kB, the overlook list itself about 12 kB, the rest code and tests' worth of CSS and JS |
+| 2026-09-17 | The list corrected after review, and everything regenerated from it | The six rows above are the first run of the list. A review found two more pull-offs mapped twice under names that do not match, and one overlook 28 road miles inside Virginia where the elevation grid does not reach. `SAME_M` now collapses on distance alone and `NC_NORTH` drops anything north of 36.56 N, so 122 became 119: Pilot Mountain Overlook dropped for latitude, "View Hominy Valley" and "Beaver Dam Overlook Parking" merged into the entries that carry their mileposts. Regenerated with no network, from the saved Overpass response, the warm horizon cache and saved atlas samples |
+| 2026-09-17 | `build-overlooks.mjs` filter counts, corrected list | 164 returned, 135 named and not the generic name, 134 south of 36.56 N (1 dropped), 125 more than 300 m from a curated spot (9 dropped), 119 after collapsing duplicates (6 pairs merged). 72 of the 119 carry a milepost in the name. Generated block 11.4 kB, as the run prints it |
+| 2026-09-17 | Overlook raycast, corrected list | Nothing to compute: all 119 were already cached from the first run, so `build_horizons.py` printed `cached` for all 159 units (40 spots plus 119 overlooks) in 2.6 s and rewrote the block without the three dropped ids. The three orphaned `ov-*.json` cache files are left in place, harmlessly |
+| 2026-09-17 | Generated blocks, corrected list | `HORIZONS` plus `OVERLOOK_HORIZONS` 117.5 kB as `build_horizons.py` prints it, down from 119.7. `OVERLOOK_SKY` 26.5 kB, down from 27.1, measured from `const OVERLOOK_SKY = {` to its closing brace. 159 of 159 points got an atlas reading, still on the same 10 tiles at zoom 6 |
+| 2026-09-17 | `index.html`, corrected list | 409,288 bytes, down 1,589 from 410,877 |
+| 2026-09-17 | `build-skyglow.mjs --check`, both ways | Exit 0 against the regenerated page, about 0.1 s with `--replay`. Exit 1 against a copy of the page with one spot renamed (reported as "in the page, but this run does not produce it") and against a copy with one generated sentence reworded (reported as "differs"). Under `--replay` the saved samples are keyed by spot name, so a copy with only a coordinate nudged still exits 0; catching a moved coordinate is what the warm tile cache is for |
+| 2026-09-17 | `build-skyglow.mjs --check`, live against the warm tile cache | Exit 0 against the real page. Exit 1 against a copy with Waterrock Knob moved 0.1 degree north, reported as "Waterrock Knob: differs". Both runs printed `10 tile(s) from the cache, 0 asked of the host` and `2 legend page(s) from the cache, 0 asked of the host`, so the check that catches a moved coordinate costs the atlas host nothing |
 
 ## Horizon spread, measured 2026-09-17
 
@@ -254,13 +283,20 @@ still the right one.
 Highest points flattest, valleys most enclosed, which is the sanity check on the
 whole pipeline in one line.
 
-The same check on the 122 overlooks, also 2026-09-17: mean horizon 0.11 to
-16.97 degrees, median 4.83. Flattest three: Mount Jefferson View (0.11), Pilot
-Mountain Overlook (0.13), Basin Cove Overlook (0.44). Most enclosed three:
-Ballhoot Scar Overlook (16.97), Woodfin Cascades Overlook (13.35), Raven Fork
-Overlook (13.17). Open viewpoints flat, gorge and road-cut names enclosed:
-the same pattern the 40 spots show, holding at more than three times the
-count. Elevations off the DEM range 2,102 to 6,053 ft across the 122.
+The same check on the 119 overlooks, recomputed 2026-09-17 after the list was
+corrected: mean horizon 0.11 to 16.97 degrees, median 4.83. Flattest three:
+Mount Jefferson View (0.11), Basin Cove Overlook (0.44), Haywood Jackson
+Overlook (0.71). Most enclosed three: Ballhoot Scar Overlook (MP 467.4)
+(16.97), Woodfin Cascades Overlook (MP 446.7) (13.35), Raven Fork Overlook
+(MP 467.9) (13.17). Open viewpoints flat, gorge and road-cut names enclosed:
+the same pattern the 40 spots show, holding at three times the count.
+Elevations off the DEM range 2,102 to 6,053 ft across the 119.
+
+The earlier figure named Pilot Mountain Overlook (0.13) as the second flattest.
+It was the Virginia overlook, so it is gone and Haywood Jackson Overlook takes
+the third place. Nothing else in the spread moved: the range, the median and
+the elevation range are unchanged, which is what dropping three points out of
+122 should do.
 
 **Known design limit that follows from it.** The thumbnail is scaled -3 to +24
 degrees, so it spends most of its height on terrain that a summit does not
@@ -316,8 +352,15 @@ Recorded here rather than resolved.
 - Under `--refetch`, a tile that starts 404ing keeps its old cached PNG, which
   then wins; a tile that stops 404ing leaves its `.missing` sentinel behind,
   unread but harmless.
-- `build-overlooks.mjs --replay` with no `tools/.overlooks-raw.json` yet
-  throws a bare `ENOENT`.
+- Keyboard handling of an overlook popup, verified 2026-09-17 and left as it
+  is. The markers are focusable and Enter opens the popup. Escape does not
+  close it while focus is still on the marker, because Leaflet hooks the
+  Escape key on the map container rather than on the marker, and the container
+  is not what is focused. The popup's own close control is reachable by Tab,
+  so the popup can always be dismissed. Moving focus into the popup when it
+  opens, and returning it to the marker when it closes, is the fix; it was not
+  attempted here because it needs its own pass over focus order and its own
+  assertions.
 
 ## Left open
 

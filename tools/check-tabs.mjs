@@ -293,6 +293,22 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
     lat: spotState.map.getCenter().lat, cards: document.querySelectorAll('#spot-list .spot').length }));
   ok(bad.filter === 'all' && bad.sort === 'mins' && bad.base === 'topo', 'garbage under a key loads the default');
   ok(bad.lat > 34 && bad.lat < 37 && bad.cards === 40, 'a map view off the page is ignored, and all 40 cards draw');
+
+  // the same for the three keys the earlier block does not cover, since a
+  // throw on the way up blanks the page rather than degrading it
+  await c.evaluate(() => {
+    localStorage.setItem('darksky.overlooks', 'yes please');
+    localStorage.setItem('darksky.showAll', '{oops');
+    localStorage.setItem('darksky.panoWhen', '[1,2,3]');
+  });
+  await c.close();
+  const d = await ctx.newPage();
+  await d.goto(URL_ + '#where');
+  await d.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
+  const junk = await d.evaluate(() => ({ cards: document.querySelectorAll('#spot-list .spot').length,
+    pins: document.querySelectorAll('.ovl-pin').length }));
+  ok(junk.cards === 40 && junk.pins === 0,
+    `junk under the overlook keys still loads 40 cards with the layer off (${junk.cards} cards, ${junk.pins} pins)`);
   await ctx.close();
 }
 

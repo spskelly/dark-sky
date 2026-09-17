@@ -3843,7 +3843,7 @@ function remember(key, value) {
   try { localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value)); } catch (e) {}
 }
 
-// remember the home point between visits; storage can throw in a private window
+// remember the home point between visits
 const HOME_KEY = 'darksky.home';
 function saveHome() { remember(HOME_KEY, spotState.home); }
 function loadSavedHome() {
@@ -5182,8 +5182,7 @@ function initTabs() {
   // paints the wrong aspect. both wait for the first time the panel is shown,
   // which also means a visit that never opens the map requests no tiles.
   const firstShow = { 'panel-where': () => { initMap(); drawSkylines(); } };
-  // the tab you were last on, so a return visit opens where you left off.
-  // storage can throw in a private window, as with the home point above.
+  // the tab you were last on, so a return visit opens where you left off
   const TAB_KEY = 'darksky.tab';
 
   function select(tab, { focus = false, top = false } = {}) {

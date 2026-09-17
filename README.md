@@ -71,13 +71,13 @@ falls back to the default instead of being trusted.
 | `darksky.basemap` | `topo` or `imagery` | `topo` |
 | `darksky.mapView` | `{lat, lon, zoom}`; ignored if outside 34-37.5 N, -85.5 to -79.5 E, or zoom outside 6-17 | framed on the visible spots |
 | `darksky.overlooks` | `'1'` or `'0'` | off |
-| `darksky.active` | a curated spot's name, or `ov:<osm id>`; dropped if it no longer exists. An overlook is only restored if its layer is on | none |
-| `darksky.pano` | the spot or overlook whose panorama is open | none |
+| `darksky.active` | a curated spot's name, or `ov:<osm id>`; dropped if it no longer exists. An overlook is only restored if its layer is on, and is cleared again when its popup is closed, so a popup dismissed on one visit does not reopen on the next | none |
+| `darksky.pano` | a curated spot's name: the card whose panorama is open. Overlooks never write it, because an overlook's panorama is always open inside its popup and is restored by `darksky.active` instead | none |
 | `darksky.panoWhen` | `{key: "HH:MM", ...}`, one entry per spot or overlook ever opened; matched to the nearest of tonight's dark-hour slices on return | nearest 9pm |
 
 `darksky.home`, `darksky.lightpollution` and `darksky.tab` predate this table
 and kept their existing names and on-disk formats. `darksky.panoWhen` can
-reach 162 keys (40 spots plus 122 overlooks), about 3 kB total; it is bounded
+reach 159 keys (40 spots plus 119 overlooks), about 3 kB total; it is bounded
 but never pruned.
 
 ## Running it
@@ -97,13 +97,18 @@ The tabs have a check, since a hidden panel cannot be measured and both the
 map and the skyline canvases need a real width the moment their tab opens:
 
 ```sh
-node tools/check-tabs.mjs                  # ~20 s, 32 assertions, exits non-zero on failure
+node tools/check-tabs.mjs                  # ~20 s, 85 assertions, exits non-zero on failure
 node tools/check-tabs.mjs --shots          # also writes six PNGs to tools/.shots/
 node tools/check-tabs.mjs other-copy.html  # check some other copy of the page
 ```
 
 It uses the Chrome already on the machine (falling back to Playwright's own
-build) and blocks the forecast and tile requests, so it passes offline.
+build) and answers or blocks every tile and data host the page reaches for: the
+forecast, the basemap tiles, and the light-pollution atlas, which is served a
+blank tile locally rather than aborted, because the layer's own error handler
+would otherwise remove the layer under the test. Leaflet and the fonts still
+load from their CDNs, so the check needs a network even though nothing it
+asserts depends on one.
 
 ## The moon is always current
 
