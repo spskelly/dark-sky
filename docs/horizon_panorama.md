@@ -365,6 +365,157 @@ information.
 `node tools/check-tabs.mjs --shots` renders the where tab at desktop and phone
 width and takes a path argument, so it can be pointed at a candidate copy.
 
+## Terrain tiles for picked points
+
+`tools/build_terrain_tiles.py` cuts the same DEM into static files a browser can
+fetch, so a skyline can be raycast in the page for any point picked on the map.
+It imports `read_lattice`, `pool_max`, `save_atomic` and the grid bounds from
+`build_horizons.py`; nothing about mosaicking or pooling is repeated. The output
+goes to an output directory outside this repository (a checkout of the separate
+public repository the tiles are served from), never into this one.
+
+### Commands
+
+```sh
+# say what a run would do: tile counts, bytes. reads and writes nothing.
+python tools/build_terrain_tiles.py --out <output directory> --dry-run
+
+# the real run. one worker, sequential reads off the tile directory.
+python tools/build_terrain_tiles.py --out <output directory>
+
+# resume after a stop: the same command. tiles already there print "cached".
+python tools/build_terrain_tiles.py --out <output directory>
+
+# rebuild every file
+python tools/build_terrain_tiles.py --out <output directory> --force
+
+# a different area, quarter degrees, south west north east
+python tools/build_terrain_tiles.py --out <output directory> --bbox 35.25 -83.25 35.50 -83.00
+```
+
+`--coarse <path to coarse_1as.npy>` pools `far.i16` from the 1 arc-second grid
+`build_horizons.py` already caches instead of reading all 15 source tiles again.
+When that cache is in `tools/.horizon-cache/` it is found without the flag.
+`--near-from-coarse` cuts the near tiles from the same grid, so the DEM drive is
+not read at all; the grid is exactly `read_lattice` at 1 arc-second, and on
+2026-09-17 the one tile built both ways was byte-identical. It is only as fresh
+as that cache.
+
+Success looks like one line per tile (`tile 17/120 near/n35.25_w083.50.i16
+written 1.6 MB 0.0s`, or `cached`), one `read` line per whole degree square,
+`far.i16 written`, and a closing line with the totals. `manifest.json` is
+written last, so its presence means the run finished. A stopped run leaves at
+most one `.tmp` file, which the next run overwrites.
+
+### What is written
+
+| File | What |
+|---|---|
+| `near/n35.25_w083.50.i16` | 1 arc-second (3600 cells per degree), max-pooled 3x3 from the source, one file per 0.25 degree square, 900 x 900 cells, 1,620,000 bytes |
+| `far.i16` | 6 arc-second (600 cells per degree), max-pooled 6x6 from the 1 arc-second lattice, the whole 34 to 37 N, 85 to 80 W grid of `build_horizons.py`, 1800 x 3000 cells, 10,800,000 bytes. Wider than the near tiles on purpose: a ray runs 100 km past the pick |
+| `manifest.json` | bounds of both levels, cells per degree, tile size, naming, encoding, nodata, the near tiles present, build date, source, and the raycast constants |
+
+Encoding, everywhere: little-endian int16 metres, rounded to the nearest metre
+after pooling, row 0 at the north edge, columns west to east, no header, nodata
+-32768. In the browser that is `new Int16Array(buffer)`.
+
+Naming: `n` or `s`, the absolute latitude as `DD.DD`, an underscore, `w` or
+`e`, the absolute longitude as `DDD.DD`, all of the tile's south west corner.
+Fixed width, so a listing sorts. From a point, by the same floor on the global
+1 arc-second lattice that `Lattice.sample` uses, so a point exactly on a tile
+edge lands in the tile that really holds its cell (rows count down from the
+north, so a point on a parallel belongs to the tile south of it):
+
+```js
+const R = Math.floor((90 - lat) * 3600), C = Math.floor((lon + 180) * 3600);
+const south = 90 - (Math.floor(R / 900) + 1) / 4, west = Math.floor(C / 900) / 4 - 180;
+const part = (v, w) => Math.abs(v).toFixed(2).padStart(w, '0');
+const name = (south < 0 ? 's' : 'n') + part(south, 5) + '_' + (west < 0 ? 'w' : 'e') + part(west, 6);
+const metres = tile[(R % 900) * 900 + (C % 900)];
+```
+
+The far grid is one array: `far[(Rf - 53 * 600) * 3000 + (Cf - 95 * 600)]` with
+`Rf = Math.floor((90 - lat) * 600)`, `Cf = Math.floor((lon + 180) * 600)`, 53
+and 95 being 90 - 37 and 180 - 85 from the far bounds in the manifest.
+
+A tile that is entirely nodata is not written and not listed in the manifest.
+A pick whose tile is not listed gets the flat horizon the viewer already falls
+back to.
+
+### Constants
+
+| Constant | Value | Evidence |
+|---|---|---|
+| `NEAR_CPD` | 3600 (1 arc-second) | the accuracy table below: 3 arc-second everywhere is four times worse |
+| `FAR_CPD` | 600 (6 arc-second) | same table: 6 arc-second beyond 10 km costs 0.02 degree of mean error |
+| `NEAR_M` | 10000 m | the range at which that table switches grids. Not the 5000 m `NEAR` of `build_horizons.py`, which switches between 1/3 and 1 arc-second |
+| `R_EFF`, `EYE`, `MIN_RANGE`, `MAX_RANGE` | copied from `build_horizons.py` into the manifest at build time | the browser raycast has to mirror them; see the constants section above |
+| default `--bbox` | 34.75 -84.50 36.75 -80.75 | the mountain region the map shows. 8 x 15 = 120 tiles |
+
+### Accuracy that set the two resolutions
+
+Measured 2026-09-17, offline, 40 curated spots x 360 azimuths, absolute
+difference in degrees from the shipped skyline (1/3 arc-second inside 5 km):
+
+| grids the raycast is given | mean | p95 | worst spot mean |
+|---|---:|---:|---|
+| 1 arc-second everywhere | 0.21 | 0.68 | Wolf Mountain 1.09 |
+| 1 arc-second inside 10 km, 3 beyond | 0.22 | 0.69 | same |
+| 1 arc-second inside 10 km, 6 beyond | 0.23 | 0.71 | same |
+| 3 arc-second everywhere | 0.81 | 2.35 | Cove Field 3.86 |
+
+So the near field needs 1 arc-second and the far field can be 6.
+
+### Measured, and extrapolated
+
+Measured 2026-09-17, one near tile (`--bbox 35.25 -83.25 35.50 -83.00`) from the
+source tiles, `far.i16` from the cached grid:
+
+| What | Result |
+|---|---|
+| Reading the tile's window from its source GeoTIFF | 0.3 s |
+| Encoding and writing the tile | under 0.05 s, 1,620,000 bytes |
+| `far.i16` pooled from the cached grid | 1.3 s, 10,800,000 bytes |
+| Whole command | 2.3 s |
+| The tile under `gzip -9` | 959,481 bytes, 59 per cent of raw |
+| `far.i16` under gzip level 9 | 6,476,253 bytes |
+| Second run of the same command | `cached` for the tile and for `far.i16`, under 1 s, no source read |
+| Same tile cut with `--near-from-coarse` | byte-identical, and `far.i16` too |
+| Tile against `read_lattice` at 1 arc-second, whole tile | identical after rounding, 810,000 of 810,000 cells |
+| `far.i16` read in node with the indexing above | 2037 m at Mount Mitchell (35.7650, -82.2652), and at the three spots below 1917, 1481 and 1474 m, each at or above its near value, as a 6x6 maximum must be |
+| Three curated spots inside it | Waterrock Knob 1917 m against 1916.94, Thunder Struck Ridge Overlook 1458 against 1457.76, Cove Field Ridge Overlook 1409 against 1409.34 |
+
+The heights are the maximum of the nine source cells under each 1 arc-second
+cell, so a tile reads at or above the bare-earth height at a point, by design.
+
+EXTRAPOLATED from that one tile, not measured. The full default run has not
+been made:
+
+| What | Estimate | From |
+|---|---|---|
+| Runtime, 120 near tiles from source | 1 to 2 minutes | 120 x 0.3 s is 36 s; the far field grid build of 2026-09-16 read 15 whole source tiles in about 2 minutes, and this reads the equivalent of 7.5 |
+| Runtime of `far.i16` with no cached grid | about 2 more minutes | it reads all 15 source tiles, the same work as that grid build |
+| Output, raw | 205.2 MB: 120 x 1.62 MB plus 10.8 MB | exact if no tile is all nodata, which is expected for this area |
+| Output as served, gzipped | about 120 MB in total, about 1 MB per near tile | one mountain tile at 59 per cent; flatter piedmont tiles should compress better |
+| Peak memory | about 300 MB, calculated, not measured | one degree square at 1 arc-second is 52 MB of float32; `read_lattice` fills it from source blocks of 1800 x 10800 float32, 78 MB, held twice for a moment. A whole degree square at full resolution (467 MB) is never in memory |
+
+The run is well under the 10 minute line, and it checkpoints per tile anyway.
+Replace these rows with measured ones after the first real run.
+
+### What invalidates the tiles
+
+| If this changes | Re-run | Why |
+|---|---|---|
+| The DEM tiles in the tile directory (`TILES` in `build_horizons.py`) | `build_horizons.py --force` first if the cached grid is used, then `build_terrain_tiles.py --force` | every file holds the old heights, and so does the cached 1 arc-second grid |
+| `--bbox` grows | the same command with the new `--bbox` | only the new tiles are built. The manifest is rewritten to list what is inside the new bbox |
+| `--bbox` shrinks | the same command, then delete the near files no longer listed | the manifest stops listing them, the files stay on disk until removed |
+| Pooling (`NEAR_CPD`, `FAR_CPD`, max to anything else) or the encoding (dtype, byte order, row order, nodata, tile size, naming) | `--force`, and the browser decoder with it | every file changes shape or meaning |
+| `R_EFF`, `EYE`, `MIN_RANGE`, `MAX_RANGE` in `build_horizons.py`, or `NEAR_M` | the same command | only `manifest.json` changes. It is rewritten on every run |
+| The grid bounds in `build_horizons.py` | `--force` | `far.i16` changes size |
+
+Limit: nothing marks an all-nodata tile as done, so a resumed run reads that
+tile's window again. None is expected in the default bbox.
+
 ## Open items
 
 Recorded here rather than resolved.
