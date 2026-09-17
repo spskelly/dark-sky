@@ -448,14 +448,43 @@ function drawGridView(ctx, view, w, h) {
   }
   ctx.setLineDash([]);
 
+  // how high each circle is, up the middle of the view
   ctx.font = '10px "IBM Plex Sans", system-ui, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = 'rgba(139,150,179,0.7)';
+  for (let a = 10; a <= 80; a += 10) {
+    const p = panProject(a, view.az0, view);
+    if (p) ctx.fillText(a + '\u00b0', p.x + 4, p.y - 3);
+  }
+}
+
+// true level, drawn after the ridge and so over the ground: the gap between
+// this line and the crest is how much sky the terrain takes, which is the
+// number the whole drawing exists to show. the compass letters ride on it,
+// because on an enclosed site the ridge used to bury them.
+function drawLevelView(ctx, view) {
+  const pts = [];
+  for (let az = 0; az <= 360; az += 5) pts.push(panProject(0, az, view));
+  ctx.setLineDash([6, 5]);
+  ctx.strokeStyle = 'rgba(236,200,120,0.55)';
+  ctx.lineWidth = 1;
+  panStrokeRuns(ctx, pts, true);
+  ctx.setLineDash([]);
+
+  ctx.font = '10px "IBM Plex Sans", system-ui, sans-serif';
+  ctx.textBaseline = 'alphabetic';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = 'rgba(236,200,120,0.8)';
+  const zero = panProject(0, view.az0 + 12, view);
+  if (zero) ctx.fillText('0\u00b0 level', zero.x, zero.y + 12);
+
   if ('letterSpacing' in ctx) ctx.letterSpacing = '0.14em';
   ctx.textAlign = 'center';
-  ctx.textBaseline = 'alphabetic';
   for (let i = 0; i < 8; i++) {
     const p = panProject(0, i * 45, view);
     if (!p) continue;
-    ctx.fillStyle = i === 0 ? 'rgba(236,231,212,0.8)' : 'rgba(169,165,143,0.7)';
+    ctx.fillStyle = i === 0 ? 'rgba(236,231,212,0.9)' : 'rgba(200,196,175,0.8)';
     ctx.fillText(PAN_COMPASS[i], p.x, p.y - 6);
   }
   if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
@@ -535,6 +564,7 @@ function drawSkyView(ctx, w, h, opts) {
   drawMoonView(ctx, sky, view);
   drawGridView(ctx, view, w, h);
   drawRidgeView(ctx, opts.horizon, view, w, h);
+  drawLevelView(ctx, view);
 }
 
 // ---------- the sentence under the canvas ----------

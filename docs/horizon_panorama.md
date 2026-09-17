@@ -211,7 +211,7 @@ crosses the state line, which let one Virginia overlook through until
 
 ## Behaviours worth keeping
 
-Four things that look like bugs and are not. Written down so a future pass
+Things that look like bugs and are not. Written down so a future pass
 does not "fix" them back.
 
 **Re-render does not reframe the map.** Only a filter change or a home-point
@@ -247,6 +247,22 @@ scrubber's remembered clock time is. Superseded 2026-09-17: this used to be
 looks around in altitude and zoom too, so the same key now carries all
 three, and `darksky.panoAz` is read once, as a fallback for `az` alone, and
 never written again.
+
+**The viewer's 0 degree level line is drawn after the ridge, on purpose.** Added
+2026-09-17 at Shawn's request. It marks true level over the ground, so the gap
+from it up to the crest reads as the degrees of sky the terrain takes, with
+altitude labels every 10 degrees up the middle of the view. The compass letters
+ride on it: drawn with the grid, before the ridge, they were buried on any
+enclosed site (Ballhoot Scar showed none). The ground itself is everything on
+the far side of the ridge ring from the zenith, not a wall of fixed depth: a
+portrait phone sees about 60 degrees below the horizon and a 30 degree wall
+let the sky come back underneath it.
+
+**The viewer paints its canvas last.** The canvas takes whatever height the
+text under it leaves. Drawn before that text was set, it was sized for a
+taller box and then squashed about 6 per cent on a phone (584 px drawn, 546
+shown), which also put drags off target. `check-tabs.mjs` asserts the drawn
+and shown sizes agree.
 
 ## Accuracy, measured
 

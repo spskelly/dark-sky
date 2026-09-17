@@ -440,6 +440,31 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   ok(low.bright === 0, `and the bottom of it is ground, with no sky under the ridge (${low.bright} bright pixels)`);
   const sub = await page.$eval('.sky-viewer-elev', e => e.textContent);
   ok(!sub.includes('&') && sub.includes('ft'), `the elevation line is text, not markup (${sub})`);
+  // the level line: where flat would be, drawn over the ground, so the gap up
+  // to the crest reads as degrees of sky the terrain takes. on the most
+  // enclosed overlook the ridge used to bury everything at 0 degrees
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => openSkyViewerForOverlook(OVERLOOKS.find(o => /Ballhoot/.test(o.name)).id));
+  await page.waitForTimeout(200);
+  const level = await page.$eval('.sky-viewer-canvas', cv => {
+    const g = cv.getContext('2d');
+    const k = cv.width / cv.clientWidth;
+    const view = { az0: skyView.az, alt0: skyView.alt, fov: skyView.fov, w: cv.clientWidth, h: cv.clientHeight };
+    let warm = 0, tried = 0;
+    for (let az = skyView.az - 25; az <= skyView.az + 25; az += 0.5) {
+      const p = panProject(0, az, view);
+      if (!p) continue;
+      tried++;
+      // a one pixel anti-aliased line rarely lands on a whole pixel: take the column
+      const d = g.getImageData(Math.round(p.x * k), Math.round(p.y * k) - 1, 1, 3).data;
+      if ([0, 4, 8].some(i => d[i] > d[i + 2] + 30)) warm++;
+    }
+    return { warm, tried, ridge: horizonAt(viewerState.horizon, skyView.az) };
+  });
+  const fit = await page.$eval('.sky-viewer-canvas', cv => Math.abs(cv.height - cv.clientHeight * devicePixelRatio));
+  ok(fit <= 1, `the canvas is drawn at the size it is shown at (${fit}px off)`);
+  ok(level.ridge > 5, `ballhoot scar is enclosed to the south (${level.ridge.toFixed(1)} degrees)`);
+  ok(level.warm >= 15, `and a level line at 0 degrees shows over its ground (${level.warm} of ${level.tried} samples)`);
   await ctx.close();
 }
 
