@@ -404,11 +404,20 @@ def main():
         rec = results.get(s['name'])
         if not rec:
             continue
-        d = rec['dem_m'] - s['elev_ft'] * 0.3048
+        # compare the listed elev against the coordinate it describes. where a
+        # spot carries a view:, elev is the parking, and measuring it against
+        # the summit the panorama is drawn from would report a gap that is the
+        # walk itself rather than an error.
+        if s['has_view']:
+            fine = fine_lattice(s['lat'], s['lon'])
+            here = float(fine.sample(np.array([s['lat']]), np.array([s['lon']]))[0])
+        else:
+            here = rec['dem_m']
+        d = here - s['elev_ft'] * 0.3048
         if abs(d) > 30:
             bad += 1
             print('elev check: %-36s dem %5.0f ft, listed %5.0f ft, %+5.0f m'
-                  % (s['name'], rec['dem_m'] / 0.3048, s['elev_ft'], d))
+                  % (s['name'], here / 0.3048, s['elev_ft'], d))
     print('elev check: %d of %d spots disagree by more than 30 m' % (bad, len(results)))
     if bad:
         print('  a large gap usually means the listed coordinate is not the listed viewpoint.')

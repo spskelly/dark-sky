@@ -1,96 +1,126 @@
-# Spot viewpoints: proposed `view:` coordinates
+# Spot coordinates and viewpoints: what was applied
 
-For a hike-in spot the parking and the view are two different places. The pin
-and the driving directions want the parking; the skyline wants the summit. The
-builder now reads an optional second coordinate:
+Applied 2026-09-17. Supersedes the proposal version of this file. The per-spot
+evidence and sources are research notes kept out of the public repository.
 
-```js
-{ name: 'Huckleberry Knob', lat: 35.3350, lon: -83.9880, elev: 5560, ...
-  view: [35.3220, -83.9935], ... }
-```
+For a hike-in spot the parking and the view are two different places. The pin,
+the driving directions and the drive-time estimate use `lat, lon`; the skyline
+panorama uses `view: [lat, lon]` where one exists. On the map the parking is a
+solid pin and the viewpoint a hollow dashed one, joined by a dashed line, so
+the walk is visible rather than buried in a note.
 
-With no `view:`, the spot coordinate is used and nothing changes. These are
-proposals: nothing below has been applied.
+**19 coordinates moved. 24 viewpoints added. 16 spots unchanged.**
 
-## How each candidate was checked
+## The table
 
-Three independent sources had to agree before a candidate is proposed here:
+`pin moved` is how far the parking coordinate shifted. `walk` is parking to
+viewpoint. Elevations are the DEM sampled at each point, in feet.
 
-1. **OpenStreetMap's named feature** has to carry the spot's own name, from the
-   cached Overpass extract `tools/.osm-cache.json`.
-2. **OSM's own `ele` tag** on that feature, where it has one.
-3. **The 3DEP elevation sampled at that position**, compared against the `elev`
-   already hand-entered in `SPOTS`.
+| spot | pin moved | walk | park ft | view ft | listed |
+|---|---:|---:|---:|---:|---:|
+| Waterrock Knob | . | 451 m | 5774 | 6287 | 5820 |
+| Thunder Struck Ridge Overlook | 246 m | . | 4779 | . | 4780 |
+| Cove Field Ridge Overlook | . | . | 4623 | . | 4620 |
+| Black Balsam Knob | . | 111 m | 6147 | 6211 | 6214 |
+| Sam Knob / Flat Laurel Creek | 1023 m | 1244 m | 5807 | 6072 | 5800 |
+| Graveyard Fields | . | . | 5112 | . | 5120 |
+| Devil's Courthouse | 171 m | 451 m | 5468 | 5748 | 5720 |
+| Cowee Mountains Overlook | . | . | 5949 | . | 5950 |
+| Wolf Mountain Overlook | . | . | 5495 | . | 5460 |
+| Fryingpan Mountain tower | 2644 m | 605 m | 4934 | 5306 | 5340 |
+| Mount Pisgah campground | 1118 m | 2335 m | 4852 | 5707 | 4960 |
+| Cataloochee Valley | 1214 m | 2027 m | 2624 | 2771 | 2650 |
+| Mount Sterling summit | 1282 m | 2269 m | 3890 | 5835 | 5842 |
+| Kuwohi (Clingmans Dome) | 702 m | 707 m | 6310 | 6641 | 6643 |
+| Cherohala Skyway, Hooper Bald | 3150 m | 663 m | 5309 | 5428 | 5290 |
+| Panthertown Valley | 1635 m | 1545 m | 4058 | 4194 | 3900 |
+| Roan Highlands, Carvers Gap | . | 589 m | 5510 | 5824 | 5512 |
+| Mayland Earth to Sky Park | 752 m | . | 2876 | . | 2700 |
+| PARI | . | . | 2880 | . | 2900 |
+| Max Patch | . | 493 m | 4361 | 4629 | 4629 |
+| Mount Mitchell State Park | . | . | 6681 | . | 6684 |
+| Craggy Pinnacle | 622 m | 361 m | 5651 | 5884 | 5892 |
+| Black Mountain Campground | . | . | 2997 | . | 3000 |
+| Big Bald | . | 1402 m | 4659 | 5515 | 5516 |
+| Wiseman's View | . | . | 3400 | . | 3400 |
+| Table Rock picnic area | . | 525 m | 3349 | 3925 | 3400 |
+| Beacon Heights | 1621 m | 199 m | 4220 | 4380 | 4220 |
+| Grandfather Mountain State Park | 1519 m | 2241 m | 4037 | 5924 | 5946 |
+| Elk Knob State Park | . | 1489 m | 4515 | 5538 | 5520 |
+| Doughton Park | 2383 m | . | 3694 | . | 3600 |
+| Lake James State Park | . | 857 m | 1194 | 1218 | 1200 |
+| Bearwallow Mountain | 1250 m | 1024 m | 3653 | 4227 | 4232 |
+| DuPont State Recreational Forest | . | . | 2305 | . | 2900 |
+| Gorges State Park | 673 m | . | 3249 | . | 3000 |
+| Whiteside Mountain | . | 446 m | 4272 | 4903 | 4930 |
+| Wayah Bald | . | 123 m | 5273 | 5340 | 5342 |
+| Standing Indian Campground | . | . | 3408 | . | 3400 |
+| Jackrabbit Mountain | . | . | 1973 | . | 2000 |
+| Huckleberry Knob | 2350 m | 920 m | 5301 | 5557 | 5560 |
+| Tsali Recreation Area | 1537 m | . | 1739 | . | 1800 |
 
-The finding that motivated all of this: where a spot's coordinate sits well
-below its listed `elev`, the listed figure turns out to describe the named
-summit, not the coordinate. Three sources agreeing to within a few metres is
-what makes that a conclusion rather than a guess.
+## The pins that were not on anything
 
-A useful property falls out of it. The builder's elevation check compares the
-DEM at the **view** coordinate against the listed `elev`, so adding a correct
-`view:` makes that spot drop off the elevation report. The check validates the
-fix.
+Six were not merely imprecise. The reverse geocode of each old coordinate says
+what it actually sat on:
 
-## Proposed, three-way agreement
+| spot | moved | the old coordinate was |
+|---|---:|---|
+| Cherohala Skyway, Hooper Bald | 3150 m | out by Stratton Ridge near the Tennessee line, nowhere near the trailhead |
+| Doughton Park | 2383 m | the Bluff Ridge Primitive Trail, in the woods, 79.6 % open for an entry tagged "open meadows" |
+| Fryingpan Mountain tower | 2644 m | 480 m off the parkway in the woods, 838 ft below its own listed elevation |
+| Huckleberry Knob | 2350 m | 1.59 km from the Skyway carriageway, turning a 20 minute walk into a bushwhack |
+| Beacon Heights | 1621 m | Blowing Rock Highway (US 221) at Appletree Ridge, a different mountain |
+| Grandfather Mountain State Park | 1519 m | Mountain Springs Road, a private road on the west flank, outside the park |
 
-Paste-ready. Distances are from the existing spot coordinate.
+Thunder Struck moved only 246 m but was the worst kind of wrong: 4 m from the
+parkway centreline, which is to say in the travel lane.
 
-```js
-Max Patch                    view: [35.7970, -82.9568],   // 493 m,  dem 1411 vs listed 1411, osm ele 1407
-Big Bald                     view: [35.9897, -82.4902],   // 1397 m, dem 1681 vs listed 1681, osm ele 1674
-Huckleberry Knob             view: [35.3220, -83.9935],   // 1527 m, dem 1694 vs listed 1695, osm ele 1696
-Bearwallow Mountain          view: [35.4610, -82.3568],   // 2204 m, dem 1288 vs listed 1290, osm ele 1281
-Mount Sterling summit        view: [35.7023, -83.1221],   // 975 m,  dem 1779 vs listed 1781
-Devil's Courthouse           view: [35.3028, -82.8955],   // 344 m,  dem 1749 vs listed 1743, osm ele 1744
-Fryingpan Mountain tower     view: [35.3934, -82.7743],   // 2126 m, dem 1618 vs listed 1628, osm ele 1621
-Craggy Pinnacle              view: [35.7034, -82.3779],   // 253 m,  dem 1774 vs listed 1796, osm ele 1780
-```
+## What still needs your judgement
 
-Craggy Pinnacle is the weakest of the eight: the DEM at OSM's pinnacle node is
-22 m below the listed 5,892 ft. The other seven agree to within 10 m. Worth a
-look before accepting.
+**`elev` means two different things across the list, and now that the two
+coordinates are separate it is visible.** Compare the `listed` column against
+`park ft` and `view ft`:
 
-## Needs a human decision
+- Most entries' `elev` is the **viewpoint**: Max Patch 4629 against a view of
+  4629, Big Bald 5516 against 5515, Wayah 5342 against 5340, Craggy 5892
+  against 5884, Grandfather 5946 against 5924.
+- A handful are the **parking**: Waterrock 5820 against a lot at 5774 and a
+  summit at 6287, Beacon Heights 4220 against a lot at 4220, Thunder Struck
+  4780 against 4779, Hooper Bald 5290 against 5309, Table Rock 3400 against a
+  lot at 3349 and a summit at 3925.
 
-These have a real gap between parking and viewpoint but no candidate that three
-sources agree on. Local knowledge beats another query here.
+Nothing was changed either way, because 40 hand-entered figures are yours to
+settle and the page uses `elev` for temperature intuition ("subtract about 15
+degrees for the 6,000-foot balds"), which argues for the place you stand at
+night. The builder's elevation check compares `elev` against the parking where
+a `view:` exists, so whichever convention you pick, it will tell you which
+entries do not follow it.
 
-| Spot | What was found | The question |
-|---|---|---|
-| Grandfather Mountain State Park | MacRae Peak 944 m away (dem 1774), Watauga View 1919 m (dem 1805); listed 5,946 ft is 1812 m, which is Calloway Peak | Which viewpoint does this entry mean? The listed elevation is the mountain's high point, but the spot is tagged for ridge campsites |
-| Roan Highlands, Carvers Gap | Nothing matching within 6 km. Carvers Gap is the trailhead; Round Bald and Jane Bald are the destination | Which bald? |
-| Elk Knob State Park | South View 1468 m (dem 1685) and North View 1486 m (dem 1688) against listed 1682 m | Both match the elevation well. Two named viewpoints on one summit, so probably either, but it should be your call |
-| Panthertown Valley | Tranquility Point 757 m (dem 1222), Salt Rock Overlook 1210 m (dem 1214), listed 1189 m | A valley with several overlooks rather than one summit |
-| Whiteside Mountain | Listed 4,930 ft is 1503 m; nearest elevation-matching feature is Shortoff Mountain 4.5 km away, which is a different mountain | Needs the real summit coordinate |
+**Four spots still disagree by more than 30 m with no viewpoint to explain it:**
 
-## Coordinates that look wrong, reported not fixed
+- **DuPont**, listed 2900 against a pin at 2305. The research found 2900
+  matches the granite domes, not the waterfall corridor the pin sits in. Either
+  the pin or the figure is describing the wrong part of the forest.
+- **Gorges**, listed 3000 against 3249 at the corrected Grassy Ridge access.
+- **Mayland**, listed 2700 against 2876 at the observatory. The move is medium
+  confidence: Mayland's own published GPS and OSM's observatory node disagree
+  by 166 m and 53 m of height, so one of them is on the hillside. Worth a
+  phone call rather than another query.
+- **Panthertown**, listed 3900 against a corrected access at 4058.
 
-Flagged for you, unchanged, per your instruction.
+**Two spots are low confidence and flagged in the research:** Kuwohi, where the
+original coordinate was the summit rather than the access and moving the pin at
+all is arguable, and Lake James, where which park area the entry means is
+inferred from its note rather than stated.
 
-**Cherohala Skyway, Hooper Bald.** 3,389 m from OSM's Hooper Bald, and 340 m
-below the listed 5,290 ft. No feature within 6 km matches that elevation: the
-nearest candidates are Santeetlah Overlook (2,451 m) and Little Huckleberry
-Knob (2,565 m). This reads as a genuine coordinate error rather than a
-trailhead offset, since a 3.4 km walk is not the short one the tags imply.
-
-**Lake James State Park.** Matched a *different* campground, Paddy's Creek
-Drive-In, 3,528 m away. The elevation agrees, so the skyline is probably fine,
-but the pin may not be where the entry means.
-
-**Elk Knob State Park.** Listed in both sections deliberately: it sits 61 m
-from OSM's picnic area, which reads as a clean match, while being 306 m below
-the summit. A close OSM distance does not mean the coordinate is the viewpoint.
-This is the case that shows why the elevation check is worth keeping.
-
-## Applying any of these
+## Re-running after an edit
 
 ```sh
-# add view: to SPOTS by hand, then
 python tools/build_horizons.py
 ```
 
-No `--force` needed. The cache records the coordinate each profile was computed
-from, so a spot that gains or changes a `view:` recomputes by itself and prints
-`coordinate moved, recomputing`. Everything else stays cached. A single spot
-takes about 0.1 s once the far field grid is built.
+No `--force` needed. Each cached profile records the coordinate it was computed
+from, so a spot whose `lat, lon` or `view:` changed recomputes itself and
+prints `coordinate moved, recomputing`. Everything else stays cached, and a
+single spot takes about 0.1 s.
