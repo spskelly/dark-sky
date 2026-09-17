@@ -268,9 +268,25 @@ def decode(s):
 SPOT_RE = re.compile(r"""\{ name: (['"])(.*?)\1, lat: (-?[\d.]+), lon: (-?[\d.]+), elev: (-?[\d.]+)""")
 
 
+# an optional second coordinate, because for a hike-in spot the parking and the
+# view are genuinely two different places and the page needs both. the pin and
+# the driving directions want the parking; the skyline wants the summit. where
+# there is no view:, the two are the same place and the spot coordinate is used.
+VIEW_RE = re.compile(r"""\{ name: (['"])(.*?)\1,.*?view: \[(-?[\d.]+), *(-?[\d.]+)\]""")
+
+
 def parse_spots(html):
-    return [{'name': m.group(2), 'lat': float(m.group(3)), 'lon': float(m.group(4)),
-             'elev_ft': float(m.group(5))} for m in SPOT_RE.finditer(html)]
+    views = {m.group(2): (float(m.group(3)), float(m.group(4)))
+             for m in VIEW_RE.finditer(html)}
+    spots = []
+    for m in SPOT_RE.finditer(html):
+        name = m.group(2)
+        lat, lon = float(m.group(3)), float(m.group(4))
+        vlat, vlon = views.get(name, (lat, lon))
+        spots.append({'name': name, 'lat': lat, 'lon': lon,
+                      'view_lat': vlat, 'view_lon': vlon,
+                      'has_view': name in views, 'elev_ft': float(m.group(5))})
+    return spots
 
 
 def slug(name):
@@ -346,23 +362,33 @@ def main():
         path = os.path.join(CACHE, slug(s['name']) + '.json')
         if os.path.exists(path) and not args.force:
             with open(path, encoding='utf-8') as f:
-                results[s['name']] = json.load(f)
-            print('[%d/%d] %s ... cached' % (i, len(todo), s['name']), flush=True)
-            continue
+                rec = json.load(f)
+            # the cache is keyed on the name, so a spot that has since been given
+            # a view: would otherwise keep its old parking-lot skyline for ever
+            # and the edit would look like it did nothing. compare the coordinate
+            # the profile was actually computed from.
+            moved = (abs(rec.get('lat', 1e9) - s['view_lat']) > 1e-9
+                     or abs(rec.get('lon', 1e9) - s['view_lon']) > 1e-9)
+            if not moved:
+                results[s['name']] = rec
+                print('[%d/%d] %s ... cached' % (i, len(todo), s['name']), flush=True)
+                continue
+            print('[%d/%d] %s ... coordinate moved, recomputing' % (i, len(todo), s['name']), flush=True)
         t = time.time()
         if not coarse:
             coarse.append(coarse_lattice(args.force))
-        fine = fine_lattice(s['lat'], s['lon'])
-        h = float(fine.sample(np.array([s['lat']]), np.array([s['lon']]))[0])
+        fine = fine_lattice(s['view_lat'], s['view_lon'])
+        h = float(fine.sample(np.array([s['view_lat']]), np.array([s['view_lon']]))[0])
         if h <= NODATA:
             print('[%d/%d] %s ... skipped, no dem coverage' % (i, len(todo), s['name']), flush=True)
             continue
-        alt, rng = raycast(s['lat'], s['lon'], h + EYE, fine, coarse[0])
+        alt, rng = raycast(s['view_lat'], s['view_lon'], h + EYE, fine, coarse[0])
         # the cache keeps range to skyline as well as altitude, and only altitude
         # is inlined into index.html. that is deliberate: distance graded haze and
         # peak labels both want the range, and holding it here means adding them
         # later costs an inlining step rather than another 7 GB read off S:.
-        rec = {'name': s['name'], 'lat': s['lat'], 'lon': s['lon'], 'dem_m': h,
+        rec = {'name': s['name'], 'lat': s['view_lat'], 'lon': s['view_lon'],
+               'from_view': s['has_view'], 'dem_m': h,
                'alt': [round(float(a), 4) for a in alt],
                'range_m': [float(x) for x in rng]}
         save_atomic(path, write_json(rec))
