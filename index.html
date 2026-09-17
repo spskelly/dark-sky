@@ -3437,7 +3437,10 @@ const TOWNS = [
   ['West Jefferson', 36.4035, -81.4926],
 ];
 
-const spotState = { home: { ...HOME_DEFAULT }, filter: 'all', sort: 'mins', map: null, markers: new Map(), homeMarker: null, active: null, picking: false, showAll: false, pano: null };
+// a remembered value is only trusted if it is still one of the choices
+const oneOf = (v, choices, fallback) => (choices.includes(v) ? v : fallback);
+
+const spotState = { home: { ...HOME_DEFAULT }, filter: oneOf(recall('darksky.filter', 'all'), ['all', 'camp', 'drive'], 'all'), sort: oneOf(recall('darksky.sort', 'mins'), ['mins', 'dist'], 'mins'), map: null, markers: new Map(), homeMarker: null, active: null, picking: false, showAll: recall('darksky.showAll', false) === true, fitKey: null, pano: null };
 
 // everything the page remembers goes through these two. storage throws in a
 // private window, and two of the older keys hold a bare string rather than
@@ -3623,7 +3626,10 @@ function bindSkylineToggle() {
     spotState.pano = spotState.pano === cv.dataset.pano ? null : cv.dataset.pano;
     renderSpotList();
   };
-  list.addEventListener('click', hit);
+  // captured, not bubbled: the card's own click listener sits on .spot, a
+  // closer ancestor of the canvas than this list, so it fires first on the
+  // way back up and a bubble-phase stopPropagation here would arrive too late
+  list.addEventListener('click', hit, true);
   list.addEventListener('keydown', ev => {
     if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.classList.contains('skyline')) {
       ev.preventDefault(); hit(ev);
@@ -3681,8 +3687,14 @@ function renderSpotList() {
     for (const [name, mk] of spotState.markers) {
       if (shown.has(name)) mk.addTo(spotState.map); else mk.remove();
     }
-    fitSpots(spotState.fitted);
-    spotState.fitted = true;
+    // reframe only when what is on the map changed: the filter or the home
+    // point. a re-render for any other reason (a panorama opening, a card
+    // selected) used to pull a zoomed-in map back out.
+    const fitKey = spotState.filter + '|' + spotState.home.lat + ',' + spotState.home.lon;
+    if (fitKey !== spotState.fitKey) {
+      if (spotState.fitKey !== null) fitSpots(true);
+      spotState.fitKey = fitKey;
+    }
   }
 }
 
@@ -3692,7 +3704,7 @@ function focusSpot(name) {
   // should not scroll to nothing
   if (!spotState.showAll && window.matchMedia(`(max-width: ${SPOT_COLLAPSE_AT}px)`).matches) {
     const rank = visibleSpots().findIndex(x => x.name === name);
-    if (rank >= SPOT_PREVIEW) spotState.showAll = true;
+    if (rank >= SPOT_PREVIEW) { spotState.showAll = true; remember('darksky.showAll', spotState.showAll); }
   }
   const s = SPOTS.find(x => x.name === name);
   if (s) loadSpotForecast(s);
@@ -4124,7 +4136,12 @@ function initMap() {
   map.attributionControl.addAttribution('&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>');
   // frame the spots before any tile layer is attached, so the first tile request
   // is already for the view we mean to show
-  map.fitBounds(L.latLngBounds([...SPOTS.map(s => [s.lat, s.lon]), [spotState.home.lat, spotState.home.lon]]),
+  // the page covers western north carolina; a remembered view outside that, or
+  // at a zoom the tiles do not have, is a stale or hand-edited value
+  const mv = recall('darksky.mapView', null);
+  const mvOk = mv && mv.lat > 34 && mv.lat < 37.5 && mv.lon > -85.5 && mv.lon < -79.5 && mv.zoom >= 6 && mv.zoom <= 17;
+  if (mvOk) map.setView([mv.lat, mv.lon], mv.zoom, { animate: false });
+  else map.fitBounds(L.latLngBounds([...visibleSpots().map(s => [s.lat, s.lon]), [spotState.home.lat, spotState.home.lon]]),
     { padding: [30, 30], maxZoom: 11, animate: false });
   // no-key tile sources. topo is the default: contour lines are what you need to judge a southern horizon
   const topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
@@ -4137,7 +4154,9 @@ function initMap() {
   // one, so it belongs in the same control as an overlay, not in a toolbar of
   // its own beside the map
   const lp = lightPollutionLayer();
-  topo.addTo(map);
+  const bases = { topo, imagery };
+  bases[oneOf(recall('darksky.basemap', 'topo'), ['topo', 'imagery'], 'topo')].addTo(map);
+  map.on('baselayerchange', e => remember('darksky.basemap', e.name));
   map.on('click', e => {
     if (!spotState.picking) return;
     setHome(e.latlng.lat, e.latlng.lng);
@@ -4166,6 +4185,15 @@ function initMap() {
   // after the control exists, so switching it on fires the control's own event
   initLightPollution(map, lp);
   placeHome();
+  // the markers were all just added; a remembered filter has to take the
+  // filtered-out ones off again. this render does not reframe: fitKey is null.
+  renderSpotList();
+  // after everything that moves the map on its own account, so only the
+  // reader's own panning and zooming is what gets remembered
+  map.on('moveend', () => {
+    const c = map.getCenter();
+    remember('darksky.mapView', { lat: +c.lat.toFixed(5), lon: +c.lng.toFixed(5), zoom: map.getZoom() });
+  });
 }
 
 // frame the visible spots plus home, so nothing sits off the edge on load
@@ -4241,20 +4269,27 @@ function setPicking(on) {
 document.querySelectorAll('[data-filter]').forEach(b => b.addEventListener('click', () => {
   spotState.filter = b.dataset.filter;
   document.querySelectorAll('[data-filter]').forEach(x => x.setAttribute('aria-pressed', x === b));
+  remember('darksky.filter', spotState.filter);
   renderSpotList();
 }));
 document.querySelectorAll('[data-sort]').forEach(b => b.addEventListener('click', () => {
   spotState.sort = b.dataset.sort;
   document.querySelectorAll('[data-sort]').forEach(x => x.setAttribute('aria-pressed', x === b));
+  remember('darksky.sort', spotState.sort);
   renderSpotList();
 }));
 document.getElementById('spot-more').addEventListener('click', () => {
   spotState.showAll = !spotState.showAll;
+  remember('darksky.showAll', spotState.showAll);
   renderSpotList();
   // collapsing from the bottom of a long list would otherwise leave the view
   // somewhere below the whole section
   if (!spotState.showAll) document.getElementById('spot-more').scrollIntoView({ block: 'center' });
 });
+// the buttons are written into the html pressed for the defaults; bring them
+// into step with what was remembered
+document.querySelectorAll('[data-filter]').forEach(x => x.setAttribute('aria-pressed', x.dataset.filter === spotState.filter));
+document.querySelectorAll('[data-sort]').forEach(x => x.setAttribute('aria-pressed', x.dataset.sort === spotState.sort));
 
 // ---------- forecast (open-meteo, no key) ----------
 

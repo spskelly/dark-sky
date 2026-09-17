@@ -217,6 +217,63 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   await page.close();
 }
 
+// --- how the where tab was left comes back ---
+{
+  const ctx = await browser.newContext({ viewport: DESKTOP });
+  const routeAll = async p => {
+    await p.route('**://api.open-meteo.com/**', r => r.abort());
+    await p.route('**://*.tile.opentopomap.org/**', r => r.abort());
+    await p.route('**://basemap.nationalmap.gov/**', r => r.abort());
+  };
+  const a = await ctx.newPage(); await routeAll(a);
+  await a.goto(URL_ + '#where');
+  await a.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
+  await a.click('[data-filter="camp"]');
+  await a.click('[data-sort="dist"]');
+  await a.click('.leaflet-control-layers-base label:has-text("imagery")');
+  await a.evaluate(() => spotState.map.setView([35.33, -82.88], 13, { animate: false }));
+  // opening a panorama re-renders the list; it must not reframe the map
+  await a.click('#spot-list .pano canvas.skyline');
+  ok(await a.evaluate(() => spotState.map.getZoom()) === 13, 'opening a panorama leaves the map where it was');
+  await a.close();
+
+  const b = await ctx.newPage(); await routeAll(b);
+  await b.goto(URL_ + '#where');
+  await b.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
+  const got = await b.evaluate(() => ({
+    filter: spotState.filter, sort: spotState.sort,
+    pressed: document.querySelector('[data-filter][aria-pressed="true"]').dataset.filter,
+    sorted: document.querySelector('[data-sort][aria-pressed="true"]').dataset.sort,
+    base: document.querySelector('.leaflet-control-layers-base input:checked').nextElementSibling.textContent.trim(),
+    zoom: spotState.map.getZoom(), lat: spotState.map.getCenter().lat,
+  }));
+  ok(got.filter === 'camp' && got.pressed === 'camp', 'the filter comes back, and its button shows it');
+  ok(got.sort === 'dist' && got.sorted === 'dist', 'the sort comes back, and its button shows it');
+  ok(got.base === 'imagery', 'the basemap comes back');
+  ok(got.zoom === 13 && Math.abs(got.lat - 35.33) < 0.01, `the map view comes back (z${got.zoom}, ${got.lat.toFixed(3)})`);
+  const pins = await b.evaluate(() => ({ shown: [...spotState.markers.values()].filter(m => spotState.map.hasLayer(m)).length,
+    camps: SPOTS.filter(s => s.kind === 'camp').length }));
+  ok(pins.shown === pins.camps, `a restored filter filters the map pins too, not just the cards (${pins.shown} of ${pins.camps})`);
+
+  // values that no longer mean anything fall back rather than being trusted
+  await b.evaluate(() => {
+    localStorage.setItem('darksky.filter', 'gone');
+    localStorage.setItem('darksky.sort', '{"x":1}');
+    localStorage.setItem('darksky.basemap', 'mars');
+    localStorage.setItem('darksky.mapView', JSON.stringify({ lat: 5, lon: 5, zoom: 99 }));
+  });
+  await b.close();
+  const c = await ctx.newPage(); await routeAll(c);
+  await c.goto(URL_ + '#where');
+  await c.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
+  const bad = await c.evaluate(() => ({ filter: spotState.filter, sort: spotState.sort,
+    base: document.querySelector('.leaflet-control-layers-base input:checked').nextElementSibling.textContent.trim(),
+    lat: spotState.map.getCenter().lat, cards: document.querySelectorAll('#spot-list .spot').length }));
+  ok(bad.filter === 'all' && bad.sort === 'mins' && bad.base === 'topo', 'garbage under a key loads the default');
+  ok(bad.lat > 34 && bad.lat < 37 && bad.cards === 40, 'a map view off the page is ignored, and all 40 cards draw');
+  await ctx.close();
+}
+
 if (SHOTS) {
   for (const [name, viewport] of [['desktop', DESKTOP], ['phone', PHONE]]) {
     for (const tab of ['when', 'tonight', 'where']) {
