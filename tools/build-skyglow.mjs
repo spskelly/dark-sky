@@ -3,9 +3,19 @@
 // remembered.
 //
 //   node tools/build-skyglow.mjs              # sample and report
+//   node tools/build-skyglow.mjs --fix        # write the block into index.html
+//   node tools/build-skyglow.mjs --check      # compare the block with the page,
+//                                             # exit 1 if they differ, 0 if not
 //   node tools/build-skyglow.mjs --json sky.json
-//   node tools/build-skyglow.mjs --refetch     # ignore the cache: tiles, tiles
-//                                               # recorded missing, and the legend pages
+//   node tools/build-skyglow.mjs --html some/copy.html   # read that page, not index.html
+//   node tools/build-skyglow.mjs --refetch     # ask the host again for every tile,
+//                                              # for the tiles recorded as missing,
+//                                              # and for the legend pages
+//
+// --check is the staleness guard for both sky blocks: move a spot or rebuild
+// the overlook list and the sampled colours change, and this is what says so.
+// It needs a warm tile cache or --replay, since a check that reaches the
+// network is a check nobody runs. --check and --fix together is an error.
 //
 // the atlas ships as png tiles coloured by sky brightness, so reading it means
 // reading pixels. that is what tools/png.mjs is for: node ships zlib, a png is
@@ -25,10 +35,13 @@ import { fileURLToPath } from 'node:url';
 import { decodePng } from './png.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const FILE = path.join(ROOT, 'index.html');
-const html = fs.readFileSync(FILE, 'utf8');
 const opt = n => { const i = process.argv.indexOf(n); return i < 0 ? null : process.argv[i + 1]; };
 const has = n => process.argv.includes(n);
+// --html is what makes --check testable: a temp copy of the page with one
+// coordinate nudged has to be checkable without touching the real one
+const FILE = opt('--html') ? path.resolve(opt('--html')) : path.join(ROOT, 'index.html');
+const html = fs.readFileSync(FILE, 'utf8');
+if (has('--check') && has('--fix')) throw new Error('--check and --fix are opposites: pass one or the other');
 // a run can be replayed from saved samples instead of fetched. the wording
 // below is the part most likely to need another pass, and re-reading ten tiles
 // off somebody else's server to re-punctuate a sentence is rude as well as
@@ -184,7 +197,7 @@ for (const w of want) tiles[w.key] = TILES
   .replace('{z}', ZOOM).replace('{x}', w.x).replace('{y}', w.y)
   .replace('{-y}', 2 ** ZOOM - 1 - w.y);
 
-console.log(`${spots.length} spots, ${want.length} samples, ${Object.keys(tiles).length} tile(s) at zoom ${ZOOM}`);
+console.log(`${spots.length} spots and ${overlooks.length} overlooks, ${want.length} samples, ${Object.keys(tiles).length} tile(s) at zoom ${ZOOM}`);
 
 // --- fetch and read the tiles ----------------------------------------------
 const UA = { 'user-agent': 'dark-sky-calendar tools (+https://github.com/spskelly/dark-sky)' };
@@ -458,9 +471,26 @@ const block = [START,
   ...notes.filter(([n]) => n.startsWith(OV)).map(([n, h, t]) => `  ${JSON.stringify(n.slice(OV.length))}: [${JSON.stringify(h)},\n    ${JSON.stringify(t)}],`),
   '};', END].join('\n');
 
+// the block is generated line for line, so an entry is a line opening with a
+// quoted key plus everything up to its closing bracket. comparing by key names
+// which spot or overlook moved rather than only saying the block differs.
+const entriesOf = text => {
+  const out = new Map();
+  let key = null;
+  for (const line of text.split('\n')) {
+    const m = /^ {2}("(?:[^"\\]|\\.)*"): \[/.exec(line);
+    if (m) key = JSON.parse(m[1]);
+    if (key === null) continue;
+    out.set(key, (out.get(key) || '') + line + '\n');
+    if (/\],$/.test(line)) key = null;
+  }
+  return out;
+};
+
+let checkFailed = false;
 if (has('--fix')) {
   const a = html.indexOf(START), b = html.indexOf(END);
-  if (a < 0 || b < 0) throw new Error('the skyglow markers are missing from index.html');
+  if (a < 0 || b < 0) throw new Error(`the skyglow markers are missing from ${FILE}`);
   // a colour the scale cannot place would put a wrong band on a card, and the
   // cards are the whole point, so refuse rather than write something plausible
   if (unknown.length) throw new Error(`refusing to write: ${unknown.length} colour(s) are not on the scale`);
@@ -472,6 +502,23 @@ if (has('--fix')) {
   const eol = html.includes('\r\n') ? '\r\n' : '\n';
   fs.writeFileSync(FILE, html.slice(0, a) + block.replace(/\n/g, eol) + html.slice(b + END.length));
   console.log(`\nwrote ${notes.length} sky lines into index.html`);
+} else if (has('--check')) {
+  const a = html.indexOf(START), b = html.indexOf(END);
+  if (a < 0 || b < 0) throw new Error(`the skyglow markers are missing from ${FILE}`);
+  // the page is CRLF and the block above is built with \n, so the comparison
+  // is on line endings normalised to \n, not on the bytes
+  const onPage = html.slice(a, b + END.length).replace(/\r\n/g, '\n');
+  if (onPage === block) {
+    console.log(`\nthe sky block in ${path.basename(FILE)} is what this run would write.`);
+  } else {
+    const mine = entriesOf(block), theirs = entriesOf(onPage);
+    const keys = [...new Set([...theirs.keys(), ...mine.keys()])].filter(k => mine.get(k) !== theirs.get(k));
+    console.log(`\nthe sky block in ${path.basename(FILE)} is not what this run would write.`);
+    for (const k of keys)
+      console.log(`  ${k}: ${!theirs.has(k) ? 'this run adds it' : !mine.has(k) ? 'in the page, but this run does not produce it' : 'differs'}`);
+    if (!keys.length) console.log('  no entry differs by key, so it is the scale or the block layout that changed');
+    checkFailed = true;
+  }
 } else {
   console.log('\nwhat each card would say (pass --fix to write it in):\n');
   for (const [n, , t] of notes) console.log(`  ${n}\n    ${t}`);
@@ -493,4 +540,5 @@ if (out) {
   }, null, 2));
   console.log(`\nwrote ${out}`);
 }
-if (!has('--fix')) console.log('\nnothing was written into index.html.');
+if (!has('--fix') && !has('--check')) console.log('\nnothing was written into index.html.');
+if (checkFailed) process.exit(1);

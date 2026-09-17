@@ -116,6 +116,11 @@ async function main() {
   if (!spots.length) throw new Error('no spots parsed from index.html');
   let elements;
   if (replay) {
+    // the raw file is written by a real run and is not in the repository, so
+    // --replay on a fresh checkout finds nothing. say which file and how to
+    // make it, rather than an ENOENT on a path nobody recognises.
+    if (!fs.existsSync(RAW)) throw new Error(
+      `no saved overpass response at ${RAW}. run "node tools/build-overlooks.mjs" once, without --replay, to record one.`);
     elements = JSON.parse(fs.readFileSync(RAW, 'utf8')).elements;
   } else {
     const data = await ask(QUERY);

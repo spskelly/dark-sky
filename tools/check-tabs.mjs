@@ -344,6 +344,29 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   await a.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
   const n = await a.evaluate(() => OVERLOOKS.length);
   ok(n > 50, `the page carries the overlooks (${n})`);
+
+  // six generated blocks written by three different tools, and the one thing
+  // no single tool can check is whether they still agree with each other.
+  // regenerating one and forgetting the rest shows up here and nowhere else.
+  const gaps = await a.evaluate(() => {
+    const ids = new Set(OVERLOOKS.map(o => o.id));
+    const names = new Set(SPOTS.map(s => s.name));
+    const label = new Map(OVERLOOKS.map(o => [o.id, `${o.name} (${o.id})`]));
+    const missing = (want, have, say = k => k) => [...want].filter(k => !(k in have)).map(say);
+    const stray = (have, want, say = k => k) => Object.keys(have).filter(k => !want.has(k)).map(say);
+    const ov = k => label.get(k) || k;
+    return {
+      'every overlook has a horizon': missing(ids, OVERLOOK_HORIZONS, ov),
+      'no horizon is left over from a dropped overlook': stray(OVERLOOK_HORIZONS, ids),
+      'every overlook has a sky line': missing(ids, OVERLOOK_SKY, ov),
+      'no sky line is left over from a dropped overlook': stray(OVERLOOK_SKY, ids),
+      'every spot has a sky line': missing(names, SKY),
+      'no sky line is left over from a dropped spot': stray(SKY, names),
+      'every spot has a horizon': missing(names, HORIZONS),
+    };
+  });
+  for (const [what, list] of Object.entries(gaps))
+    ok(list.length === 0, list.length ? `${what} -- ${list.length} without one: ${list.join('; ')}` : what);
   ok(await a.$$eval('.ovl-pin', e => e.length) === 0, 'the layer is off on a first visit');
   await a.click('.leaflet-control-layers-overlays label:has-text("parkway overlooks")');
   ok(await a.$$eval('.ovl-pin', e => e.length) === n, 'switching it on draws one marker per overlook');
