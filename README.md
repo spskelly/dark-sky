@@ -50,6 +50,36 @@ will be clear, and where to drive.
   says so if its tiles stop loading, and the parkway is simply absent until
   `tools/build-parkway.mjs` has been run.
 
+## What's remembered
+
+The page comes back as you left it: the tab (above), the home point, the map
+view, the spot filter and sort, the overlook layer, and whichever panorama was
+open with its scrubber where you left it. One pair, `recall(key, fallback)`
+and `remember(key, value)`, owns the `localStorage` read/write and the
+`try/catch` a private window can throw. A remembered value that no longer
+means anything (a removed filter name, a map view outside the page's box)
+falls back to the default instead of being trusted.
+
+| Key | Holds | Default |
+|---|---|---|
+| `darksky.home` | `{lat, lon, name}` | Waynesville |
+| `darksky.lightpollution` | `'1'` or `'0'` | on |
+| `darksky.tab` | the tab id; a hash in the URL outranks it | the calendar tab |
+| `darksky.filter` | `all`, `camp` or `drive` | `all` |
+| `darksky.sort` | `mins` or `dist` | `mins` |
+| `darksky.showAll` | boolean | off (collapsed) |
+| `darksky.basemap` | `topo` or `imagery` | `topo` |
+| `darksky.mapView` | `{lat, lon, zoom}`; ignored if outside 34-37.5 N, -85.5 to -79.5 E, or zoom outside 6-17 | framed on the visible spots |
+| `darksky.overlooks` | `'1'` or `'0'` | off |
+| `darksky.active` | a curated spot's name, or `ov:<osm id>`; dropped if it no longer exists. An overlook is only restored if its layer is on | none |
+| `darksky.pano` | the spot or overlook whose panorama is open | none |
+| `darksky.panoWhen` | `{key: "HH:MM", ...}`, one entry per spot or overlook ever opened; matched to the nearest of tonight's dark-hour slices on return | nearest 9pm |
+
+`darksky.home`, `darksky.lightpollution` and `darksky.tab` predate this table
+and kept their existing names and on-disk formats. `darksky.panoWhen` can
+reach 162 keys (40 spots plus 122 overlooks), about 3 kB total; it is bounded
+but never pruned.
+
 ## Running it
 
 The site is one `index.html` with no build step and no runtime dependencies.
@@ -111,6 +141,26 @@ route relation, clips them to western North Carolina, simplifies each to about
 markers. The road travels in the page rather than being fetched at runtime, so
 it still draws from `file://` and offline, and cannot break because somebody
 else's API moved. With the block empty the map just doesn't draw it.
+
+## The overlook pins
+
+`tools/build-overlooks.mjs` finds every named viewpoint OpenStreetMap knows
+about within 400 m of the Blue Ridge Parkway, drops the ones that are already
+a curated spot, collapses OSM's habit of mapping one pull-off as two
+features, and writes the result into `index.html` as `OVERLOOKS`. Same
+source and licence as the parkway line, same generated-block pattern.
+
+```sh
+node tools/build-overlooks.mjs             # rewrites OVERLOOKS in index.html
+node tools/build-overlooks.mjs --dry-run   # print the filter counts, change nothing
+node tools/build-overlooks.mjs --replay    # re-filter the last Overpass response, no network
+```
+
+Adding or moving a curated spot near the parkway, or refreshing from OSM,
+means re-running this and then `python tools/build_horizons.py` and
+`node tools/build-skyglow.mjs --fix`, in that order, so every pin keeps a
+horizon and a light-pollution reading: see
+[the runbook](docs/horizon_panorama.md#what-invalidates-what).
 
 ## The sky glow layer
 
@@ -213,7 +263,9 @@ are looking at two greens and working out which one you are standing in.
 `--replay` takes the samples back out of a `--json` run instead of fetching, so
 the wording — the part most likely to need another pass — can be worked on, and
 tested, without re-reading ten tiles off somebody else's server to repunctuate a
-sentence.
+sentence. Before 2026-09-17, `--json` did not write the `samples` field this
+reads, so `--replay` could not have worked no matter what this said; both do
+now.
 
 It writes nothing into `index.html`. What a colour *means* is the atlas
 author's business and not something to invent, so the run also prints a census
