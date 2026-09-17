@@ -69,6 +69,21 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   await page.keyboard.press('ArrowLeft');
   ok((await selected(page)).join() === 'tab-where', 'arrow-left from the first tab wraps to the last');
 
+  // the complaint that started this check: as three identical cards the tabs
+  // read as decoration. the selected one has to differ in more than a border
+  // colour, and the bar needs its rail, or nothing says these are tabs at all.
+  const look = await page.evaluate(() => {
+    const sel = document.querySelector('[role="tab"][aria-selected="true"]');
+    const un = document.querySelector('[role="tab"][aria-selected="false"]');
+    const q = t => getComputedStyle(t.querySelector('b')).color;
+    return { lit: q(sel), quiet: q(un),
+             accent: getComputedStyle(sel).boxShadow,
+             rail: getComputedStyle(document.querySelector('.guide')).borderBottomWidth };
+  });
+  ok(look.lit !== look.quiet, `the selected question is lit and the others are not (${look.lit} vs ${look.quiet})`);
+  ok(look.accent !== 'none', 'the selected tab carries an accent, not just a border');
+  ok(parseFloat(look.rail) > 0, 'the tab bar sits on a rail');
+
   // the notes list and the credits sit outside every panel: they are never hidden
   ok(await page.isVisible('#notes') && await page.isVisible('#credits'), 'notes and credits stay outside the tabs');
   await page.close();

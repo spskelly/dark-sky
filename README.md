@@ -67,7 +67,7 @@ The tabs have a check, since a hidden panel cannot be measured and both the
 map and the skyline canvases need a real width the moment their tab opens:
 
 ```sh
-node tools/check-tabs.mjs                  # ~20 s, 29 assertions, exits non-zero on failure
+node tools/check-tabs.mjs                  # ~20 s, 32 assertions, exits non-zero on failure
 node tools/check-tabs.mjs --shots          # also writes six PNGs to tools/.shots/
 node tools/check-tabs.mjs other-copy.html  # check some other copy of the page
 ```
