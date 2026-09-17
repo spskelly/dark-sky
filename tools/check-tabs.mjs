@@ -282,6 +282,46 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   await ctx.close();
 }
 
+// --- the selected spot, its open panorama and the scrubber come back ---
+{
+  const ctx = await browser.newContext({ viewport: DESKTOP });
+  const a = await ctx.newPage();
+  await a.route('**://api.open-meteo.com/**', r => r.abort());
+  await a.goto(URL_ + '#where');
+  await a.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
+  const name = await a.$eval('#spot-list .spot:nth-child(2)', el => el.dataset.name);
+  await a.click('#spot-list .spot:nth-child(2) .name');
+  await a.click('#spot-list .spot:nth-child(2) canvas.skyline');
+  const clock = await a.evaluate(() => {
+    const s = document.querySelector('#spot-list .pano.open input');
+    s.value = String(Math.max(0, Number(s.max) - 3));
+    s.dispatchEvent(new Event('input', { bubbles: true }));
+    return document.querySelector('#spot-list .pano.open .pano-time span').textContent;
+  });
+  await a.close();
+
+  const b = await ctx.newPage();
+  await b.route('**://api.open-meteo.com/**', r => r.abort());
+  await b.goto(URL_ + '#where');
+  await b.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
+  const got = await b.evaluate(() => ({
+    active: spotState.active, card: document.querySelector('#spot-list .spot.active')?.dataset.name,
+    open: document.querySelector('#spot-list .pano.open canvas')?.dataset.pano,
+    clock: document.querySelector('#spot-list .pano.open .pano-time span')?.textContent,
+  }));
+  ok(got.active === name && got.card === name, 'the selected spot comes back selected');
+  ok(got.open === name, 'with its panorama open');
+  ok(got.clock === clock, `and the scrubber at the same clock time (${got.clock})`);
+
+  ok(await b.evaluate(() => nearestSlice([new Date(2026, 8, 17, 20, 0), new Date(2026, 8, 17, 23, 50), new Date(2026, 8, 18, 0, 10)], '00:05')) === 2,
+    'a time after midnight matches the slice after midnight, not the evening one');
+  await b.evaluate(() => { localStorage.setItem('darksky.active', 'Nowhere Knob'); localStorage.setItem('darksky.pano', 'Nowhere Knob'); });
+  await b.reload();
+  await b.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
+  ok(await b.evaluate(() => spotState.active === null && spotState.pano === null), 'a remembered spot that no longer exists is dropped');
+  await ctx.close();
+}
+
 if (SHOTS) {
   for (const [name, viewport] of [['desktop', DESKTOP], ['phone', PHONE]]) {
     for (const tab of ['when', 'tonight', 'where']) {

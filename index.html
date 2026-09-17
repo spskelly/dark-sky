@@ -3440,7 +3440,10 @@ const TOWNS = [
 // a remembered value is only trusted if it is still one of the choices
 const oneOf = (v, choices, fallback) => (choices.includes(v) ? v : fallback);
 
-const spotState = { home: { ...HOME_DEFAULT }, filter: oneOf(recall('darksky.filter', 'all'), ['all', 'camp', 'drive'], 'all'), sort: oneOf(recall('darksky.sort', 'mins'), ['mins', 'dist'], 'mins'), map: null, markers: new Map(), homeMarker: null, active: null, picking: false, showAll: recall('darksky.showAll', false) === true, fitKey: null, pano: null };
+const spotState = { home: { ...HOME_DEFAULT }, filter: oneOf(recall('darksky.filter', 'all'), ['all', 'camp', 'drive'], 'all'), sort: oneOf(recall('darksky.sort', 'mins'), ['mins', 'dist'], 'mins'), map: null, markers: new Map(), homeMarker: null,
+  active: SPOTS.some(s => s.name === recall('darksky.active', null)) ? recall('darksky.active', null) : null,
+  picking: false, showAll: recall('darksky.showAll', false) === true, fitKey: null,
+  pano: SPOTS.some(s => s.name === recall('darksky.pano', null)) ? recall('darksky.pano', null) : null };
 
 // everything the page remembers goes through these two. storage throws in a
 // private window, and two of the older keys hold a bare string rather than
@@ -3523,7 +3526,22 @@ const skySwatch = hex => (/^#[0-9a-f]{6}$/.test(hex || '')
 // to the card exactly as it was if canvas is missing or a profile is absent,
 // the same posture as the map and the light pollution overlay.
 
-const panoState = { when: new Map() };
+// the scrubber is remembered as a clock time, not a slider index or a date:
+// the slices are tonight's dark hours and differ every night, so an index
+// lands on a different time and a date is last night.
+const panoState = { when: new Map(Object.entries(recall('darksky.panoWhen', {}) || {})) };
+const hhmm = d => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+// minutes since 5pm, so 00:10 sorts after 23:50 rather than before 20:00
+const sinceFive = s => { const [h, m] = String(s).split(':').map(Number); return ((h * 60 + m) - 17 * 60 + 1440) % 1440; };
+function nearestSlice(nights, want) {
+  const w = sinceFive(want);
+  if (!isFinite(w)) return 0;
+  let best = 0;
+  nights.forEach((t, i) => {
+    if (Math.abs(sinceFive(hhmm(t)) - w) < Math.abs(sinceFive(hhmm(nights[best])) - w)) best = i;
+  });
+  return best;
+}
 
 // the dark part of tonight, in ten minute slices, sunset to sunrise. a card
 // opens at 9pm, the hour the calendar already draws its phases at.
@@ -3575,13 +3593,8 @@ function drawSkylines() {
     const nights = panoNight(lat, lon);
     const slider = box.querySelector('input');
     slider.max = String(nights.length - 1);
-    if (!panoState.when.has(s.name)) {
-      let best = 0;
-      const off = t => Math.abs(t.getHours() * 60 + t.getMinutes() - 21 * 60);
-      nights.forEach((t, i) => { if (off(t) < off(nights[best])) best = i; });
-      panoState.when.set(s.name, best);
-    }
-    const idx = Math.min(panoState.when.get(s.name), nights.length - 1);
+    // a card opens at 9pm, the hour the calendar already draws its phases at
+    const idx = nearestSlice(nights, panoState.when.get(s.name) || '21:00');
     slider.value = String(idx);
 
     // a frame that fails falls back to the strip rather than taking the whole
@@ -3605,7 +3618,11 @@ function drawSkylines() {
     try { sum.textContent = horizonSummary({ horizon, lat, lon, elevM, date: nights[idx] }); }
     catch (e) { sum.remove(); }
 
-    slider.oninput = () => { panoState.when.set(s.name, Number(slider.value)); paint(); };
+    slider.oninput = () => {
+      panoState.when.set(s.name, hhmm(nights[Number(slider.value)]));
+      remember('darksky.panoWhen', Object.fromEntries(panoState.when));
+      paint();
+    };
     slider.onclick = ev => ev.stopPropagation();
 
   });
@@ -3624,6 +3641,7 @@ function bindSkylineToggle() {
     if (!cv) return;
     ev.stopPropagation();   // the card selects the spot; the canvas does not
     spotState.pano = spotState.pano === cv.dataset.pano ? null : cv.dataset.pano;
+    remember('darksky.pano', spotState.pano || '');
     renderSpotList();
   };
   // captured, not bubbled, for both listeners below: the card's own click and
@@ -3701,6 +3719,7 @@ function renderSpotList() {
 
 function focusSpot(name) {
   spotState.active = name;
+  remember('darksky.active', name);
   // the card may be one the collapsed list is hiding; opening it from the map
   // should not scroll to nothing
   if (!spotState.showAll && window.matchMedia(`(max-width: ${SPOT_COLLAPSE_AT}px)`).matches) {
@@ -4174,6 +4193,7 @@ function initMap() {
       .bindPopup(`<b>${s.name}</b><br>${elevTag(s)} &middot; ~${fmtDur(driveMins(haversine(spotState.home, s), s))} from home<br>${s.tags.join(', ')}`);
     mk.on('click', () => {
       spotState.active = s.name;
+      remember('darksky.active', s.name);
       loadSpotForecast(s);
       document.querySelectorAll('.spot').forEach(e => e.classList.toggle('active', e.dataset.name === s.name));
       document.querySelector(`.spot[data-name="${s.name}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -4189,6 +4209,10 @@ function initMap() {
   // the markers were all just added; a remembered filter has to take the
   // filtered-out ones off again. this render does not reframe: fitKey is null.
   renderSpotList();
+  // bring the selected spot back without flying to it: the map view is
+  // remembered separately and is where the reader left it
+  const back = SPOTS.find(s => s.name === spotState.active);
+  if (back) { loadSpotForecast(back); spotState.markers.get(back.name)?.openPopup(); }
   // after everything that moves the map on its own account, so only the
   // reader's own panning and zooming is what gets remembered
   map.on('moveend', () => {
