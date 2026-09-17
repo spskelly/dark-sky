@@ -51,11 +51,11 @@
   <p class="lede">stubbed Sky and STARS, an invented ridgeline. nothing here is real data.</p>
   <div class="check" id="check">running checks</div>
 
-  <h2>full panorama, 9pm</h2>
+  <h2>open panorama, 9pm, facing north</h2>
   <canvas class="pano" id="pano-9"></canvas>
   <p class="summary" id="sum-9"></p>
 
-  <h2>full panorama, 1am</h2>
+  <h2>open panorama, 1am</h2>
   <canvas class="pano" id="pano-1"></canvas>
   <p class="summary" id="sum-1"></p>
 
@@ -351,27 +351,33 @@ if (!ok) check.className = 'check bad';
 const spot = { horizon: decoded, lat: 35.45, lon: -83.14, elevM: 1830 };
 const at = h => new Date(2026, 8, 16, h, 0, 0);
 
-function render(canvasId, sumId, date) {
+function render(canvasId, sumId, date, az0) {
   const c = document.getElementById(canvasId);
-  drawPanorama(c, Object.assign({ date: date, mode: 'full' }, spot));
+  drawPanorama(c, Object.assign({ date: date, mode: 'full', az0: az0 }, spot));
   if (sumId) document.getElementById(sumId).innerHTML = '<b>' + horizonSummary(Object.assign({ date: date }, spot)) + '</b>';
 }
-render('pano-9', 'sum-9', at(21));
+// north-centred, on purpose: azimuth 0 then sits in the middle of the canvas
+// rather than at either edge, which is where the wrap actually needs checking
+// now that the open view is a window rather than a full turn (see seamCheck).
+render('pano-9', 'sum-9', at(21), 0);
 
-// the wrap seam. azimuth 0 and azimuth 359.9 are a third of a degree apart, so
-// the two edge columns of the canvas have to look alike. a milky way band
-// smeared across the canvas instead of wrapping shows up here as a large
-// difference long before it is obvious to the eye.
+// the wrap seam. north-centred, azimuth 359.9 and azimuth 0.1 are a third of a
+// degree apart in reality and a third of the canvas apart in azToX's raw,
+// unwrapped x -- they meet at the centre column here, not at the two edges,
+// which is where they met back when the open view was a full turn. a milky
+// way band smeared across the centre instead of wrapping shows up here as a
+// large difference long before it is obvious to the eye.
 (function seamCheck() {
   const c = document.getElementById('pano-9');
   const g = c.getContext('2d');
-  const left = g.getImageData(0, 0, 2, c.height).data;
-  const right = g.getImageData(c.width - 2, 0, 2, c.height).data;
+  const mid = Math.round(c.width / 2);
+  const left = g.getImageData(mid - 2, 0, 2, c.height).data;
+  const right = g.getImageData(mid, 0, 2, c.height).data;
   let sum = 0;
   for (let i = 0; i < left.length; i++) sum += Math.abs(left[i] - right[i]);
   const mean = sum / left.length;
   const el = document.createElement('div');
-  el.textContent = 'wrap seam: mean edge difference ' + mean.toFixed(1) + ' of 255'
+  el.textContent = 'wrap seam: mean centre-column difference ' + mean.toFixed(1) + ' of 255'
     + (mean < 12 ? ' (continuous)' : ' (SEAM, the band is not wrapping)');
   document.getElementById('check').appendChild(el);
 })();

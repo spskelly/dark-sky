@@ -58,8 +58,9 @@ will be clear, and where to drive.
 ## What's remembered
 
 The page comes back as you left it: the tab (above), the home point, the map
-view, the spot filter and sort, the overlook layer, and whichever panorama was
-open with its scrubber where you left it. One pair, `recall(key, fallback)`
+view, the spot filter and sort, the overlook layer, whichever panorama was
+open with its scrubber where you left it, and the heading it was turned to.
+One pair, `recall(key, fallback)`
 and `remember(key, value)`, owns the `localStorage` read/write and the
 `try/catch` a private window can throw. A remembered value that no longer
 means anything (a removed filter name, a map view outside the page's box)
@@ -79,6 +80,7 @@ falls back to the default instead of being trusted.
 | `darksky.active` | a curated spot's name, or `ov:<osm id>`; dropped if it no longer exists. An overlook is only restored if its layer is on, and is cleared again when its popup is closed, so a popup dismissed on one visit does not reopen on the next | none |
 | `darksky.pano` | a curated spot's name: the card whose panorama is open. Overlooks never write it, because an overlook's panorama is always open inside its popup and is restored by `darksky.active` instead | none |
 | `darksky.panoWhen` | `{key: "HH:MM", ...}`, one entry per spot or overlook ever opened; matched to the nearest of tonight's dark-hour slices on return | nearest 9pm |
+| `darksky.panoAz` | a heading in degrees, 0-360; shared by every spot and overlook, not stored per key, since it is which way the reader is used to looking rather than something about a particular place | south, 180 |
 
 `darksky.home`, `darksky.lightpollution` and `darksky.tab` predate this table
 and kept their existing names and on-disk formats. `darksky.panoWhen` can
