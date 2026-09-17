@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { milepost, metres, pick, parseSpots, baseName, row } from './build-overlooks.mjs';
+import { milepost, metres, pick, parseSpots, row } from './build-overlooks.mjs';
 
 const node = (id, name, lat, lon) => ({ type: 'node', id, lat, lon, tags: name ? { tourism: 'viewpoint', name } : { tourism: 'viewpoint' } });
 const way = (id, name, lat, lon) => ({ type: 'way', id, center: { lat, lon }, tags: { tourism: 'viewpoint', name } });
@@ -20,7 +20,7 @@ test('metres is good to a few metres at this latitude', () => {
 test('unnamed and generically named viewpoints are dropped', () => {
   const out = pick([node(1, null, 35.5, -82.5), node(2, 'Scenic Overlook', 35.6, -82.6), node(3, 'Bad Fork Valley Overlook', 35.7, -82.7)], []);
   assert.deepEqual(out.kept.map(o => o.name), ['Bad Fork Valley Overlook']);
-  assert.deepEqual(out.counts, { returned: 3, named: 1, clearOfSpots: 1, distinct: 1 });
+  assert.deepEqual(out.counts, { returned: 3, named: 1, inNorthCarolina: 1, clearOfSpots: 1, distinct: 1 });
 });
 
 test('anything within 300 m of a curated spot or its viewpoint is dropped', () => {
@@ -44,32 +44,33 @@ test('a node and a way for one overlook collapse, the node winning; same name fa
   assert.deepEqual(out.kept.map(o => o.id), ['n13', 'n12', 'n11']);   // north to south
 });
 
-test('baseName strips a trailing milepost parenthetical and normalises case and spacing', () => {
-  assert.equal(baseName('Bad Fork Valley Overlook (MP 399.7)'), 'bad fork valley overlook');
-  assert.equal(baseName('Bad Fork Valley Overlook'), 'bad fork valley overlook');
-  assert.equal(baseName('Curtis Creek Overlook (348.8)'), 'curtis creek overlook');
-  assert.equal(baseName('Cowee  Mountains   Overlook'), 'cowee mountains overlook');
-});
-
-test('one overlook mapped twice under two spellings collapses, and the one that says its milepost is kept', () => {
+test('two names for one pull-off collapse whatever they are called, and the milepost spelling is kept', () => {
   const out = pick([
-    node(30, 'Bad Fork Valley Overlook', 35.5000, -82.9000),
-    way(31, 'Bad Fork Valley Overlook (MP 399.7)', 35.5001, -82.9000),   // about 11 m away
-    node(32, 'Cowee mountains Overlook', 35.6000, -83.0000),
-    node(33, 'Cowee Mountains Overlook', 35.60018, -83.0000),           // about 20 m away, different case
-    node(34, 'Curtis Creek Overlook (348.8)', 35.7000, -83.1000),
-    node(35, 'Curtis Creek Overlook', 35.70009, -83.1000),              // about 10 m away, bare-number suffix
+    // the two pairs that shipped twice: a "View " prefix on one, and
+    // "Parking" against "Gap Overlook" on the other
+    node(981685208, 'View Hominy Valley', 35.4476, -82.7173),
+    node(9743653104, 'Hominy Valley (MP 404.2)', 35.4475, -82.7172),         // about 14 m away
+    way(98261195, 'Beaver Dam Overlook Parking', 35.4538, -82.6800),
+    node(9041327666, 'Beaver Dam Gap Overlook (MP 401.7)', 35.4536, -82.6800), // about 22 m away
+    // and the other direction: one name, two real pull-offs 2 km apart
     node(36, 'Fair View Overlook', 35.8000, -83.2000),
-    node(37, 'Fair View Overlook', 35.8180, -83.2000),                  // about 2 km away, stays two
+    node(37, 'Fair View Overlook', 35.8180, -83.2000),
   ], []);
   const ids = out.kept.map(o => o.id);
-  assert.equal(ids.includes('w31'), true);
-  assert.equal(ids.includes('n30'), false);
-  assert.equal(out.kept.find(o => o.id === 'w31').mp, 399.7);
-  assert.equal(ids.filter(id => id === 'n32' || id === 'n33').length, 1);
-  assert.equal(ids.filter(id => id === 'n34' || id === 'n35').length, 1);
-  assert.equal(ids.includes('n36'), true);
-  assert.equal(ids.includes('n37'), true);
+  assert.deepEqual(ids.filter(i => i.endsWith('685208') || i.endsWith('653104')), ['n9743653104']);
+  assert.deepEqual(ids.filter(i => i.endsWith('261195') || i.endsWith('327666')), ['n9041327666']);
+  assert.equal(out.kept.find(o => o.id === 'n9743653104').mp, 404.2);
+  assert.equal(out.kept.find(o => o.id === 'n9041327666').mp, 401.7);
+  assert.equal(ids.includes('n36') && ids.includes('n37'), true, 'same name 2 km apart stays two');
+});
+
+test('anything north of the state line is dropped, and counted', () => {
+  const out = pick([
+    node(40, 'Pilot Mountain Overlook', 36.6419, -80.5347),   // 28 road miles into virginia
+    node(41, 'Air Bellows Overlook', 36.4200, -81.2000),      // the northernmost in north carolina
+  ], []);
+  assert.deepEqual(out.kept.map(o => o.id), ['n41']);
+  assert.equal(out.counts.inNorthCarolina, 1);
 });
 
 test('coordinates are cut to four decimals', () => {

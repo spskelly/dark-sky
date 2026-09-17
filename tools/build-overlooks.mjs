@@ -29,7 +29,15 @@ const END = '// --- overlooks:end ---';
 const BBOX = { s: 34.9, w: -84.4, n: 36.7, e: -80.3 };
 const NEAR_ROAD_M = 400;   // a viewpoint further than this from the road is a trail summit, not a pull-off
 const NEAR_SPOT_M = 300;   // closer than this to a curated spot and it is that spot
-const SAME_M = 150;        // a node and a way with one name this close are one overlook mapped twice
+const SAME_M = 150;        // two viewpoints this close are one pull-off mapped twice, whatever they are called
+// the parkway crosses into virginia at about 36.55 n, and it runs north-east
+// from there, so nothing on this road in north carolina lies north of this.
+// the page's subject is western north carolina and the elevation grid the
+// panoramas need stops at 37 n, so a virginia overlook gets rays that run off
+// the grid and a horizon that is not a measurement. the filter is on latitude
+// rather than on the query box because --replay re-filters a response that was
+// fetched with the wider box.
+const NC_NORTH = 36.56;
 const GENERIC = new Set(['scenic overlook']);
 
 const QUERY = `[out:json][timeout:180];
@@ -50,14 +58,6 @@ export function metres(a, b) {
   const dp = (b.lat - a.lat) * RAD, dl = (b.lon - a.lon) * RAD;
   const x = Math.sin(dp / 2) ** 2 + Math.cos(a.lat * RAD) * Math.cos(b.lat * RAD) * Math.sin(dl / 2) ** 2;
   return 6371000 * 2 * Math.asin(Math.sqrt(x));
-}
-
-// osm commonly carries the same pull-off as two features under two spellings,
-// one with the milepost in the name and one without. lowercase, drop a
-// trailing "(MP 399.7)" or bare "(348.8)" parenthetical, and collapse
-// whitespace, so those two spellings compare equal.
-export function baseName(name) {
-  return name.toLowerCase().replace(/\s*\((?:mp\s*)?\d{1,3}(?:\.\d+)?\)\s*$/i, '').replace(/\s+/g, ' ').trim();
 }
 
 // one row of the generated block. osm names are anybody's to edit, and this
@@ -87,20 +87,27 @@ export function pick(elements, spots) {
     lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon, isNode: e.type === 'node',
   })).filter(o => isFinite(o.lat) && isFinite(o.lon));
   const named = all.filter(o => o.name && !GENERIC.has(o.name.toLowerCase()));
+  const inNC = named.filter(o => o.lat <= NC_NORTH);
   const taken = spots.flatMap(s => [{ lat: s.lat, lon: s.lon }, ...(s.view ? [{ lat: s.view[0], lon: s.view[1] }] : [])]);
-  const clear = named.filter(o => !taken.some(t => metres(o, t) < NEAR_SPOT_M));
-  // osm commonly tags the same pull-off twice, once with the milepost in the
-  // name and once without: compare on baseName so the two spellings collapse.
+  const clear = inNC.filter(o => !taken.some(t => metres(o, t) < NEAR_SPOT_M));
+  // osm commonly tags the same pull-off twice, and the two entries need not
+  // share a name: one reads "View Hominy Valley" and the other "Hominy Valley
+  // (MP 404.2)", one "Beaver Dam Overlook Parking" and the other "Beaver Dam
+  // Gap Overlook (MP 401.7)". names are therefore not compared at all. two
+  // viewpoints within SAME_M are one pull-off for this page's purposes: the
+  // raycast starts 150 m out and the elevation cell is 10 m, so the two would
+  // draw the same horizon under different names.
   // whichever spelling carries the milepost sorts first and is the one kept;
   // failing that, nodes first, since a node is the point somebody placed,
   // where a way's centre is only computed
   const rank = o => milepost(o.name) === null ? 1 : 0;
   const kept = [];
   for (const o of [...clear].sort((a, b) => (rank(a) - rank(b)) || (b.isNode - a.isNode)))
-    if (!kept.some(k => baseName(k.name) === baseName(o.name) && metres(k, o) < SAME_M)) kept.push(o);
+    if (!kept.some(k => metres(k, o) < SAME_M)) kept.push(o);
   kept.sort((a, b) => b.lat - a.lat);
   return {
-    counts: { returned: elements.length, named: named.length, clearOfSpots: clear.length, distinct: kept.length },
+    counts: { returned: elements.length, named: named.length, inNorthCarolina: inNC.length,
+              clearOfSpots: clear.length, distinct: kept.length },
     kept: kept.map(o => {
       const mp = milepost(o.name);
       return { id: o.id, name: o.name, lat: +o.lat.toFixed(4), lon: +o.lon.toFixed(4), ...(mp === null ? {} : { mp }) };
@@ -132,6 +139,7 @@ async function main() {
   const { counts, kept } = pick(elements, spots);
   console.log(`viewpoints within ${NEAR_ROAD_M} m of the parkway: ${counts.returned}`);
   console.log(`  named, and not just "scenic overlook":   ${counts.named}`);
+  console.log(`  south of ${NC_NORTH} n, so in north carolina:   ${counts.inNorthCarolina}`);
   console.log(`  more than ${NEAR_SPOT_M} m from a curated spot:      ${counts.clearOfSpots}`);
   console.log(`  after collapsing one overlook mapped twice: ${counts.distinct}`);
   console.log(`  of which carry a milepost in the name:   ${kept.filter(o => o.mp !== undefined).length}`);
