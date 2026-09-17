@@ -3626,15 +3626,16 @@ function bindSkylineToggle() {
     spotState.pano = spotState.pano === cv.dataset.pano ? null : cv.dataset.pano;
     renderSpotList();
   };
-  // captured, not bubbled: the card's own click listener sits on .spot, a
-  // closer ancestor of the canvas than this list, so it fires first on the
-  // way back up and a bubble-phase stopPropagation here would arrive too late
+  // captured, not bubbled, for both listeners below: the card's own click and
+  // keydown listeners sit on .spot, a closer ancestor of the canvas than this
+  // list, so they fire first on the way back up and a bubble-phase
+  // stopPropagation here would arrive too late to stop either one
   list.addEventListener('click', hit, true);
   list.addEventListener('keydown', ev => {
     if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.classList.contains('skyline')) {
       ev.preventDefault(); hit(ev);
     }
-  });
+  }, true);
 }
 
 // lot and view, off the dem, where there is a walk between them; the listed

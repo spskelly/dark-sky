@@ -235,6 +235,14 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   // opening a panorama re-renders the list; it must not reframe the map
   await a.click('#spot-list .pano canvas.skyline');
   ok(await a.evaluate(() => spotState.map.getZoom()) === 13, 'opening a panorama leaves the map where it was');
+  // the same has to hold for a keyboard toggle: tab to the canvas, press enter
+  await a.evaluate(() => spotState.map.setView([35.33, -82.88], 13, { animate: false }));
+  await a.focus('#spot-list .pano canvas.skyline');
+  await a.keyboard.press('Enter');
+  await a.waitForTimeout(800); // flyTo runs 600ms; let it finish either way
+  const kb = await a.evaluate(() => ({ zoom: spotState.map.getZoom(), active: spotState.active }));
+  ok(kb.zoom === 13, 'a keyboard toggle leaves the map where it was too');
+  ok(kb.active === null, 'and does not select the card either');
   await a.close();
 
   const b = await ctx.newPage(); await routeAll(b);
