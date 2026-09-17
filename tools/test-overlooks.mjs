@@ -1,0 +1,84 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { milepost, metres, pick, parseSpots, baseName } from './build-overlooks.mjs';
+
+const node = (id, name, lat, lon) => ({ type: 'node', id, lat, lon, tags: name ? { tourism: 'viewpoint', name } : { tourism: 'viewpoint' } });
+const way = (id, name, lat, lon) => ({ type: 'way', id, center: { lat, lon }, tags: { tourism: 'viewpoint', name } });
+
+test('the milepost is read out of the name and never invented', () => {
+  assert.equal(milepost('Licklog Gap Overlook (MP 435.7)'), 435.7);
+  assert.equal(milepost('View Funnel Top (MP 409.3)'), 409.3);
+  assert.equal(milepost('Mills River Valley Overlook MP404'), 404);
+  assert.equal(milepost('Air Bellows Overlook'), null);
+});
+
+test('metres is good to a few metres at this latitude', () => {
+  // one thousandth of a degree of latitude is 111.2 m
+  assert.ok(Math.abs(metres({ lat: 35.4, lon: -83 }, { lat: 35.401, lon: -83 }) - 111.2) < 1);
+});
+
+test('unnamed and generically named viewpoints are dropped', () => {
+  const out = pick([node(1, null, 35.5, -82.5), node(2, 'Scenic Overlook', 35.6, -82.6), node(3, 'Bad Fork Valley Overlook', 35.7, -82.7)], []);
+  assert.deepEqual(out.kept.map(o => o.name), ['Bad Fork Valley Overlook']);
+  assert.deepEqual(out.counts, { returned: 3, named: 1, clearOfSpots: 1, distinct: 1 });
+});
+
+test('anything within 300 m of a curated spot or its viewpoint is dropped', () => {
+  const spots = [{ name: 'Cowee Mountains Overlook', lat: 35.3556, lon: -82.9879, view: null },
+                 { name: 'Waterrock Knob', lat: 35.4605, lon: -83.1400, view: [35.4641, -83.1377] }];
+  const out = pick([
+    node(1, 'Cowee Mountains Overlook', 35.3557, -82.9880),   // on the spot
+    node(2, 'Waterrock Knob Summit', 35.4640, -83.1376),      // on the view:
+    node(3, 'Fork Ridge Overlook', 35.4490, -83.1300),        // 1.5 km off
+  ], spots);
+  assert.deepEqual(out.kept.map(o => o.name), ['Fork Ridge Overlook']);
+});
+
+test('a node and a way for one overlook collapse, the node winning; same name far apart stays two', () => {
+  const out = pick([
+    way(10, 'Pounding Mill Overlook', 35.3300, -82.8000),
+    node(11, 'Pounding Mill Overlook', 35.3301, -82.8001),    // about 14 m away
+    node(12, 'View Waynesville', 35.4500, -83.0000),
+    node(13, 'View Waynesville', 35.4700, -83.0000),          // 2.2 km away
+  ], []);
+  assert.deepEqual(out.kept.map(o => o.id), ['n13', 'n12', 'n11']);   // north to south
+});
+
+test('baseName strips a trailing milepost parenthetical and normalises case and spacing', () => {
+  assert.equal(baseName('Bad Fork Valley Overlook (MP 399.7)'), 'bad fork valley overlook');
+  assert.equal(baseName('Bad Fork Valley Overlook'), 'bad fork valley overlook');
+  assert.equal(baseName('Curtis Creek Overlook (348.8)'), 'curtis creek overlook');
+  assert.equal(baseName('Cowee  Mountains   Overlook'), 'cowee mountains overlook');
+});
+
+test('one overlook mapped twice under two spellings collapses, and the one that says its milepost is kept', () => {
+  const out = pick([
+    node(30, 'Bad Fork Valley Overlook', 35.5000, -82.9000),
+    way(31, 'Bad Fork Valley Overlook (MP 399.7)', 35.5001, -82.9000),   // about 11 m away
+    node(32, 'Cowee mountains Overlook', 35.6000, -83.0000),
+    node(33, 'Cowee Mountains Overlook', 35.60018, -83.0000),           // about 20 m away, different case
+    node(34, 'Curtis Creek Overlook (348.8)', 35.7000, -83.1000),
+    node(35, 'Curtis Creek Overlook', 35.70009, -83.1000),              // about 10 m away, bare-number suffix
+    node(36, 'Fair View Overlook', 35.8000, -83.2000),
+    node(37, 'Fair View Overlook', 35.8180, -83.2000),                  // about 2 km away, stays two
+  ], []);
+  const ids = out.kept.map(o => o.id);
+  assert.equal(ids.includes('w31'), true);
+  assert.equal(ids.includes('n30'), false);
+  assert.equal(out.kept.find(o => o.id === 'w31').mp, 399.7);
+  assert.equal(ids.filter(id => id === 'n32' || id === 'n33').length, 1);
+  assert.equal(ids.filter(id => id === 'n34' || id === 'n35').length, 1);
+  assert.equal(ids.includes('n36'), true);
+  assert.equal(ids.includes('n37'), true);
+});
+
+test('coordinates are cut to four decimals', () => {
+  const [o] = pick([node(1, 'X Overlook', 35.123456, -82.987654)], []).kept;
+  assert.deepEqual([o.lat, o.lon], [35.1235, -82.9877]);
+});
+
+test('spots parse with both quote styles and an optional view', () => {
+  const html = "const SPOTS = [\n  { name: 'A', lat: 35.1, lon: -83.1, elev: 1, view: [35.2, -83.2], kind: 'view' },\n" +
+    '  { name: "B\'s", lat: 35.3, lon: -83.3, elev: 2, kind: \'view\' },\n];\n';
+  assert.deepEqual(parseSpots(html), [{ name: 'A', lat: 35.1, lon: -83.1, view: [35.2, -83.2] }, { name: "B's", lat: 35.3, lon: -83.3, view: null }]);
+});
