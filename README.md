@@ -10,6 +10,13 @@ will be clear, and where to drive.
 
 ## What it does
 
+- **Three tabs, one question each.** *When is it dark?* (calendar and the
+  window list), *will it be clear?* (tonight's hourly forecast) and *where do
+  i go?* (the map and the spot list) are tabs rather than eight screens of
+  scroll. The URL still points where it always did: `#when`, `#tonight`,
+  `#where`, or any id inside a panel such as `#check-before-you-go`, opens the
+  tab that owns it. Cards on a wide screen, a sticky strip of short labels on a
+  phone, and the tab you were last on is remembered between visits.
 - **Moon phase calendar.** True phase times from the Meeus algorithm
   (*Astronomical Algorithms*, ch. 49), converted to your local time zone, so
   dates match published almanacs to the day. Phases are drawn at 9pm local —
@@ -55,6 +62,18 @@ python3 -m http.server 8000   # then open http://localhost:8000
 The map (Leaflet, from cdnjs) and the forecast (Open-Meteo) need network
 access; everything else — the phase maths, the calendar, the spot list —
 works offline, and the map degrades to the list with a note.
+
+The tabs have a check, since a hidden panel cannot be measured and both the
+map and the skyline canvases need a real width the moment their tab opens:
+
+```sh
+node tools/check-tabs.mjs                  # ~20 s, 29 assertions, exits non-zero on failure
+node tools/check-tabs.mjs --shots          # also writes six PNGs to tools/.shots/
+node tools/check-tabs.mjs other-copy.html  # check some other copy of the page
+```
+
+It uses the Chrome already on the machine (falling back to Playwright's own
+build) and blocks the forecast and tile requests, so it passes offline.
 
 ## The moon is always current
 

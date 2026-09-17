@@ -3,6 +3,7 @@ tools/.osm-cache.json
 tools/.horizon-cache/
 tools/.starcat-cache/
 tools/__pycache__/
+tools/.shots/
 docs/handoffs/
 docs/superpowers/
 docs/research/

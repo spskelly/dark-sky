@@ -94,19 +94,27 @@
      a bare "tonight" label and an empty teal pill */
   .hero .tonight-now[hidden], .hero .next-window[hidden] { display: none; }
 
-  /* the three questions the page answers, as jump links. the calendar filled
-     the fold on its own, so the forecast and the map were invisible until you
-     scrolled blind past it. */
-  .guide { max-width: 1100px; margin: 0 auto 34px; display: grid; grid-template-columns: repeat(auto-fit, minmax(232px, 1fr)); gap: 10px; }
-  .guide a { display: block; text-decoration: none; background: var(--night-2); border: 1px solid transparent; border-radius: 12px; padding: 13px 16px; }
-  .guide a:hover { border-color: var(--line); }
+  /* nothing on this page may outrank the hidden attribute: the tab panels are
+     switched with it, and a stray display rule would leave two of them open */
+  [hidden] { display: none !important; }
+
+  /* the three questions the page answers, as the page's tabs. the calendar
+     filled the fold on its own, so the forecast and the map were invisible
+     until you scrolled blind past it. */
+  .guide { max-width: 1100px; margin: 0 auto 34px; }
+  /* the panel carries the page's column so its contents line up with the tab
+     bar above them. every block inside already asks for the same 1100px, which
+     inside a 1100px parent costs nothing. */
+  .panel { max-width: 1100px; margin: 0 auto; }
+  .guide .tablist { display: grid; grid-template-columns: repeat(auto-fit, minmax(232px, 1fr)); gap: 10px; }
+  .guide [role="tab"] { display: block; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; background: var(--night-2); border: 1px solid transparent; border-radius: 12px; padding: 13px 16px; }
+  .guide [role="tab"]:hover { border-color: var(--line); }
+  .guide [role="tab"][aria-selected="true"] { border-color: var(--dark-sky); background: var(--dark-sky-wash); }
   .guide b { display: block; font-family: var(--serif); font-weight: 400; font-size: 18px; line-height: 1.28; color: var(--moon); margin-bottom: 4px; }
-  .guide b::after { content: " \2192"; color: var(--ink-dim); }
   .guide .what { display: block; font-size: 13px; color: var(--ink-dim); line-height: 1.45; }
   /* the two-word version of each question. only the sticky phone strip wears it */
   .guide .short { display: none; }
-
-  /* jump links land a heading just under the top edge, not flush against it */
+  /* in-panel anchors land a heading just under the top edge, not flush against it */
   .windows, .spots, #tonight, #cal, .controls { scroll-margin-top: 22px; }
   /* hourly sky row: one icon per hour, weather-app style */
   .tonight { margin-top: 18px; max-width: 640px; width: 100%; }
@@ -373,28 +381,27 @@
     .masthead { margin-bottom: 18px; }
     .masthead .scope { border-left: 0; padding-left: 0; }
 
-    /* the three questions were three cards you scrolled past once and never
-       saw again, on a page eight screens long. on a phone they become the
-       page's navigation: a sticky strip of short labels that marks where you
-       are and gets you to the other two sections in one tap. */
+    /* on a phone three cards of question-and-explanation is most of a screen
+       spent on navigation, so the tab bar shrinks to a sticky strip of short
+       labels: the current tab marked, the other two one tap away. */
     .guide {
-      position: sticky; top: 0; z-index: 1100;
-      grid-template-columns: repeat(3, 1fr); gap: 0; margin-bottom: 20px;
+      position: sticky; top: 0; z-index: 1100; margin-bottom: 20px;
       /* out to the body's gutters, so nothing shows through underneath it */
       margin-inline: calc(-1 * clamp(16px, 4vw, 56px)); padding-inline: clamp(16px, 4vw, 56px);
       background: var(--night); border-bottom: 1px solid var(--night-3);
     }
-    .guide a {
+    .guide .tablist { grid-template-columns: repeat(3, 1fr); gap: 0; }
+    .guide [role="tab"] {
       display: flex; align-items: center; justify-content: center; text-align: center;
       background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0;
       padding: 12px 2px; min-height: 46px;
     }
-    .guide a:hover { border-color: transparent; border-bottom-color: var(--line); }
+    .guide [role="tab"]:hover { border-color: transparent; border-bottom-color: var(--line); }
     .guide b, .guide .what { display: none; }
     .guide .short { display: block; font-size: 13px; line-height: 1.2; color: var(--ink-dim); }
-    .guide a[aria-current] { border-bottom-color: var(--dark-sky); }
-    .guide a[aria-current] .short { color: var(--moon); }
-    /* anchors land below the strip rather than under it */
+    .guide [role="tab"][aria-selected="true"] { background: none; border-bottom-color: var(--dark-sky); }
+    .guide [role="tab"][aria-selected="true"] .short { color: var(--moon); }
+    /* in-panel anchors land below the strip rather than under it */
     .windows, .spots, #tonight, #cal, .controls { scroll-margin-top: 58px; }
 
     .tonight .summary { min-height: 7.5em; }
@@ -476,15 +483,21 @@
       <span id="hero-sub"></span>
     </p>
     <p class="next-window" id="hero-next" hidden></p>
-    <div class="tonight" id="tonight" aria-live="polite"></div>
   </div>
 </section>
 
-<nav class="guide" aria-label="what this page answers">
-  <a href="#when" data-from="#cal"><b>when is it dark?</b><span class="what">every new-moon window for the next twelve months, with the weekend nights called out</span><span class="short">dark nights</span></a>
-  <a href="#tonight"><b>will it be clear?</b><span class="what">tonight's cloud cover, temperature and dew point hour by hour, sunset to sunrise</span><span class="short">tonight's sky</span></a>
-  <a href="#where"><b>where do i go?</b><span class="what">forty dark-sky spots on a map, ranked by drive time from wherever home is</span><span class="short">where to go</span></a>
+<!-- the three questions used to be jump links down an eight-screen page. they
+     are the page's tabs now: one question answered at a time, and the other two
+     always one tap away instead of a blind scroll. -->
+<nav class="guide">
+  <div class="tablist" role="tablist" aria-label="what this page answers">
+    <button role="tab" id="tab-when" aria-controls="panel-when" aria-selected="true"><b>when is it dark?</b><span class="what">every new-moon window for the next twelve months, with the weekend nights called out</span><span class="short">dark nights</span></button>
+    <button role="tab" id="tab-tonight" aria-controls="panel-tonight" aria-selected="false" tabindex="-1"><b>will it be clear?</b><span class="what">tonight's cloud cover, temperature and dew point hour by hour, sunset to sunrise</span><span class="short">tonight's sky</span></button>
+    <button role="tab" id="tab-where" aria-controls="panel-where" aria-selected="false" tabindex="-1"><b>where do i go?</b><span class="what">forty dark-sky spots on a map, ranked by drive time from wherever home is</span><span class="short">where to go</span></button>
+  </div>
 </nav>
+
+<div class="panel" role="tabpanel" id="panel-when" aria-labelledby="tab-when" tabindex="0">
 
 <div class="controls">
   <div class="month-nav">
@@ -517,6 +530,14 @@
   <ol id="windows"></ol>
   <button id="win-more" hidden aria-expanded="false" aria-controls="windows"></button>
 </section>
+
+</div><!-- /panel-when -->
+
+<div class="panel" role="tabpanel" id="panel-tonight" aria-labelledby="tab-tonight" tabindex="0" hidden>
+  <div class="tonight" id="tonight" aria-live="polite"></div>
+</div>
+
+<div class="panel" role="tabpanel" id="panel-where" aria-labelledby="tab-where" tabindex="0" hidden>
 
 <section class="spots" id="where">
   <h3>where to look up</h3>
@@ -591,6 +612,8 @@
     </p>
   </aside>
 </section>
+
+</div><!-- /panel-where -->
 
 <!-- reference reading, not a task: nine hundred pixels of it sat between the
      spot list and the footer on a phone. open on a wide screen, folded on a
@@ -2196,38 +2219,95 @@ document.querySelectorAll('[data-hemi]').forEach(b => b.addEventListener('click'
   document.querySelectorAll('[data-hemi]').forEach(x => x.setAttribute('aria-pressed', x === b));
   renderAll();
 }));
-// ---------- section strip ----------
-// on a phone the three guide links are the page's only navigation, pinned to
-// the top, so they have to say which section you are actually in. the links
-// read as a question in order on a wide screen but their targets are not in
-// that order down the page, so sort by position before picking the current one.
-(function trackSections() {
-  // data-from, where present, is where the section starts for the purpose of
-  // marking it; href stays where the link goes
-  const links = [...document.querySelectorAll('.guide a')]
-    .map(a => ({ a, t: document.querySelector(a.dataset.from || a.getAttribute('href')) }))
-    .filter(x => x.t);
-  if (!links.length) return;
-  let queued = false;
-  const mark = () => {
-    queued = false;
-    // a third of the way down the viewport: a heading that has just come into
-    // view is the section you are reading, not the one you are leaving
-    const line = window.scrollY + Math.max(120, window.innerHeight * 0.33);
-    const tops = new Map(links.map(x => [x, x.t.getBoundingClientRect().top + window.scrollY]));
-    let cur = null;
-    for (const x of [...links].sort((a, b) => tops.get(a) - tops.get(b))) {
-      if (tops.get(x) <= line) cur = x;
+// ---------- tabs ----------
+// the three questions are the page's navigation: each owns a panel, one panel
+// is shown at a time, and the hash keeps meaning what it always meant. an id
+// inside a hidden panel opens that panel first, and the browser's own jump
+// then lands on a visible element.
+function initTabs() {
+  const bar = document.querySelector('.guide .tablist');
+  const tabs = [...bar.querySelectorAll('[role="tab"]')];
+  const panelOf = t => document.getElementById(t.getAttribute('aria-controls'));
+  // #when, #tonight and #where already name a section inside each panel, so a
+  // tab reads its hash off aria-controls rather than carrying a second copy
+  const hashOf = t => '#' + t.getAttribute('aria-controls').replace('panel-', '');
+  // nothing in a hidden panel can be measured: leaflet reads 0x0 and frames the
+  // wrong bounds, and a skyline canvas falls back to its default 300px and
+  // paints the wrong aspect. both wait for the first time the panel is shown,
+  // which also means a visit that never opens the map requests no tiles.
+  const firstShow = { 'panel-where': () => { initMap(); drawSkylines(); } };
+  // the tab you were last on, so a return visit opens where you left off.
+  // storage can throw in a private window, as with the home point above.
+  const TAB_KEY = 'darksky.tab';
+
+  function select(tab, { focus = false, top = false } = {}) {
+    if (!tab) return;
+    try { localStorage.setItem(TAB_KEY, tab.id); } catch (e) {}
+    for (const t of tabs) {
+      const on = t === tab;
+      t.setAttribute('aria-selected', String(on));
+      t.tabIndex = on ? 0 : -1;
+      panelOf(t).hidden = !on;
     }
-    for (const x of links) {
-      if (x === cur) x.a.setAttribute('aria-current', 'location');
-      else x.a.removeAttribute('aria-current');
-    }
+    const id = tab.getAttribute('aria-controls');
+    if (firstShow[id]) { const run = firstShow[id]; delete firstShow[id]; run(); }
+    if (focus) tab.focus();
+    if (top) scrollTo({ top: 0, behavior: 'instant' });
+  }
+
+  // which tab owns an id: whichever panel the element sits in. an id outside
+  // every panel (credits, the notes list) belongs to no tab and changes nothing
+  const tabFor = id => {
+    const panel = id && document.getElementById(id)?.closest('[role="tabpanel"]');
+    return panel ? tabs.find(t => t.getAttribute('aria-controls') === panel.id) : null;
   };
-  addEventListener('scroll', () => { if (!queued) { queued = true; requestAnimationFrame(mark); } }, { passive: true });
-  addEventListener('resize', mark);
-  mark();
-})();
+  const hashId = () => decodeURIComponent(location.hash.slice(1));
+
+  bar.addEventListener('click', e => {
+    const tab = e.target.closest('[role="tab"]');
+    if (!tab) return;
+    select(tab, { top: true });
+    history.replaceState(null, '', hashOf(tab));
+  });
+  // arrow keys move between tabs, the wai pattern's roving tabindex above puts
+  // exactly one of them in the tab order
+  bar.addEventListener('keydown', e => {
+    const i = tabs.indexOf(document.activeElement);
+    if (i < 0) return;
+    const to = { ArrowLeft: i - 1, ArrowRight: i + 1, Home: 0, End: tabs.length - 1 }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    const tab = tabs[(to + tabs.length) % tabs.length];
+    select(tab, { focus: true, top: true });
+    history.replaceState(null, '', hashOf(tab));
+  });
+
+  // any in-page link whose target lives in another panel: open it in the
+  // capture phase, before the browser's jump, so the jump finds it visible
+  addEventListener('click', e => {
+    const a = e.target.closest('a[href^="#"]');
+    if (a) select(tabFor(decodeURIComponent(a.hash.slice(1))));
+  }, true);
+
+  // a pasted or edited hash: the browser has already given up scrolling to a
+  // hidden element by the time this fires, so do the scroll here
+  addEventListener('hashchange', () => {
+    const id = hashId(), tab = tabFor(id);
+    if (!tab) return;
+    select(tab);
+    document.getElementById(id).scrollIntoView({ block: 'start' });
+  });
+
+  // a link says which panel it means, so it outranks the remembered tab
+  const linked = tabFor(hashId());
+  let remembered = null;
+  try { remembered = tabs.find(t => t.id === localStorage.getItem(TAB_KEY)); } catch (e) {}
+  select(linked || remembered || tabs[0]);
+  if (linked) document.getElementById(hashId()).scrollIntoView({ block: 'start' });
+  // a restored tab puts its own hash in the URL, so a reload or a copied link
+  // stays on it. a first visit keeps its bare URL.
+  else if (remembered && remembered !== tabs[0]) history.replaceState(null, '', hashOf(remembered));
+}
 
 // everything on this page is derived from new Date() at render time, so a tab
 // left open past midnight keeps insisting it is yesterday: "today" sits on the
@@ -2294,7 +2374,9 @@ renderAll();
 paintSkyKey();
 const savedHome = loadSavedHome() || HOME_DEFAULT;
 spotState.home = { lat: savedHome.lat, lon: savedHome.lon, name: savedHome.name || '' };
-initMap();
+// opens whichever tab the hash asks for, and builds the map if that is the map
+// tab. runs after home is restored, since the spot popups bake in drive times.
+initTabs();
 // syncs the controls, the list and the forecast to whatever home ended up being
 setHome(spotState.home.lat, spotState.home.lon, spotState.home.name);
 </script>
