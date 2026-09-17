@@ -139,7 +139,7 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   // the notes are for somebody planning a night, not for whoever keeps the
   // page: nothing about what an entry used to say or how it was measured
   const inside = await page.$$eval('#spot-list .note', els => els.map(e => e.textContent)
-    .filter(t => /this page used to|used to say|the model|the listed|this entry|—/.test(t)).map(t => t.slice(0, 40)));
+    .filter(t => /this page used to|used to say|the model|the listed|this entry|\u2014/.test(t)).map(t => t.slice(0, 40)));
   ok(inside.length === 0, `no card note is written to the maintainer (${inside.join(' | ') || 'none'})`);
 
   // this panel is drawn twice: once by renderSpotList at load, once when the
