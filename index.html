@@ -262,6 +262,18 @@
   .spot-controls details .group { margin-top: 8px; }
   /* armed for a click that sets home */
   #map.picking { cursor: crosshair; }
+
+  /* home used to be set inside the "where do i go" tab, with its own tonight
+     forecast a tab away in "will it be clear". both belong above the tabs:
+     home is one thing, asked once, not a setting buried in one of the three
+     questions. */
+  .home-strip { max-width: 1100px; margin: 0 auto 26px; }
+  .home-strip .spot-controls { margin-bottom: 6px; }
+  .home-sky { margin: 0; font-size: 14px; line-height: 1.5; color: var(--ink-dim); }
+  .home-sky:empty { display: none; }
+  .home-sky b { color: var(--ink); font-weight: 500; }
+  .home-sky a { color: var(--moon-dim); }
+  .home-sky a:hover { color: var(--moon); }
   #map.picking .leaflet-grab { cursor: crosshair; }
   .spot-layout { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 14px; }
   #map { height: 560px; border-radius: 12px; background: var(--night-2); overflow: hidden; }
@@ -546,6 +558,32 @@
   </div>
 </section>
 
+<!-- home used to be a setting inside "where do i go", with its forecast a tab
+     away in "will it be clear". it answers neither question on its own, so it
+     sits above them instead: where home is, how to change it, and a one-line
+     read on tonight's sky there. the hour-by-hour detail still lives in the
+     tab, one click from the link below. -->
+<section class="home-strip" aria-label="home location and tonight's sky at home">
+  <div class="spot-controls">
+    <div class="group" role="group" aria-label="home location">
+      <span>home</span>
+      <select id="home-town" aria-label="home town"></select>
+      <button id="home-pick" aria-pressed="false">pick on map</button>
+      <button id="home-geo">use my location</button>
+    </div>
+    <details class="coords">
+      <summary>exact coordinates</summary>
+      <div class="group">
+        <input id="home-lat" type="number" step="0.0001" aria-label="home latitude">
+        <input id="home-lon" type="number" step="0.0001" aria-label="home longitude">
+        <button id="home-set">update</button>
+      </div>
+    </details>
+  </div>
+  <p class="spot-msg" id="spot-msg" role="status"></p>
+  <p class="home-sky" id="home-sky" aria-live="polite"></p>
+</section>
+
 <!-- the three questions used to be jump links down an eight-screen page. they
      are the page's tabs now: one question answered at a time, and the other two
      always one tap away instead of a blind scroll. -->
@@ -601,7 +639,7 @@
 
 <section class="spots" id="where">
   <h3>where to look up</h3>
-  <p class="lede">forty high, open, dark places across western north carolina, from the cherohala skyway to doughton park. set your home town and the map and the list reorder around it, nearest first. drive times are estimates, and <a href="#check-before-you-go">all of it needs checking before you drive</a>.</p>
+  <p class="lede">forty high, open, dark places across western north carolina, from the cherohala skyway to doughton park, ranked by drive time from home. drive times are estimates, and <a href="#check-before-you-go">all of it needs checking before you drive</a>.</p>
   <div class="spot-controls">
     <div class="group" role="group" aria-label="filter spots">
       <span>show</span>
@@ -614,22 +652,7 @@
       <button data-sort="mins" aria-pressed="true" title="estimated driving time from your home point">drive time</button>
       <button data-sort="dist" aria-pressed="false" title="straight-line distance from your home point">distance</button>
     </div>
-    <div class="group" role="group" aria-label="home location">
-      <span>home</span>
-      <select id="home-town" aria-label="home town"></select>
-      <button id="home-pick" aria-pressed="false">pick on map</button>
-      <button id="home-geo">use my location</button>
-    </div>
-    <details class="coords">
-      <summary>exact coordinates</summary>
-      <div class="group">
-        <input id="home-lat" type="number" step="0.0001" aria-label="home latitude">
-        <input id="home-lon" type="number" step="0.0001" aria-label="home longitude">
-        <button id="home-set">update</button>
-      </div>
-    </details>
   </div>
-  <p class="spot-msg" id="spot-msg" role="status"></p>
   <div class="legend">
     <span><i class="pin camp"></i> overnight camping allowed</span>
     <span><i class="pin view"></i> viewing only</span>
