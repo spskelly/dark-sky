@@ -40,61 +40,28 @@ function horizonAt(horizon, azDeg) {
 }
 
 // ---------- projection ----------
-// cylindrical: azimuth linear, altitude linear. the open view is a window onto
-// the cylinder, PAN_FOV degrees of azimuth centred on a heading the reader can
-// turn, altitude -5 to +40 so a degree of azimuth and a degree of altitude cost
-// about the same pixels on screen. the thumbnail keeps the full turn and its
-// own fixed altitude window, -3 to +24: on that scale a sixty pixel strip gives
-// a typical ridge nine pixels and it reads as a smudge. every thumbnail shares
-// the one window, so two spots side by side still compare honestly.
-// ponytail: module-level rather than threaded through every draw call. one
-// canvas is drawn at a time and nothing here is reentrant.
-const PAN_FOV = 120;   // degrees of azimuth across the open view. the full turn
-                       // read as a smear once it had to share the canvas with
-                       // stars and labels; 120 keeps a degree of azimuth close
-                       // to a degree of altitude (the window below is 45 tall)
-                       // so turning to face something feels like turning.
-let PAN_TOP = 40;
-let PAN_BOT = -5;
-let PAN_AZ0 = 180;     // heading at the centre of the view being drawn. thumb
-                       // mode (a full turn) leaves this at 180, which is where
-                       // the old fixed mapping put the left edge; nothing in a
-                       // full turn depends on where that edge falls.
-let PAN_FOV_DEG = 360; // the current draw's azimuth window: 360 for a thumb's
-                       // full turn, PAN_FOV for the open view.
+// cylindrical: azimuth linear, altitude linear. this is the thumbnail's own
+// projection now -- the open, turnable sky moved to the stereographic one
+// below -- so it only ever draws one fixed window: the full turn, altitude
+// -3 to +24. on that scale a sixty pixel strip gives a typical ridge nine
+// pixels and it reads as a smudge otherwise. every thumbnail shares the one
+// window, so two spots side by side still compare honestly.
+const PAN_TOP = 24;
+const PAN_BOT = -3;
+const PAN_AZ0 = 180;      // where the fixed window's centre sits; nothing in
+                          // a full turn depends on where that centre falls
+const PAN_FOV_DEG = 360;
 
-// azimuth to x, no wrapping: az is trusted to already be in the frame the
-// caller wants, either a raw sweep index or an azimuth already folded near
-// PAN_AZ0 by wrapNear below. pure, so it is what tools/test-panorama.mjs
-// exercises directly.
+// azimuth to x. pure, so it is what tools/test-panorama.mjs exercises
+// directly. the thumbnail never needs to wrap an azimuth toward a moving
+// heading -- it has no heading, the whole turn is always on screen -- so
+// this is the only mapping left; a window narrower than 360 needs the wrap
+// wrapNear used to do, and that window is the dialog's now, projected
+// through panProject below instead.
 function azToX(az, az0, fovDeg, w) {
   return (az - az0 + fovDeg / 2) / fovDeg * w;
 }
-// the copy of az, mod 360, nearest centre: a point off to the side of the
-// window lands a bounded, predictable distance off-canvas instead of wherever
-// its raw degree value happens to fall. not safe on a value a sweep or a
-// chain has already unwrapped relative to a neighbour -- that value is
-// deliberately allowed outside +/-180 of centre, which is the whole point of
-// unwrapping it, and folding it back here would undo that.
-function wrapNear(az, center) {
-  const d = ((az - center) % 360 + 540) % 360 - 180;
-  return center + d;
-}
-// the point mapping: az resolved to its nearest copy of centre, then placed.
-// at the thumb defaults (centre 180, a 360 degree window) wrapNear is the
-// identity for any az already in [0, 360), so this is byte-for-byte the old
-// unwrapped formula for every input the old code ever saw.
-const panX = (az, w) => azToX(wrapNear(az, PAN_AZ0), PAN_AZ0, PAN_FOV_DEG, w);
-// the raw mapping, for a sweep or a chain that has already placed az in the
-// frame it wants (the ridge's two ends have to land on 0 and w, not the same
-// point, which wrapNear would do to them).
 const panXLin = (az, w) => azToX(az, PAN_AZ0, PAN_FOV_DEG, w);
-// pixels per full physical turn: the wrap-repeat copies below try a point one
-// turn either side of its raw position, in case that is the copy nearest the
-// window. one turn is the whole canvas in thumb mode, three canvas widths in
-// the open window, which is also why the open window never needs more than
-// the one nearby copy: the other two land two turns away, off-canvas by a lot.
-const panTurnPx = w => 360 / PAN_FOV_DEG * w;
 const panY = (alt, h) => (PAN_TOP - alt) / (PAN_TOP - PAN_BOT) * h;
 
 // ---------- stereographic projection, for the dialog viewer ----------
@@ -204,7 +171,7 @@ function drawPanorama(canvas, opts) {
   const ctx = canvas.getContext && canvas.getContext('2d');
   // the dialog viewer draws with no horizon at all -- a flat line and a
   // caveat, for a picked point before phase 2's terrain exists -- so only
-  // the older modes, which have nothing to fall back to, require one
+  // the thumbnail, which has nothing to fall back to, requires one
   if (!ctx || (!opts.horizon && opts.mode !== 'view')) return false;
 
   const dpr = window.devicePixelRatio || 1;
@@ -215,116 +182,12 @@ function drawPanorama(canvas, opts) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
 
-  const thumb = opts.mode === 'thumb';
-  PAN_TOP = thumb ? 24 : 40;
-  PAN_BOT = thumb ? -3 : -5;
-  PAN_FOV_DEG = thumb ? 360 : PAN_FOV;
-  // a heading off the end of a turn, or not a number at all (nothing stored
-  // yet, or a garbage value), falls back to the same south the page opens on
-  PAN_AZ0 = thumb ? 180 : (isFinite(opts.az0) ? ((opts.az0 % 360) + 360) % 360 : 180);
-  if (thumb) {
-    drawRidge(ctx, opts.horizon, w, h, true);
-    return true;
-  }
-  if (opts.mode === 'view') {
-    drawSkyView(ctx, w, h, opts);
-    return true;
-  }
-
-  const sky = skyContext(opts);
-  drawSkyWash(ctx, w, h);
-  drawMilkyWay(ctx, sky, w, h);
-  drawStars(ctx, sky, w, h);
-  drawMoon(ctx, sky, w, h);
-  drawGrid(ctx, w, h);
-  drawRidge(ctx, opts.horizon, w, h, false);
-  drawLabels(ctx, w, h);
-  return true;
+  if (opts.mode === 'view') { drawSkyView(ctx, w, h, opts); return true; }
+  if (opts.mode === 'thumb') { drawRidge(ctx, opts.horizon, w, h); return true; }
+  return false;
 }
 
-function drawSkyWash(ctx, w, h) {
-  // brightest at the true horizon rather than at the bottom edge, because the
-  // bottom edge is behind the ridge and never seen
-  const g = ctx.createLinearGradient(0, 0, 0, panY(0, h));
-  g.addColorStop(0, '#060b19');
-  g.addColorStop(0.7, '#0e1834');
-  g.addColorStop(1, '#17254a');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, w, h);
-}
-
-// The band is |galactic latitude| < b, so its outline is two lines of constant
-// b converted to alt/az. Drawn as one path of quads: a quad per 2 degrees of
-// galactic longitude, each quad also repeated a full turn left and right, so
-// the piece that straddles azimuth 0 comes back round instead of being
-// stretched into a stripe across the whole canvas. One fill, so the overlaps
-// inside the path cost nothing and the alpha stays even.
-function milkyWayPath(ctx, sky, halfWidth, w, h) {
-  ctx.beginPath();
-  let prev = null;
-  const turn = panTurnPx(w);
-  for (let l = 0; l <= 360; l += 2) {
-    // fat and bright toward sagittarius, thin toward the anticentre, which is
-    // what the eye actually recognises as the milky way
-    const b = halfWidth * (0.42 + 0.58 * (0.5 + 0.5 * Math.cos(l * PAN_D2R)));
-    const cur = { top: galAltAz(l, b, sky), bot: galAltAz(l, -b, sky) };
-    if (prev) {
-      const ref = prev.top.az;
-      const pts = [prev.top, prev.bot, cur.bot, cur.top].map(function (p) {
-        let az = p.az;
-        while (az - ref > 180) az -= 360;
-        while (az - ref < -180) az += 360;
-        return { x: panXLin(az, w), y: panY(p.alt, h) };
-      });
-      for (let k = -1; k <= 1; k++) {
-        const dx = k * turn;
-        ctx.moveTo(pts[0].x + dx, pts[0].y);
-        ctx.lineTo(pts[1].x + dx, pts[1].y);
-        ctx.lineTo(pts[2].x + dx, pts[2].y);
-        ctx.lineTo(pts[3].x + dx, pts[3].y);
-        ctx.closePath();
-      }
-    }
-    prev = cur;
-  }
-}
-
-function drawMilkyWay(ctx, sky, w, h) {
-  // five nested widths, faintest and widest first, so the band fades out at its
-  // edges instead of ending. the blur closes the steps between them; it costs a
-  // few pixels of fade at the left and right edges, which at two per cent alpha
-  // nobody sees, and the wrap check in the harness measures what it costs.
-  const bands = [[22, 0.015], [17, 0.018], [12, 0.020], [7.5, 0.023], [3.5, 0.027]];
-  const blurred = 'filter' in ctx;
-  if (blurred) ctx.filter = 'blur(9px)';
-  for (let i = 0; i < bands.length; i++) {
-    milkyWayPath(ctx, sky, bands[i][0], w, h);
-    ctx.fillStyle = 'rgba(198,208,238,' + bands[i][1] + ')';
-    ctx.fill();
-  }
-  if (blurred) ctx.filter = 'none';
-
-  const core = galAltAz(0, 0, sky);
-  if (core.alt > PAN_BOT) {
-    const x = panX(core.az, w);
-    const y = panY(core.alt, h);
-    const r = Math.max(34, w * 0.055);
-    const turn = panTurnPx(w);
-    for (let k = -1; k <= 1; k++) {
-      const g = ctx.createRadialGradient(x + k * turn, y, 0, x + k * turn, y, r);
-      g.addColorStop(0, 'rgba(236,231,212,0.14)');
-      g.addColorStop(1, 'rgba(236,231,212,0)');
-      ctx.fillStyle = g;
-      ctx.fillRect(x + k * turn - r, y - r, r * 2, r * 2);
-    }
-    if (core.alt > 2) {
-      ctx.fillStyle = 'rgba(169,165,143,0.85)';
-      ctx.font = '11px "IBM Plex Sans", system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('galactic core', x, y - r * 0.52);
-    }
-  }
-}
+const PAN_COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 
 // STARS is an array of arrays, [ra, dec, mag] with a name appended only for the
 // ones worth labelling, so anything past index 2 is optional.
@@ -333,201 +196,37 @@ function drawMilkyWay(ctx, sky, w, h) {
 // the constellation lines index into the full list.
 const starMagLimit = w => (w < 520 ? 4.2 : 6);
 
-function drawStars(ctx, sky, w, h) {
-  const list = (typeof STARS !== 'undefined' && STARS) || [];
-  const limit = starMagLimit(w);
-  // where each star landed, so the figure lines can reuse it
-  const seen = new Array(list.length);
-  ctx.fillStyle = '#e9edf8';
-  for (let i = 0; i < list.length; i++) {
-    const p = panAltAz(list[i][0], list[i][1], sky);
-    seen[i] = p;
-    const mag = list[i][2];
-    if (mag > limit || p.alt < PAN_BOT || p.alt > PAN_TOP) continue;
-    const x = panX(p.az, w), y = panY(p.alt, h);
-    const r = Math.max(0.4, 1.7 - 0.30 * mag);
-    ctx.globalAlpha = Math.max(0.2, Math.min(1, 1.02 - 0.16 * mag));
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
-    // the handful of genuinely bright ones get a little bloom
-    if (mag < 1.0) {
-      ctx.globalAlpha = 0.13;
-      ctx.beginPath();
-      ctx.arc(x, y, r * 3.4, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-  ctx.globalAlpha = 1;
-  drawFigures(ctx, seen, w, h);
-}
-
-// CONSTELLATION_LINES is runs of indices into STARS. one path, each segment
-// also laid down a turn either side so a figure straddling north is not
-// dragged across the whole canvas.
-function drawFigures(ctx, seen, w, h) {
-  if (typeof CONSTELLATION_LINES === 'undefined' || !CONSTELLATION_LINES) return;
-  ctx.beginPath();
-  const turn = panTurnPx(w);
-  for (let r = 0; r < CONSTELLATION_LINES.length; r++) {
-    const run = CONSTELLATION_LINES[r];
-    for (let i = 1; i < run.length; i++) {
-      const a = seen[run[i - 1]], b = seen[run[i]];
-      if (!a || !b || a.alt < PAN_BOT || b.alt < PAN_BOT) continue;
-      let az = b.az;
-      while (az - a.az > 180) az -= 360;
-      while (az - a.az < -180) az += 360;
-      // ponytail: a straight line in this projection is wrong for a pair
-      // sitting either side of the zenith. they are rare and the cheap fix is
-      // to leave that segment out rather than to draw a great circle.
-      if (Math.abs(az - a.az) > 60) continue;
-      for (let k = -1; k <= 1; k++) {
-        ctx.moveTo(panXLin(a.az, w) + k * turn, panY(a.alt, h));
-        ctx.lineTo(panXLin(az, w) + k * turn, panY(b.alt, h));
-      }
-    }
-  }
-  ctx.strokeStyle = 'rgba(152,172,224,0.17)';
-  ctx.lineWidth = 1;
-  ctx.stroke();
-}
-
-function drawMoon(ctx, sky, w, h) {
-  const m = moonAltAz(sky);
-  if (m.alt < PAN_BOT - 2) return;
-  const x = panX(m.az, w);
-  const y = panY(m.alt, h);
-  // ponytail: fixed 9 px disc, roughly twenty times life size. at three pixels
-  // to the degree a true half-degree moon is under two pixels and the phase is
-  // invisible, which is the one thing the drawing is for. scale it properly if
-  // a zoom ever lands.
-  const r = 9;
-
-  const g = ctx.createRadialGradient(x, y, r, x, y, r * 5);
-  g.addColorStop(0, 'rgba(236,231,212,0.17)');
-  g.addColorStop(1, 'rgba(236,231,212,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(x - r * 5, y - r * 5, r * 10, r * 10);
-
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.beginPath();
-  ctx.arc(0, 0, r, 0, Math.PI * 2);
-  ctx.fillStyle = '#101c3a';
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(95,116,173,0.5)';
-  ctx.lineWidth = 0.75;
-  ctx.stroke();
-
-  // the lit limb: outer half circle down the sunward side, terminator ellipse
-  // back up. same geometry as the page's moonPath, in canvas arcs.
-  const k = Math.max(0, Math.min(1, m.illum));
-  if (k > 0.02) {
-    // the unrotated path is lit on the +x side. bring +x up to the zenith,
-    // then round toward east, which is leftward here because azimuth runs
-    // left to right across the canvas.
-    ctx.rotate(-(90 + (m.limbPA || 0)) * PAN_D2R);
-    ctx.beginPath();
-    ctx.ellipse(0, 0, r, r, 0, -Math.PI / 2, Math.PI / 2, false);
-    ctx.ellipse(0, 0, r * Math.abs(1 - 2 * k), r, 0, Math.PI / 2, -Math.PI / 2, k < 0.5);
-    ctx.closePath();
-    ctx.fillStyle = '#ece7d4';
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
-function drawGrid(ctx, w, h) {
-  ctx.strokeStyle = 'rgba(95,116,173,0.20)';
-  ctx.lineWidth = 1;
-  ctx.setLineDash([2, 5]);
-  [10, 20, 30].forEach(function (a) {
-    const y = Math.round(panY(a, h)) + 0.5;
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(w, y);
-    ctx.stroke();
-  });
-  // the eight compass azimuths, so the horizontal scale is readable at all
-  ctx.setLineDash([2, 7]);
-  ctx.strokeStyle = 'rgba(95,116,173,0.13)';
-  for (let a = 0; a < 360; a += 45) {
-    const x = Math.round(panX(a, w)) + 0.5;
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, h);
-    ctx.stroke();
-  }
-  ctx.setLineDash([]);
-}
-
-// the ridge sweeps degree by degree, thumb mode always the full turn, the
-// open view only the window plus one degree of pad either side so the crest
-// stroke does not stop short of the edge. leftAz/rightAz can land off a whole
-// degree when the reader has dragged the heading, which is why the sweep
-// itself runs from the whole degrees either side while the two bottom
-// corners of the fill close on the exact edges.
-function drawRidge(ctx, horizon, w, h, thumb) {
-  const leftAz = thumb ? 0 : PAN_AZ0 - PAN_FOV_DEG / 2;
-  const rightAz = thumb ? 360 : PAN_AZ0 + PAN_FOV_DEG / 2;
-  const from = Math.floor(leftAz), to = Math.ceil(rightAz);
+// the ridge, the thumbnail's whole drawing: the full turn, degree by degree,
+// filled from the crest down to the bottom edge. the open, turnable sky and
+// its own ridge fill, wash, stars and moon live in drawSkyView below now.
+function drawRidge(ctx, horizon, w, h) {
   const altAt = i => horizon[((Math.round(i) % 360) + 360) % 360];
 
   ctx.beginPath();
-  ctx.moveTo(panXLin(leftAz, w), h);
-  for (let i = from; i <= to; i++) {
+  ctx.moveTo(panXLin(0, w), h);
+  for (let i = 0; i <= 360; i++) {
     ctx.lineTo(panXLin(i, w), panY(altAt(i), h));
   }
-  ctx.lineTo(panXLin(rightAz, w), h);
+  ctx.lineTo(panXLin(360, w), h);
   ctx.closePath();
 
   const g = ctx.createLinearGradient(0, panY(PAN_TOP * 0.3, h), 0, h);
-  g.addColorStop(0, thumb ? '#121c38' : '#0b1226');
-  g.addColorStop(1, thumb ? '#070c1a' : '#03060f');
+  g.addColorStop(0, '#121c38');
+  g.addColorStop(1, '#070c1a');
   ctx.fillStyle = g;
   ctx.fill();
 
   // a rim of sky light along the crest. without it the silhouette reads as a
   // hole punched in the canvas rather than as a ridge with sky behind it.
   ctx.beginPath();
-  for (let i = from; i <= to; i++) {
+  for (let i = 0; i <= 360; i++) {
     const x = panXLin(i, w);
     const y = panY(altAt(i), h);
-    if (i === from) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   }
-  if (!thumb) {
-    ctx.save();
-    ctx.strokeStyle = 'rgba(140,164,220,0.10)';
-    ctx.lineWidth = 11;
-    ctx.stroke();
-    ctx.restore();
-  }
-  ctx.strokeStyle = thumb ? 'rgba(122,140,186,0.75)' : 'rgba(132,152,204,0.5)';
+  ctx.strokeStyle = 'rgba(122,140,186,0.75)';
   ctx.lineWidth = 1;
   ctx.stroke();
-}
-
-const PAN_COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-
-function drawLabels(ctx, w, h) {
-  ctx.font = '10px "IBM Plex Sans", system-ui, sans-serif';
-  if ('letterSpacing' in ctx) ctx.letterSpacing = '0.14em';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'alphabetic';
-  // this only ever draws the open window, never a full turn, so each compass
-  // point has exactly one position; whichever of the 8 fall outside the
-  // window land off-canvas and are simply not seen, same as a star would be.
-  for (let i = 0; i < 8; i++) {
-    ctx.fillStyle = i === 0 ? 'rgba(236,231,212,0.8)' : 'rgba(169,165,143,0.7)';
-    ctx.fillText(PAN_COMPASS[i], panX(i * 45, w), h - 6);
-  }
-  if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
-  ctx.font = '10px "IBM Plex Sans", system-ui, sans-serif';
-  ctx.textAlign = 'left';
-  ctx.fillStyle = 'rgba(139,150,179,0.7)';
-  [10, 20, 30].forEach(function (a) {
-    ctx.fillText(a + '°', 6, panY(a, h) - 4);
-  });
 }
 
 // ---------- the dialog viewer (stereographic) ----------

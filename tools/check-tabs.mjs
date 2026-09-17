@@ -623,26 +623,41 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   const pop = await a.evaluate(() => {
     const c = document.querySelector('.leaflet-popup .ovl canvas.skyline');
     const px = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
-    // a filled sky-wash background alone (no stars, moon or labels) tops out
-    // well under 600 for r+g+b, so counting only genuinely bright pixels
-    // tells a real panorama apart from a background a solid fill could also
-    // produce; distinct sampled colours is a cheap second signal against a
-    // uniform fill specifically. thresholds measured against the flattest and
-    // most enclosed overlook in tools/.shots/measure-canvas-signal.mjs.
-    let bright = 0;
+    // the popup's own canvas is the closed thumbnail strip now -- no stars,
+    // no moon, the sky viewer draws those -- so what tells a real ridge
+    // apart from a flat fill is variety of colour across the crest's
+    // gradient, not brightness.
     const colours = new Set();
     for (let i = 0; i < px.length; i += 4) {
-      if (px[i] + px[i + 1] + px[i + 2] > 600) bright++;
       if ((i / 4) % 37 === 0) colours.add(px[i] + ',' + px[i + 1] + ',' + px[i + 2]);
     }
-    return { sized: c.width === Math.round(c.clientWidth * devicePixelRatio) && c.clientWidth > 200, bright, colours: colours.size,
-             text: document.querySelector('.leaflet-popup .ovl').textContent };
+    return { sized: c.width === Math.round(c.clientWidth * devicePixelRatio) && c.clientWidth > 200, colours: colours.size,
+             text: document.querySelector('.leaflet-popup .ovl').textContent,
+             hasOpenBtn: !!document.querySelector('.leaflet-popup .ovl-open'),
+             hasScrubber: !!document.querySelector('.leaflet-popup .pano-time'),
+             hasSky: !!document.querySelector('.leaflet-popup .ovl > .sky') };
   });
   ok(pop.sized, 'the popup panorama is painted at its real width');
-  ok(pop.bright > 1, `and paints real stars, moon or labels, not just a filled background (${pop.bright} bright px)`);
-  ok(pop.colours >= 30, `with more than a flat wash of colour (${pop.colours} distinct, sampled)`);
+  ok(pop.colours >= 5, `and paints a real ridge, not a flat fill (${pop.colours} distinct colours, sampled)`);
   ok(/\d,?\d{3} ft/.test(pop.text), 'the popup lists the elevation');
   ok(pop.text.includes('modelled from bare earth, not visited; trees and the cut bank are not in it'), 'and says what the model cannot see');
+  ok(pop.hasOpenBtn, 'the popup has its own "open sky view" button');
+  ok(!pop.hasScrubber, 'and no scrubber of its own');
+  ok(!pop.hasSky, 'and no sky sentence of its own -- that moved into the viewer');
+
+  // the button opens the dialog with this overlook's own name and caveat
+  await a.click('.leaflet-popup .ovl-open');
+  await a.waitForSelector('#sky-viewer[open]');
+  const viewer = await a.evaluate(() => ({
+    title: document.getElementById('sky-viewer-title').textContent,
+    caveat: document.querySelector('.sky-viewer-caveat').textContent,
+  }));
+  ok(viewer.title.length > 0, `"open sky view" opens the dialog, titled ${JSON.stringify(viewer.title)}`);
+  ok(viewer.caveat.includes('modelled from bare earth, not visited'), 'with the same caveat the popup shows');
+  await a.keyboard.press('Escape');
+  await a.waitForFunction(() => !document.getElementById('sky-viewer').open);
+  ok(await a.evaluate(() => document.activeElement?.classList.contains('ovl-open')),
+    'and closing it returns focus to the button that opened it');
   await a.close();
 
   const b = await ctx.newPage();
