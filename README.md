@@ -58,9 +58,9 @@ will be clear, and where to drive.
 ## What's remembered
 
 The page comes back as you left it: the tab (above), the home point, the map
-view, the spot filter and sort, the overlook layer, whichever panorama was
-open with its scrubber where you left it, and the heading it was turned to.
-One pair, `recall(key, fallback)`
+view, the spot filter and sort, the overlook layer, whichever sky viewer
+dialog was open with its scrubber where you left it, and the view it was
+turned to. One pair, `recall(key, fallback)`
 and `remember(key, value)`, owns the `localStorage` read/write and the
 `try/catch` a private window can throw. A remembered value that no longer
 means anything (a removed filter name, a map view outside the page's box)
@@ -78,14 +78,16 @@ falls back to the default instead of being trusted.
 | `darksky.mapView` | `{lat, lon, zoom}`; ignored if outside 34-37.5 N, -85.5 to -79.5 E, or zoom outside 6-17 | framed on the visible spots |
 | `darksky.overlooks` | `'1'` or `'0'` | off |
 | `darksky.active` | a curated spot's name, or `ov:<osm id>`; dropped if it no longer exists. An overlook is only restored if its layer is on, and is cleared again when its popup is closed, so a popup dismissed on one visit does not reopen on the next | none |
-| `darksky.pano` | a curated spot's name: the card whose panorama is open. Overlooks never write it, because an overlook's panorama is always open inside its popup and is restored by `darksky.active` instead | none |
-| `darksky.panoWhen` | `{key: "HH:MM", ...}`, one entry per spot or overlook ever opened; matched to the nearest of tonight's dark-hour slices on return | nearest 9pm |
-| `darksky.panoAz` | a heading in degrees, 0-360; shared by every spot and overlook, not stored per key, since it is which way the reader is used to looking rather than something about a particular place | south, 180 |
+| `darksky.pano` | which sky viewer dialog is open: a curated spot's name, or `ov:<osm id>` for an overlook opened from its popup's "open sky view" button. Reopened on return, independent of the overlook layer or `darksky.active` | none |
+| `darksky.panoWhen` | `{key: "HH:MM", ...}`, one entry per spot or overlook ever opened; the clock is the Eastern one now (was the reader's own device clock), matched to the nearest of that evening's dark-hour slices on return | nearest 9pm |
+| `darksky.skyView` | `{az, alt, fov}`, the sky viewer's heading, altitude and zoom; shared by every spot, overlook and, in phase 2, picked point, not stored per key, since it is which way the reader is used to looking rather than something about a particular place | south, 25 up, 100 degree field |
+| `darksky.panoAz` | legacy: a heading in degrees, 0-360. Read once by `loadSkyView`, as a fallback for `darksky.skyView`'s own `az` when that key is not set yet, and never written again | (read-once fallback only) |
 
 `darksky.home`, `darksky.lightpollution` and `darksky.tab` predate this table
 and kept their existing names and on-disk formats. `darksky.panoWhen` can
 reach 159 keys (40 spots plus 119 overlooks), about 3 kB total; it is bounded
-but never pruned.
+but never pruned. The sky viewer's chosen date is deliberately not
+remembered: returning next week to last week's sky would be a bug.
 
 ## Running it
 

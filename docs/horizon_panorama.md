@@ -124,10 +124,11 @@ Nothing downstream of `index.html` needs regenerating. `build-og.mjs` and
 | `NODATA` | -999999.0 | 3DEP's own. Masked explicitly before pooling so an all-void block stays void rather than becoming a sea level plain |
 | Grid box | 34-37 N, -85 to -80 | Nearly the smallest whole-degree box holding every 100 km ray. Rays from Doughton Park run about 0.3 degrees off the north edge; no n38 tile exists at these longitudes and nothing that far north is on a parkway skyline |
 | `MAG_LIMIT` | 4.5 | Plus the 121 fainter stars the constellation figures need to close, admitted for that reason alone and drawn at their true magnitude |
-| Thumbnail scale | -3 to +24 degrees | 27 degrees over a 60 px strip is 0.44 px per degree, which reads as a dark smear. Fixed and shared across every spot regardless of the open view's own window, so thumbnails stay comparable. Superseded 2026-09-17: this row used to compare against the open view's old full-turn scale, -10..+80 over 60 px, 0.67 px per degree; the open view is now a window that turns (`PAN_FOV`, below) with its own scale, so that comparison no longer says anything about the thumbnail and is dropped |
-| `PAN_FOV` | 120 degrees | Added 2026-09-17 with the look-around window. The altitude window below it is 45 degrees (-5..+40); 120 keeps a degree of azimuth close to a degree of altitude across a card's own width, so turning the view reads as turning rather than a slow pan or a blur. Not tuned against a reader; a round number close to the altitude span, chosen once and left alone |
-| Open view altitude window | -5 to +40 degrees | Added 2026-09-17, replacing -10..+80. Roughly equal pixel scale to the 120 degree azimuth window, so the view is not badly stretched on one axis. `PAN_TOP`/`PAN_BOT` in `sky-panorama.js` |
-| Open view default heading | south, 180 degrees | Added 2026-09-17. Not measured: the old full-turn open view mapped azimuth linearly from 0 at the left edge, which put south at dead centre of the canvas (`panX(180, w) === w / 2`); defaulting the new windowed view's centre to the same 180 means a visitor who already knew the old drawing sees the same centre on their first look at the new one |
+| Thumbnail scale | -3 to +24 degrees | 27 degrees over a 60 px strip is 0.44 px per degree, which reads as a dark smear otherwise. Fixed and shared across every spot, so thumbnails stay comparable; it no longer has an "open" state to be compared against, since the turnable sky moved into the sky viewer dialog (below), which is centred on wherever the reader is looking rather than windowed onto a fixed strip |
+| Sky viewer default field of view | 100 degrees, range 40 to 140 | Added 2026-09-17 with the dialog, replacing `PAN_FOV` (120 degrees, a fixed cylindrical window). Stereographic rather than cylindrical, so the field of view is a true angular measure, calibrated in `panViewScale` against a pure-altitude offset rather than an azimuth one so it means the same thing at any altitude, including near the zenith. Not tuned against a reader; a round number in the middle of the range, chosen once and left alone |
+| Sky viewer altitude clamp | -10 to +90 degrees | Added 2026-09-17. Replaces the old fixed altitude window (-5..+40); the dialog looks anywhere the reader drags it to, clamped so it cannot look further below the horizon than the old open view did, or past straight up |
+| Sky viewer cull | 100 degrees from the view centre | Added 2026-09-17. `panProject` returns `null` past this, which is what lets every draw routine skip a segment instead of drawing it stretched across the canvas; comfortably inside the true singularity at 180 degrees (directly behind the viewer), where the projection's `1 + cos(angle)` denominator reaches zero |
+| Sky viewer default view | south, 25 degrees up (az 180, alt 25) | Added 2026-09-17, replacing the open view's old default heading, south at dead centre with no altitude of its own. Azimuth kept at 180 for the same reason it was chosen the first time: a visitor who already knew the old drawing sees the same heading on their first look at the new one. 25 degrees up is new, chosen for a first look with the ridge low in the frame and most of the canvas given to sky |
 | `NEAR_ROAD_M` (`build-overlooks.mjs`) | 400 m | A viewpoint farther than this from the parkway is treated as a trail summit, not a pull-off. Not a count from the dry run: it is baked into the Overpass query itself (`around.bp:400`), so all 164 raw results are inside it by construction |
 | `NC_NORTH` (`build-overlooks.mjs`) | 36.56 N | Added 2026-09-17, after Pilot Mountain Overlook (36.6419 N, about 28 road miles into Virginia) shipped in the list and was cited here as the second flattest overlook. The grid box above stops at 37 N, so a Virginia overlook's northward rays run off it and its horizon is not a measurement. The parkway crosses the state line at about 36.55 N and runs north-east from there, so nothing on this road in North Carolina lies north of 36.56. The filter is a latitude test rather than a narrower Overpass box because `--replay` re-filters a response that was fetched with the wider box. Dropped 1 of 135 named, non-generic viewpoints |
 | `NEAR_SPOT_M` (`build-overlooks.mjs`) | 300 m | Dropped 9 of the 134 named, non-generic viewpoints inside North Carolina as duplicates of a curated spot's `lat, lon` or `view:` (2026-09-17 dry run), leaving 125. The spec guessed roughly 15; 9 is the measurement. Names such as "Craggy Pinnacle Summit" and "View Devils Courthouse (MP 422.4)" are typical: many curated parkway spots are trailheads OSM does not tag as viewpoints |
@@ -146,21 +147,24 @@ pretending to correct for it.
 motion. The existing chapter 49 phase code makes the same choice, so this
 matches it rather than running two time scales in one file.
 
-**Every clock shown is Eastern; every clock chosen is the reader's own.**
-Added 2026-09-17. `panTime` and `fmtClock` display in `America/New_York`
-regardless of the reader's device, since every spot is in North Carolina and
-an unlabelled local time on a page about somewhere else is simply wrong.
-Deliberately left alone: `hhmm`, `sinceFive`, `nearestSlice`, `panoNight` and
-`nightWindow` still read the reader's own device clock and calendar day to
-decide *which* instant to look at (tonight's dark hours, the default 9pm
-slice, dusk and dawn for the summary sentence). They never display a time
-themselves, and every comparison inside them is against a `Date` one of them
-produced, so the convention only has to be consistent with itself, not with
-Eastern. A reader far from Eastern gets a window of choices shifted from true
-Eastern dusk-to-dawn -- re-anchoring `panoNight`'s start to an Eastern civil
-day would need DST-aware date arithmetic this page has never had to do, for a
-difference nothing here tests or, realistically, many readers of a
-western-North-Carolina site will ever see. Recorded rather than fixed.
+**Retired 2026-09-17: "every clock shown is Eastern; every clock chosen is
+the reader's own."** That limit recorded that `panoNight` and `nightWindow`
+anchored on the reader's own device clock and calendar day, not North
+Carolina's, so a reader far from Eastern got a window of choices shifted
+from true Eastern dusk-to-dawn. Fixed, not just documented around: `panoNight`
+and `nightWindow` now anchor on the Eastern civil date, found through
+`easternParts` (an instant's Eastern year/month/day/hour/minute, read via
+`Intl.DateTimeFormat` with an explicit `timeZone`) and `easternInstant` (the
+UTC instant for a given Eastern clock time, found by trying Eastern's two
+possible whole-hour UTC offsets and checking which one round-trips, rather
+than assuming which one applies -- the assumption that used to break on the
+two days a year the offset changes). `hhmm`, the remembered per-spot scrubber
+time, reads and writes the same Eastern clock now, so it still means the
+right slice regardless of the reader's device. Tested in `node --test
+tools/test-panorama.mjs` across both 2026 DST changes and, via a child
+process (`tools/eastern-tz-child.mjs`), from a `TZ=Asia/Tokyo` process.
+`panTime` and `fmtClock`'s own Eastern display predates this and is
+unchanged.
 
 **Longitude is east-positive.** Meeus is west-positive. `lon: -83.14` is North
 Carolina, and `Sky.lmst` adds the longitude. This is the single easiest thing
@@ -232,13 +236,17 @@ changes enough to make 32 stale, the phone-width assertion in
 fails, not a glance at the page.
 
 **The turned heading is one value for the whole page, not one per spot.**
-`darksky.panoAz` is read once into `panoState.az0` and written by
-`bindPanoRotate` regardless of which card or overlook the reader dragged.
-Turning to face a landmark on one spot's panorama and opening another
-spot's panorama next keeps facing the same way, on purpose: it is "which way
-am I used to looking," the same kind of preference as the basemap or the
-overlook layer, not a fact about a particular place the way the scrubber's
-remembered clock time is.
+`darksky.skyView` (`{ az, alt, fov }`) is shared across every card, overlook
+and, in phase 2, picked point that opens the sky viewer, regardless of which
+one the reader dragged. Turning to face a landmark on one spot's sky and
+opening another spot's next keeps facing the same way, on purpose: it is
+"which way am I used to looking," the same kind of preference as the basemap
+or the overlook layer, not a fact about a particular place the way the
+scrubber's remembered clock time is. Superseded 2026-09-17: this used to be
+`darksky.panoAz`, one value (`az0`) written by `bindPanoRotate`; the dialog
+looks around in altitude and zoom too, so the same key now carries all
+three, and `darksky.panoAz` is read once, as a fallback for `az` alone, and
+never written again.
 
 ## Accuracy, measured
 
@@ -263,13 +271,24 @@ Rendering, `tools/panorama-integration.html` against the real modules:
 | Horizon codec round trip | 0.01097 degrees against a 0.02198 quantisation step |
 | Codec clamp ends | `AA` to -10.00, `//` to 80.00 |
 | Lit limb vs the sun's direction | 3 degrees, with a 38 degree parallactic correction applied |
-| Milky Way wrap seam | mean centre-column difference 2.6 of 255, continuous. Moved 2026-09-17 from the two edge columns to the centre column: the open view is now a 120 degree window rather than a full turn, so its own left and right edges are 120 degrees apart and mean nothing wrapping to compare, while a window centred due north puts the actual wrap seam, azimuth 0, at the middle of the canvas instead |
+| Lit limb vs the sun, sky viewer dialog | 3 degrees, in a view not centred on the moon, so the check exercises the tilt a centred one cannot (see below) |
 | Catalogue | 1,046 stars, 150 figure runs, every index valid |
 
 The limb check is the one that matters and the reason it exists: a flipped sign
 in the parallactic rotation reads as roughly 180 degrees, or as twice the
 parallactic angle, and is otherwise invisible except as a moon lit from the
-wrong side on a night nobody happens to be checking.
+wrong side on a night nobody happens to be checking. The dialog's own moon
+finds "toward the zenith" on screen by projecting a point a degree higher in
+altitude, since that direction is only straight up at the view centre itself;
+its own limb check, in a view not centred on the moon, is what proves that
+holds away from the centre too.
+
+Retired 2026-09-17: the Milky Way wrap seam check, which measured the flat
+open view's cylindrical wrap-copy machinery at the join between two edges of
+its window. The sky viewer dialog's stereographic projection has no seam to
+check -- a point past its 100 degree cull is not drawn at all, never wrapped
+or stretched across the canvas -- so the check had nothing left to measure
+and was removed with the flat open view it tested.
 
 ## Measured runs
 
@@ -295,9 +314,11 @@ wrong side on a night nobody happens to be checking.
 | 2026-09-17 | `index.html`, corrected list | 409,288 bytes, down 1,589 from 410,877 |
 | 2026-09-17 | `build-skyglow.mjs --check`, both ways | Exit 0 against the regenerated page, about 0.1 s with `--replay`. Exit 1 against a copy of the page with one spot renamed (reported as "in the page, but this run does not produce it") and against a copy with one generated sentence reworded (reported as "differs"). Under `--replay` the saved samples are keyed by spot name, so a copy with only a coordinate nudged still exits 0; catching a moved coordinate is what the warm tile cache is for |
 | 2026-09-17 | `build-skyglow.mjs --check`, live against the warm tile cache | Exit 0 against the real page. Exit 1 against a copy with Waterrock Knob moved 0.1 degree north, reported as "Waterrock Knob: differs". Both runs printed `10 tile(s) from the cache, 0 asked of the host` and `2 legend page(s) from the cache, 0 asked of the host`, so the check that catches a moved coordinate costs the atlas host nothing |
-| 2026-09-17 | Look-around window (`PAN_FOV`, drag and arrow-key turning): `node --test tools/test-panorama.mjs`, the pure azimuth mapping and its wrap cases | 7 pass, including the antipodal-point and turn-copy cases |
+| 2026-09-17 | Sky viewer dialog (`panProject`, stereographic, replacing the flat `PAN_FOV` window): `node --test tools/test-panorama.mjs` | 14 pass: the thumbnail's own affine mapping, `panProject`'s centre-maps-to-centre, left/right symmetry, behind-the-viewer null, the zenith ring, and the true-angular-field calibration |
+| 2026-09-17 | Eastern civil date anchoring (`easternParts`, `easternInstant`), same test file | A January and a July evening and both 2026 DST change dates all round-trip to 17:00 Eastern; the four dates are not all the same UTC offset (proof DST moved something); a child process with `TZ=Asia/Tokyo` (`tools/eastern-tz-child.mjs`) computes the same instants and the same Eastern parts |
 | 2026-09-17 | Same change, `node --test tools/test-inline-parity.mjs` | 1 pass: the copy of `sky-panorama.js` pasted into `index.html` still matches the source file byte for byte, CRLF normalised |
-| 2026-09-17 | Same change, `node tools/check-tabs.mjs` | All checks pass, including the new ones: default heading south, dragging redraws and stores the heading, a reload restores it, garbage falls back, the drag does not select the card, a closed thumbnail elsewhere is unaffected, both arrow keys turn the view, and a Tokyo-timezone browser still shows Eastern time in the scrubber label and the summary sentence |
+| 2026-09-17 | Same change, `node tools/check-tabs.mjs` | All checks pass, including the new ones: the dialog opens from a card at the default view, dragging redraws and stores `darksky.skyView`, a reload restores it, garbage falls back, the drag does not select the card, arrow keys and Home turn and reset the view, Escape closes it and returns focus to the thumbnail, the date picker changes the title and the summary sentence, and a Tokyo-timezone browser's "tonight" is the Eastern evening, not its own calendar date |
+| 2026-09-17 | Popup slimmed, inline open view deleted: pixel-hash comparison of all 40 card thumbnails against the pre-dialog `index.html` | 0 mismatches: the thumbnail is unchanged, pixel for pixel |
 
 ## Horizon spread, measured 2026-09-17
 
@@ -334,9 +355,11 @@ degrees, so it spends most of its height on terrain that a summit does not
 have, and the flat end of that range renders as a nearly straight line: correct,
 and indistinguishable from an empty box. The strip therefore compares spots well
 at the enclosed end and poorly at the open end. A test can only freeze whichever
-window is chosen, so this is recorded rather than asserted. The upgrade path is
-an adapting scale, or an explicit "open sky" state, rather than a straight line
-the reader has to interpret. Revisit the window against the spread above.
+window is chosen, so this is recorded rather than asserted. The upgrade path
+recorded here used to be "an adapting scale, or an explicit open-sky state";
+the sky viewer dialog is that state now, so a flat thumbnail is an invitation
+to open it rather than the whole story. The thumbnail's own scale is
+unchanged and still worth revisiting against the spread above.
 
 **Second limit, same origin.** All 40 spots sit inside about 200 km, so the moon
 and the galactic core land within a degree or two of the same screen position on
@@ -528,9 +551,12 @@ Recorded here rather than resolved.
   lot; Craggy Dome Scenic Overlook (MP 364.5), 365 m from the Craggy Pinnacle
   pin, which is the usual parking for the Pinnacle trail and may be the same
   lot.
-- The `bright > 1` canvas assertion in `check-tabs.mjs` has a thin margin and
-  depends on the real night sky; `colours >= 30` is the robust signal in that
-  same check.
+- Resolved 2026-09-17: the `bright > 1` canvas assertion in `check-tabs.mjs`
+  this used to flag (a thin margin, dependent on the real night sky) is gone
+  along with the overlook popup's own moon and stars -- the popup's canvas is
+  the closed thumbnail now, which never draws either; the sky viewer dialog
+  its "open sky view" button opens is what shows them, and is not checked
+  this way.
 - Under `--refetch`, a tile that starts 404ing keeps its old cached PNG, which
   then wins; a tile that stops 404ing leaves its `.missing` sentinel behind,
   unread but harmless.
