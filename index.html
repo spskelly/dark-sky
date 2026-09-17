@@ -3439,17 +3439,26 @@ const TOWNS = [
 
 const spotState = { home: { ...HOME_DEFAULT }, filter: 'all', sort: 'mins', map: null, markers: new Map(), homeMarker: null, active: null, picking: false, showAll: false, pano: null };
 
+// everything the page remembers goes through these two. storage throws in a
+// private window, and two of the older keys hold a bare string rather than
+// json ('tab-where', '0'), so a value that will not parse comes back as it is.
+function recall(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === null) return fallback;
+    try { return JSON.parse(raw); } catch (e) { return raw; }
+  } catch (e) { return fallback; }
+}
+function remember(key, value) {
+  try { localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value)); } catch (e) {}
+}
+
 // remember the home point between visits; storage can throw in a private window
 const HOME_KEY = 'darksky.home';
-function saveHome() {
-  try { localStorage.setItem(HOME_KEY, JSON.stringify(spotState.home)); } catch (e) {}
-}
+function saveHome() { remember(HOME_KEY, spotState.home); }
 function loadSavedHome() {
-  try {
-    const v = JSON.parse(localStorage.getItem(HOME_KEY) || 'null');
-    if (v && isFinite(v.lat) && isFinite(v.lon)) return v;
-  } catch (e) {}
-  return null;
+  const v = recall(HOME_KEY, null);
+  return v && isFinite(v.lat) && isFinite(v.lon) ? v : null;
 }
 
 // straight-line distance in miles and compass bearing from home
@@ -3732,12 +3741,12 @@ function initLightPollution(map, lp) {
     key.hidden = false;
     // a fresh try deserves a fresh verdict, and a fresh complaint if it fails
     failed = 0; dead = false;
-    try { localStorage.setItem(LP_KEY, '1'); } catch (err) {}
+    remember(LP_KEY, '1');
   });
   map.on('overlayremove', e => {
     if (e.layer !== lp) return;
     key.hidden = true;
-    try { localStorage.setItem(LP_KEY, '0'); } catch (err) {}
+    remember(LP_KEY, '0');
   });
 
   // a moved or mistyped tile url would otherwise leave the box ticked over an
@@ -3750,8 +3759,7 @@ function initLightPollution(map, lp) {
     spotMsg('the light pollution layer could not load. every spot still links to its own light map.');
   });
 
-  let want = true;
-  try { want = localStorage.getItem(LP_KEY) !== '0'; } catch (err) {}
+  const want = String(recall(LP_KEY, '1')) !== '0';
   if (want) lp.addTo(map);
 }
 
@@ -4482,7 +4490,7 @@ function initTabs() {
 
   function select(tab, { focus = false, top = false } = {}) {
     if (!tab) return;
-    try { localStorage.setItem(TAB_KEY, tab.id); } catch (e) {}
+    remember(TAB_KEY, tab.id);
     for (const t of tabs) {
       const on = t === tab;
       t.setAttribute('aria-selected', String(on));
@@ -4540,8 +4548,7 @@ function initTabs() {
 
   // a link says which panel it means, so it outranks the remembered tab
   const linked = tabFor(hashId());
-  let remembered = null;
-  try { remembered = tabs.find(t => t.id === localStorage.getItem(TAB_KEY)); } catch (e) {}
+  const remembered = tabs.find(t => t.id === recall(TAB_KEY, null)) || null;
   select(linked || remembered || tabs[0]);
   if (linked) document.getElementById(hashId()).scrollIntoView({ block: 'start' });
   // a restored tab puts its own hash in the URL, so a reload or a copied link

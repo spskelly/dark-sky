@@ -155,6 +155,32 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   await ctx.close();
 }
 
+// --- values saved by the page before recall/remember existed still load ---
+{
+  const ctx = await browser.newContext({ viewport: DESKTOP });
+  const seed = await ctx.newPage();
+  await seed.goto(URL_);
+  await seed.evaluate(() => {
+    localStorage.setItem('darksky.home', JSON.stringify({ lat: 35.5951, lon: -82.5515, name: 'Asheville' }));
+    localStorage.setItem('darksky.lightpollution', '0');
+    localStorage.setItem('darksky.tab', 'tab-where');
+  });
+  await seed.close();
+  const page = await ctx.newPage();
+  await page.goto(URL_);
+  await page.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
+  const got = await page.evaluate(() => ({
+    home: spotState.home.name, tab: document.querySelector('[role="tab"][aria-selected="true"]').id,
+    lp: !!document.querySelector('.leaflet-control-layers-overlays input:checked'),
+    helper: typeof recall === 'function' && typeof remember === 'function',
+  }));
+  ok(got.helper, 'recall and remember exist');
+  ok(got.home === 'Asheville', 'an old-format home point still loads');
+  ok(got.tab === 'tab-where', 'an old raw tab id still loads');
+  ok(got.lp === false, "an old raw '0' still switches the light pollution layer off");
+  await ctx.close();
+}
+
 // --- an in-page link that points into another panel ---
 {
   const page = await open(browser, DESKTOP);
