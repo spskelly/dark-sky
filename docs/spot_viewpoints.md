@@ -35,7 +35,7 @@ viewpoint. Elevations are the DEM sampled at each point, in feet.
 | Cherohala Skyway, Hooper Bald | 3150 m | 663 m | 5309 | 5428 | 5290 |
 | Panthertown Valley | 1635 m | 1545 m | 4058 | 4194 | 3900 |
 | Roan Highlands, Carvers Gap | . | 589 m | 5510 | 5824 | 5512 |
-| Mayland Earth to Sky Park | 752 m | . | 2876 | . | 2700 |
+| Mayland Earth to Sky Park | 752 m | . | 2876 | . | 2876 |
 | PARI | . | . | 2880 | . | 2900 |
 | Max Patch | . | 493 m | 4361 | 4629 | 4629 |
 | Mount Mitchell State Park | . | . | 6681 | . | 6684 |
@@ -50,7 +50,7 @@ viewpoint. Elevations are the DEM sampled at each point, in feet.
 | Doughton Park | 2383 m | . | 3694 | . | 3600 |
 | Lake James State Park | . | 857 m | 1194 | 1218 | 1200 |
 | Bearwallow Mountain | 1250 m | 1024 m | 3653 | 4227 | 4232 |
-| DuPont State Recreational Forest | . | . | 2305 | . | 2900 |
+| DuPont State Recreational Forest | 3.5 km | 770 m | 2720 | 3027 | 3030 |
 | Gorges State Park | 673 m | . | 3249 | . | 3000 |
 | Whiteside Mountain | . | 446 m | 4272 | 4903 | 4930 |
 | Wayah Bald | . | 123 m | 5273 | 5340 | 5342 |
@@ -103,14 +103,20 @@ Settled with Shawn 2026-09-17:**
 - **Gorges**, listed 3000, now 3249, the DEM at the corrected Grassy Ridge
   access. A stale figure.
 - **Panthertown**, listed 3900, now 4058, the DEM at the corrected access.
-- **DuPont**, left at 2900 against a pin at 2305, and the note now says the
-  entry is unsettled: the pin is in the waterfall corridor, 2900 matches the
-  granite domes 2.6 km away around Cedar Rock. Still open: which part of the
-  forest the entry is for.
-- **Mayland**, left at 2700 against 2876 at the observatory, and the note now
-  says the listed elevation is uncertain and why: the published GPS and OSM's
-  observatory node disagree by 166 m and 53 m of height. Still open, and only
-  somebody at the park can close it.
+- **DuPont**, settled 2026-09-17 from published sources. The entry is for the
+  granite domes, not the waterfall corridor: the pin moved to the Corn Mill
+  Shoals lot on Cascade Lake Road (35.1728, -82.6390, OSM lot centre, 2,720 ft)
+  with a `view:` on the open slab on Big Rock Trail (35.1790, -82.6355, OSM
+  viewpoint node, 3,027 ft). Hours 5am to 10pm and the camping ban are the
+  N.C. Forest Service FAQ and 02 NCAC 60B .1031 and .1010. Not established:
+  whether the lot is gated at 10pm.
+- **Mayland**, settled 2026-09-17 from the college's own pages. The pin stays
+  on the observatory (OSM building, confirmed on imagery) and the listing is
+  now 2,876 ft, the DEM there. The old 2,700 was the visitor center level; the
+  college's published GPS point is 166 m away in woods and is not a place
+  anyone stands. The college states 24 hour access to the grounds, a shared
+  entrance gate that is shut when unstaffed, and walking around it. Not
+  established: where the gate is, so the note gives no walking distance.
 
 **The card now shows both elevations where there is a walk** (2026-09-17):
 `3,890 ft lot · 5,835 ft view` on the 24 spots with a `view:`, the listed

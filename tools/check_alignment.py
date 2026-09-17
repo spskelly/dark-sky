@@ -57,8 +57,6 @@ DRIVE_TOL_M = 20.0      # the 1/3 arc-second grid is about 10 m
 # this list only keeps the output quiet, so delete an entry when the listing or
 # the pin is corrected rather than editing the reason here.
 KNOWN = {
-    'DuPont State Recreational Forest': 'listed 2900 predates the pin; see docs/spot_viewpoints.md',
-    'Mayland Earth to Sky Park': 'their published GPS and the OSM node disagree; needs a phone call',
     'Doughton Park': 'pin moved to the Bluff Ridge trail access',
 }
 
