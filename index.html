@@ -323,7 +323,11 @@
   .spot .pano canvas.skyline:focus-visible { outline: 2px solid var(--accent, #5fc2ad); outline-offset: 2px; }
   .spot .pano.open canvas.skyline, .ovl .pano.open canvas.skyline { height: 230px; cursor: zoom-out; }
   /* the popup never toggles, so it gets no zoom cursor */
-  .ovl .pano.open canvas.skyline { cursor: default; }
+  .ovl .pano.open canvas.skyline { cursor: grab; }
+  .spot .pano.open canvas.skyline:active, .ovl .pano.open canvas.skyline:active { cursor: grabbing; }
+  /* the open view is a third of the turn; say so, or nobody finds the rest */
+  .spot .pano.open::after, .ovl .pano.open::after { content: 'drag the sky, or use the arrow keys, to look around'; display: block;
+    margin-top: 4px; font-size: 11px; color: var(--ink-dim); opacity: 0.8; }
   .spot .pano-sum, .ovl .pano-sum { margin: 6px 0 0; font-size: 12px; line-height: 1.5; color: var(--ink-dim); }
   .spot .pano-time, .ovl .pano-time { display: none; align-items: center; gap: 8px; margin-top: 6px;
     font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-dim); }
