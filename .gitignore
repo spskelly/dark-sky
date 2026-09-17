@@ -4,6 +4,9 @@ tools/.horizon-cache/
 tools/.starcat-cache/
 tools/__pycache__/
 tools/.shots/
+.claude/
+.superpowers/
+tools/.skyglow-cache/
 docs/handoffs/
 docs/superpowers/
 docs/research/
