@@ -3238,6 +3238,36 @@ function panMaxProfile(a, b) {
   return out;
 }
 
+// the windows under the crowns, as holes to cut out of the tree ring: one per
+// run of azimuths where the window top sits over its floor, each sample
+// standing for its own degree, so a hole spans half a degree past its first
+// and last sample and no further. top runs along the window top, floor along
+// its floor, both in azimuth order; azimuths keep counting past 360 through
+// north. circular joins a window through north into one hole (the dialog);
+// the flat strip, which has two ends, gets two. drawing the ring down to the
+// floor with a crown band over it instead interpolated both across the degree
+// where a window starts, two chords up to 54 degrees tall with sky between
+// them (View Waynesville, azimuth 77 to 78, 2026-09-18).
+function panWindowHoles(lo, hi, circular) {
+  if (!lo || !hi) return [];
+  const open = [];
+  for (let a = 0; a < 360; a++) open.push(hi[a] > lo[a]);
+  return panRuns(open, circular).map(run => {
+    const a0 = run[0], last = run[run.length - 1];
+    const top = [[a0 - 0.5, hi[a0]]], floor = [[a0 - 0.5, lo[a0]]];
+    run.forEach((i, k) => { top.push([a0 + k, hi[i]]); floor.push([a0 + k, lo[i]]); });
+    top.push([a0 + run.length - 0.5, hi[last]]);
+    floor.push([a0 + run.length - 0.5, lo[last]]);
+    return { top, floor };
+  });
+}
+
+// the holes the structures ring needs: a window only shows sky above whatever
+// structure stands in it, so its floor is the higher of the two
+function panStructureHoles(canopy, circular) {
+  return canopy.lo ? panWindowHoles(panMaxProfile(canopy.lo, canopy.s), canopy.hi, circular) : [];
+}
+
 // the profile a body actually has to clear: the highest of ridge, trees and
 // structures. with nothing above the ridge it is the ridge itself, the same
 // object, which is what keeps the no-canopy sentence exactly what it was.
@@ -3440,15 +3470,21 @@ const starMagLimit = w => (w < 520 ? 4.2 : 6);
 // one filled strip: the full turn, degree by degree, from the crest down to
 // the bottom edge, plus a one pixel crest line. the thumbnail's whole
 // drawing is three of these back to front.
-function panRidgeStrip(ctx, prof, w, h, style) {
+function panRidgeStrip(ctx, prof, w, h, style, holes) {
   const altAt = i => prof[((Math.round(i) % 360) + 360) % 360];
   ctx.beginPath();
   ctx.moveTo(panXLin(0, w), h);
   for (let i = 0; i <= 360; i++) ctx.lineTo(panXLin(i, w), panY(altAt(i), h));
   ctx.lineTo(panXLin(360, w), h);
   ctx.closePath();
+  // each window a subpath inside the strip, so even-odd leaves it unfilled
+  for (const { top, floor } of holes || []) {
+    top.forEach(([az, alt], k) => (k ? ctx.lineTo : ctx.moveTo).call(ctx, panXLin(az, w), panY(alt, h)));
+    for (let k = floor.length - 1; k >= 0; k--) ctx.lineTo(panXLin(floor[k][0], w), panY(floor[k][1], h));
+    ctx.closePath();
+  }
   ctx.fillStyle = style.fill;
-  ctx.fill();
+  ctx.fill('evenodd');
 
   // a rim of sky light along the crest. without it the silhouette reads as a
   // hole punched in the canvas rather than as a ridge with sky behind it.
@@ -3462,6 +3498,14 @@ function panRidgeStrip(ctx, prof, w, h, style) {
   ctx.strokeStyle = style.crest;
   ctx.lineWidth = 1;
   ctx.stroke();
+  // and along each window's floor: the tops of what stands under the crowns
+  if (holes && holes.length) {
+    ctx.beginPath();
+    for (const { floor } of holes) {
+      floor.forEach(([az, alt], k) => (k ? ctx.lineTo : ctx.moveTo).call(ctx, panXLin(az, w), panY(alt, h)));
+    }
+    ctx.stroke();
+  }
   ctx.setLineDash([]);
 }
 
@@ -3475,21 +3519,9 @@ const PAN_LAYERS = {
   trees: { fill: 'rgba(8,28,16,0.7)', crest: 'rgba(118,168,118,0.6)', dash: [], rim: 'rgba(130,190,130,0.10)' },
 };
 
-// the crowns over a window: a band from the canopy base to the tree line.
-// where there is no window hi equals t and the band has no height.
-function panBandStrip(ctx, lo, hi, w, h, style) {
-  ctx.beginPath();
-  for (let i = 0; i <= 360; i++) ctx.lineTo(panXLin(i, w), panY(hi[i % 360], h));
-  for (let i = 360; i >= 0; i--) ctx.lineTo(panXLin(i, w), panY(lo[i % 360], h));
-  ctx.closePath();
-  ctx.fillStyle = style.fill;
-  ctx.fill();
-}
-
 function drawRidge(ctx, horizon, w, h, canopy) {
-  if (canopy && canopy.s) panRidgeStrip(ctx, panMaxProfile(panMaxProfile(horizon, canopy.lo || canopy.t), canopy.s), w, h, PAN_LAYERS.structures);
-  if (canopy && canopy.t) panRidgeStrip(ctx, panMaxProfile(horizon, canopy.lo || canopy.t), w, h, PAN_LAYERS.trees);
-  if (canopy && canopy.lo) panBandStrip(ctx, canopy.hi, canopy.t, w, h, PAN_LAYERS.trees);
+  if (canopy && canopy.s) panRidgeStrip(ctx, panMaxProfile(panMaxProfile(horizon, canopy.t), canopy.s), w, h, PAN_LAYERS.structures, panStructureHoles(canopy, false));
+  if (canopy && canopy.t) panRidgeStrip(ctx, panMaxProfile(horizon, canopy.t), w, h, PAN_LAYERS.trees, panWindowHoles(canopy.lo, canopy.hi, false));
   const g = ctx.createLinearGradient(0, panY(PAN_TOP * 0.3, h), 0, h);
   g.addColorStop(0, '#121c38');
   g.addColorStop(1, '#070c1a');
@@ -3778,7 +3810,7 @@ function panProjectAll(alt, az, view) {
 // within a degree of the point directly behind the viewer a chord can cut the
 // canvas; only reachable looking at or below the horizon. sample finer there
 // if it ever shows.
-function panRingView(ctx, prof, view, w, h, style) {
+function panRingView(ctx, prof, view, w, h, style, holes) {
   const altAt = az => horizonAt(prof, az);
   const top = [];
   for (let az = 0; az < 360; az++) top.push(panProject(altAt(az), az, view));
@@ -3790,15 +3822,29 @@ function panRingView(ctx, prof, view, w, h, style) {
   ctx.closePath();
   const behindIsGround = -view.alt0 < altAt(view.az0 + 180);
   if (behindIsGround) ctx.rect(-1, -1, w + 2, h + 2);
+  // each window a closed subpath on the filled side of the ring, so even-odd
+  // leaves it unfilled whichever side of the ring the ground is
+  for (const { top: up, floor } of holes || []) {
+    up.forEach(([az, alt], k) => { const p = panProjectAll(alt, az, view); if (k) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y); });
+    for (let k = floor.length - 1; k >= 0; k--) { const p = panProjectAll(floor[k][1], floor[k][0], view); ctx.lineTo(p.x, p.y); }
+    ctx.closePath();
+  }
   ctx.fillStyle = style.fill;
   ctx.fill('evenodd');
 
-  for (const run of panRuns(top, true)) {
-    if (run.length < 2) continue;
+  // the crest along the ring, and along each window's floor: the tops of what
+  // stands under the crowns
+  const lines = panRuns(top, true).map(run => run.map(i => top[i]));
+  for (const { floor } of holes || []) {
+    const pts = floor.map(([az, alt]) => panProject(alt, az, view));
+    for (const run of panRuns(pts, false)) lines.push(run.map(i => pts[i]));
+  }
+  for (const line of lines) {
+    if (line.length < 2) continue;
     // the rim of sky light along the crest, same as the flat ridge
     ctx.beginPath();
-    ctx.moveTo(top[run[0]].x, top[run[0]].y);
-    for (let k = 1; k < run.length; k++) ctx.lineTo(top[run[k]].x, top[run[k]].y);
+    ctx.moveTo(line[0].x, line[0].y);
+    for (let k = 1; k < line.length; k++) ctx.lineTo(line[k].x, line[k].y);
     if (style.rim) {
       ctx.save();
       ctx.strokeStyle = style.rim;
@@ -3814,23 +3860,11 @@ function panRingView(ctx, prof, view, w, h, style) {
   }
 }
 
-// the same band in the dialog's projection
-// ponytail: straight chords per degree, like panRingView; a band passing
-// behind the viewer can draw a stray chord, only reachable looking down
-function panBandView(ctx, lo, hi, view, style) {
-  ctx.beginPath();
-  for (let az = 0; az <= 360; az++) { const p = panProjectAll(horizonAt(hi, az), az, view); if (az === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); }
-  for (let az = 360; az >= 0; az--) { const p = panProjectAll(horizonAt(lo, az), az, view); ctx.lineTo(p.x, p.y); }
-  ctx.closePath();
-  ctx.fillStyle = style.fill;
-  ctx.fill();
-}
 
 function drawRidgeView(ctx, horizon, view, w, h, canopy) {
   const terrain = horizon || new Float64Array(360);   // a picked point: flat at 0
-  if (canopy && canopy.s) panRingView(ctx, panMaxProfile(panMaxProfile(terrain, canopy.lo || canopy.t), canopy.s), view, w, h, PAN_LAYERS.structures);
-  if (canopy && canopy.t) panRingView(ctx, panMaxProfile(terrain, canopy.lo || canopy.t), view, w, h, PAN_LAYERS.trees);
-  if (canopy && canopy.lo) panBandView(ctx, canopy.hi, canopy.t, view, PAN_LAYERS.trees);
+  if (canopy && canopy.s) panRingView(ctx, panMaxProfile(panMaxProfile(terrain, canopy.t), canopy.s), view, w, h, PAN_LAYERS.structures, panStructureHoles(canopy, true));
+  if (canopy && canopy.t) panRingView(ctx, panMaxProfile(terrain, canopy.t), view, w, h, PAN_LAYERS.trees, panWindowHoles(canopy.lo, canopy.hi, true));
   const g = ctx.createLinearGradient(0, 0, 0, h);
   g.addColorStop(0, '#0b1226');
   g.addColorStop(1, '#03060f');

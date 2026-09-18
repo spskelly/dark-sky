@@ -345,9 +345,19 @@ floor, not the tree line.
 What ships. A canopy entry carries `f` and `b` beside `t` only where
 `has_window` finds a window opening `WINDOW_MIN_DEG` above the ridge on some
 azimuth; elsewhere the entry is the tree line alone, as before. The page draws
-the trees as the crown above the window with the sky open under it down to the
-floor, and the rise and set sentence names the trees or the ridge by what is
-actually in the way at the crossing. The constants are in the table above.
+the trees solid up to the tree line with each window cut out of them as a hole
+(`panWindowHoles`), one per run of window azimuths, spanning half a degree past
+its first and last sample; the crest runs along the tree line and along each
+window's floor. The rise and set sentence names the trees or the ridge by what
+is actually in the way at the crossing. The constants are in the table above.
+
+Changed 2026-09-18, from Shawn's Street View comparison at View Waynesville:
+the page first drew the trees up to the window floor with a crown band over
+them. Both shapes interpolated straight across the degree where a window
+starts, so at azimuth 77 to 78 (tree line 58 degrees, window 4.5 to 7.5) the
+ring's crest drew a 54-degree straight line through solid crown, with a sliver
+of sky beside it, and the band had no crest, so the silhouette broke wherever a
+window sat under it.
 
 Measured, 2026-09-18:
 

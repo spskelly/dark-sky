@@ -308,3 +308,55 @@ test('sentence: with a canopy the sentence keeps its shape, comma separated part
   const s = say(ridge, { t: swTrees, s: null });
   assert.ok(s.split(', ').length >= 3 && !s.endsWith('.'), s);
 });
+
+// a window under the crowns is a hole cut out of the tree ring, not the ring
+// dropping to the window floor with a crown band laid over it: that drew the
+// ring's edge and the band's edge as two chords across one degree, 54 degrees
+// tall at View Waynesville (azimuth 77 to 78), with a crest stroked down the
+// first and sky showing between them
+const winCanopy = () => {
+  const t = new Float64Array(360).fill(58), lo = new Float64Array(360).fill(58), hi = new Float64Array(360).fill(58);
+  for (let a = 78; a <= 80; a++) { lo[a] = 4.5; hi[a] = 7.5; }
+  return { t, s: null, lo, hi };
+};
+
+test('panWindowHoles: one hole per window, spanning its degrees and no further', () => {
+  const c = winCanopy();
+  const plain = x => JSON.parse(JSON.stringify(x));   // arrays from the vm context have its prototype
+  const holes = plain(ctx.panWindowHoles(c.lo, c.hi, true));
+  assert.equal(holes.length, 1);
+  const { top, floor } = holes[0];
+  assert.deepEqual(top.map(p => p[0]), [77.5, 78, 79, 80, 80.5]);
+  assert.deepEqual(top.map(p => p[1]), [7.5, 7.5, 7.5, 7.5, 7.5]);
+  assert.deepEqual(floor.map(p => p[1]), [4.5, 4.5, 4.5, 4.5, 4.5]);
+  assert.equal(ctx.panWindowHoles(null, null, true).length, 0);
+  assert.equal(ctx.panWindowHoles(c.t, c.t, true).length, 0);
+});
+
+test('panWindowHoles: a window through north is one hole in the dialog, two on the flat strip', () => {
+  const lo = new Float64Array(360).fill(20), hi = new Float64Array(360).fill(20);
+  for (const a of [358, 359, 0, 1]) { lo[a] = 2; hi[a] = 9; }
+  const round = ctx.panWindowHoles(lo, hi, true);
+  assert.equal(round.length, 1);
+  assert.deepEqual([round[0].top[0][0], round[0].top.at(-1)[0]], [357.5, 361.5]);
+  assert.equal(ctx.panWindowHoles(lo, hi, false).length, 2);
+});
+
+test('panRidgeStrip: holes are cut from the fill, and the crest follows the tree line unbroken', () => {
+  const calls = [];
+  const rec = name => (...a) => calls.push([name, ...a]);
+  const g = { beginPath: rec('begin'), moveTo: rec('move'), lineTo: rec('line'), closePath: rec('close'),
+              fill: rec('fill'), stroke: rec('stroke'), setLineDash: () => {} };
+  const c = winCanopy();
+  ctx.panRidgeStrip(g, c.t, 360, 100, { fill: '#000', crest: '#fff', dash: [] }, ctx.panWindowHoles(c.lo, c.hi, false));
+  const fillAt = calls.findIndex(k => k[0] === 'fill');
+  assert.equal(calls[fillAt][1], 'evenodd');
+  const x = az => vm.runInContext(`panXLin(${az}, 360)`, ctx);
+  assert.ok(calls.slice(0, fillAt).some(k => k[0] === 'move' && k[1] === x(77.5)), 'the hole is a subpath of the fill');
+  // the crest: the tree line's 361 points in one stroke, then the window floor
+  const crest = calls.slice(fillAt + 1);
+  const firstStroke = crest.findIndex(k => k[0] === 'stroke');
+  assert.equal(crest.slice(0, firstStroke).filter(k => k[0] === 'move').length, 1);
+  assert.equal(crest.slice(0, firstStroke).filter(k => k[0] === 'line').length, 360);
+  assert.ok(crest.slice(firstStroke).some(k => k[0] === 'move' && k[1] === x(77.5)), 'the window floor gets its own crest');
+});
