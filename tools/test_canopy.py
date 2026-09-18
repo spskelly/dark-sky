@@ -1044,6 +1044,40 @@ class TestSuggestCheckpoint(unittest.TestCase):
                 bc.CACHE = saved
 
 
+class TestSuggestDryRun(unittest.TestCase):
+    """--suggest-views --dry-run says what the real run would do and stops:
+    no H: read, no overpass request, no file written."""
+
+    HTML = ('const SPOTS = [\n'
+            "  { name: 'Site A (closed)', lat: 35.10, lon: -83.10, elev: 4000, kind: 'view' },\n"
+            '];\n'
+            'const OVERLOOKS = [\n'
+            '];\n')
+
+    CLOSED_REC = {'t': [60.0] * 360}
+
+    def test_reads_no_h_fetches_nothing_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as d:
+            saved = bc.CACHE
+            bc.CACHE = d
+            try:
+                with mock.patch.object(bh, 'read_html', return_value=self.HTML), \
+                     mock.patch.object(bc, 'load_cached', side_effect=lambda s: dict(self.CLOSED_REC)), \
+                     mock.patch.object(bc, 'fetch_site', side_effect=AssertionError('dry-run fetched H:')), \
+                     mock.patch.object(bc, 'osm_access', side_effect=AssertionError('dry-run asked overpass')), \
+                     mock.patch.object(bc, 'suggest', side_effect=AssertionError('dry-run computed a suggestion')), \
+                     mock.patch.object(bh, 'save_atomic', side_effect=AssertionError('dry-run wrote a row')), \
+                     mock.patch.object(sys, 'argv', ['build_canopy.py', '--suggest-views', '--dry-run']):
+                    out = io.StringIO()
+                    with contextlib.redirect_stdout(out):
+                        bc.main()
+                self.assertFalse(os.path.exists(os.path.join(d, 'suggest')))
+                self.assertFalse(os.path.exists(os.path.join(d, 'osm')))
+                self.assertFalse(os.path.exists(os.path.join(d, 'view-review.md')))
+                self.assertIn('closed-in', out.getvalue())
+            finally:
+                bc.CACHE = saved
+
 
 def crown(x0, y0, z_lo, z_hi, step=0.5):
     """one leaf-off crown filling a 1 m cell from z_lo to z_hi"""

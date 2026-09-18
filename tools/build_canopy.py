@@ -493,6 +493,21 @@ def near_access(cx, cy, ways, lat, lon):
     return ok
 
 
+def _osm_cached(site):
+    """the saved overpass answer for this site's pin and search radius, read
+    from disk only, or None when there isn't one or it no longer matches. a
+    dry run uses this too, to count what a real run would still need to ask
+    overpass for, without asking it."""
+    lat, lon = site['view_lat'], site['view_lon']
+    r = SEARCH_R + ACCESS_M
+    path = os.path.join(CACHE, 'osm', bh.cache_name({'name': site['name'], 'ov_id': site.get('ov_id')}))
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding='utf-8') as f:
+        got = json.load(f)
+    return got['elements'] if got.get('at') == [lat, lon, r] else None
+
+
 def osm_access(site):
     """the osm roads, paths and parking within SEARCH_R + ACCESS_M of the pin,
     as overpass ways with their geometry, or None when no mirror answered. one
@@ -501,12 +516,10 @@ def osm_access(site):
     run asks again"""
     lat, lon = site['view_lat'], site['view_lon']
     r = SEARCH_R + ACCESS_M
+    cached = _osm_cached(site)
+    if cached is not None:
+        return cached
     path = os.path.join(CACHE, 'osm', bh.cache_name({'name': site['name'], 'ov_id': site.get('ov_id')}))
-    if os.path.exists(path):
-        with open(path, encoding='utf-8') as f:
-            got = json.load(f)
-        if got.get('at') == [lat, lon, r]:
-            return got['elements']
     s, w = from_local(-r, -r, lat, lon)
     n, e = from_local(r, r, lat, lon)
     bb = '%.6f,%.6f,%.6f,%.6f' % (s, w, n, e)
@@ -985,6 +998,20 @@ def main():
     if args.suggest_views:
         closed = [(s, load_cached(s)) for s in todo]
         closed = [(s, r) for s, r in closed if r and closed_in(r, terrain_for(s).get('alt'))]
+        if args.dry_run:
+            # everything above and below this is a local cache read: no H:,
+            # no overpass, no write. --force means no saved row is reused,
+            # the same as the real run.
+            need = closed if args.force else [(s, r) for s, r in closed if not load_suggested(s)]
+            osm_ok = sum(1 for s, r in need if _osm_cached(s) is not None)
+            print('%d closed-in sites (of %d selected)' % (len(closed), len(todo)))
+            print('  %d already have a reusable suggest row, %d would be computed' % (len(closed) - len(need), len(need)))
+            print('  osm: %d cached, %d would ask overpass' % (osm_ok, len(need) - osm_ok))
+            print('  estimated up to %.1f min (upper bound: %d confirm raycasts a site at most, ~1.2 s each)'
+                  % (len(need) * CONFIRM_MAX * 1.2 / 60, CONFIRM_MAX))
+            print('  writes: %s, %s, %s' % (os.path.join(CACHE, 'suggest'), os.path.join(CACHE, 'osm'),
+                  os.path.join(CACHE, 'view-review.md')))
+            return
         os.makedirs(os.path.join(CACHE, 'suggest'), exist_ok=True)
         rows = []
         failed = []
