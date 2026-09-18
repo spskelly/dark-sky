@@ -35,6 +35,11 @@ const BBOX = { s: 34.9, w: -84.4, n: 36.7, e: -80.3 };
 const NEAR_ROAD_M = 400;   // a viewpoint further than this from the road is a trail summit, not a pull-off
 const NEAR_SPOT_M = 300;   // closer than this to a curated spot and it is that spot
 const SAME_M = 150;        // two viewpoints this close are one pull-off mapped twice, whatever they are called
+const MOVED_WARN_M = 60;   // an applied standing spot further than this from the osm point is likely a mistyped coordinate
+
+export function movedTooFar(m) {
+  return m > MOVED_WARN_M;
+}
 // the parkway crosses into virginia at about 36.55 n, and it runs north-east
 // from there, so nothing on this road in north carolina lies north of this.
 // the page's subject is western north carolina and the elevation grid the
@@ -110,17 +115,27 @@ export function pick(elements, spots, views = {}) {
   for (const o of [...clear].sort((a, b) => (rank(a) - rank(b)) || (b.isNode - a.isNode)))
     if (!kept.some(k => metres(k, o) < SAME_M)) kept.push(o);
   kept.sort((a, b) => b.lat - a.lat);
+  // a separate list, not a key on the kept rows: kept rows are written into
+  // the page as-is, and the moved distance is only for this run's own log.
+  const applied = [];
   return {
     counts: { returned: elements.length, named: named.length, inNorthCarolina: inNC.length,
               clearOfSpots: clear.length, distinct: kept.length },
     kept: kept.map(o => {
       const mp = milepost(o.name);
       const v = views[o.id];
+      // three readers (build_horizons.parse_overlooks, check_alignment.py,
+      // build-skyglow.mjs) split the OVERLOOKS block on "];", so a note
+      // carrying it would corrupt every one of them
+      if (v && v[2] && v[2].includes('];'))
+        throw new Error(`overlook-views.json note for ${o.id} contains "];", which the OVERLOOKS block readers split on`);
       // a reviewed spot is kept exact: it was placed to the metre on purpose,
       // where the osm point is only cut to the 10 m the terrain needs
       const at = v ? { lat: v[0], lon: v[1] } : { lat: +o.lat.toFixed(4), lon: +o.lon.toFixed(4) };
+      if (v) applied.push({ id: o.id, name: o.name, movedM: metres({ lat: o.lat, lon: o.lon }, at) });
       return { id: o.id, name: o.name, ...at, ...(mp === null ? {} : { mp }), ...(v && v[2] ? { note: v[2] } : {}) };
     }),
+    applied,
   };
 }
 
@@ -146,7 +161,7 @@ async function main() {
     fs.renameSync(tmp, RAW);
     elements = data.elements;
   }
-  const { counts, kept } = pick(elements, spots, views);
+  const { counts, kept, applied } = pick(elements, spots, views);
   console.log(`viewpoints within ${NEAR_ROAD_M} m of the parkway: ${counts.returned}`);
   console.log(`  named, and not just "scenic overlook":   ${counts.named}`);
   console.log(`  south of ${NC_NORTH} n, so in north carolina:   ${counts.inNorthCarolina}`);
@@ -156,6 +171,11 @@ async function main() {
   const stale = Object.keys(views).filter(id => !kept.some(o => o.id === id));
   console.log(`standing spots applied: ${Object.keys(views).length - stale.length}`);
   for (const id of stale) console.warn(`  overlook-views.json names ${id}, which is no longer in the list`);
+  for (const a of applied) {
+    console.log(`  ${a.name} (${a.id}): moved ${a.movedM.toFixed(0)} m from the osm point`);
+    if (movedTooFar(a.movedM))
+      console.warn(`    over ${MOVED_WARN_M} m, check the coordinate in tools/overlook-views.json`);
+  }
   // a run that comes back nearly empty is overpass having a bad day, and
   // writing it would quietly delete the layer
   if (kept.length < 50) throw new Error(`refusing to write: only ${kept.length} overlooks, expected over a hundred`);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { milepost, metres, pick, parseSpots, row } from './build-overlooks.mjs';
+import { milepost, metres, pick, parseSpots, row, movedTooFar } from './build-overlooks.mjs';
 
 const node = (id, name, lat, lon) => ({ type: 'node', id, lat, lon, tags: name ? { tourism: 'viewpoint', name } : { tourism: 'viewpoint' } });
 const way = (id, name, lat, lon) => ({ type: 'way', id, center: { lat, lon }, tags: { tourism: 'viewpoint', name } });
@@ -106,4 +106,31 @@ test('a reviewed standing spot replaces the osm point, unrounded, and carries it
 test('a standing spot with no note adds no note key', () => {
   const { kept } = pick([node(1, 'X Overlook', 35.1, -82.9)], [], { n1: [35.10002, -82.90001, ''] });
   assert.equal('note' in kept[0], false);
+});
+
+test('pick reports each applied standing spot and how far it moved from the osm point', () => {
+  const at = { lat: 35.1236789, lon: -82.9871234 };
+  const { applied } = pick([node(1, 'X Overlook', 35.123456, -82.987654), node(2, 'Y Overlook', 35.3, -82.5)],
+    [], { n1: [at.lat, at.lon, ''] });
+  assert.equal(applied.length, 1);
+  assert.equal(applied[0].id, 'n1');
+  assert.ok(Math.abs(applied[0].movedM - metres({ lat: 35.123456, lon: -82.987654 }, at)) < 1e-6);
+});
+
+test('an overlook with no reviewed spot is not in the applied list', () => {
+  const { applied } = pick([node(1, 'X Overlook', 35.1, -82.9)], [], {});
+  assert.deepEqual(applied, []);
+});
+
+test('a standing spot moved more than 60 m from the osm point is flagged, a mistyped coordinate', () => {
+  assert.equal(movedTooFar(60), false);
+  assert.equal(movedTooFar(60.001), true);
+  assert.equal(movedTooFar(0), false);
+});
+
+test('a note containing "];" is refused, naming the overlook id', () => {
+  assert.throws(
+    () => pick([node(1, 'X Overlook', 35.1, -82.9)], [], { n1: [35.10002, -82.90001, 'walk past the gate]; then turn'] }),
+    /n1/,
+  );
 });
