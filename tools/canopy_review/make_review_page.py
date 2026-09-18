@@ -1,9 +1,11 @@
 """build the standing-spot review page from the saved suggest rows and the
 crops make_crops.py wrote. reads tools/.canopy-cache/suggest/*.json (current
 params only) and tools/.canopy-cache/review/crops/<slug>.jpg; writes
-tools/.canopy-cache/review/review.html. naip imagery is usgs public domain;
-the road/path/parking overlay in each crop is openstreetmap data, (c)
-OpenStreetMap contributors, ODbL."""
+tools/.canopy-cache/review/review.html. if tools/.canopy-cache/review/notes.json
+exists (a row key -> one-line string map), each row with a note shows it on
+its card as the reviewer's look at the aerial. naip imagery is usgs public
+domain; the road/path/parking overlay in each crop is openstreetmap data,
+(c) OpenStreetMap contributors, ODbL."""
 import base64, glob, html, json, os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import build_canopy as bc
@@ -22,6 +24,13 @@ for p in glob.glob(os.path.join(bc.CACHE, 'suggest', '*.json')):
         rows.append(r)
 assert rows, 'no suggest rows for current params'
 print('rows: %d' % len(rows))
+# notes.json is optional, a reviewer's aerial-read per row key; missing file changes nothing
+NOTES_PATH = os.path.join(REVIEW, 'notes.json')
+notes = {}
+if os.path.exists(NOTES_PATH):
+    with open(NOTES_PATH, encoding='utf-8') as f:
+        notes = json.load(f)
+print('notes: %d' % len(set(notes) & {r['key'] for r in rows}))
 SAT = 'https://www.google.com/maps/@%.6f,%.6f,40m/data=!3m1!1e3'
 
 
@@ -86,8 +95,10 @@ def row_html(n, r):
     alt = 'aerial view of %s: the pin%s, the 60 m search ring and nearby roads and paths' % (
         e(r['name']), '' if r['spot'] is None else ' and the proposed spot')
     fl = '<div class="flags">%s</div>' % ''.join(flags) if flags else ''
+    # reuse .best (existing secondary-text style) for the reviewer's note, if any
+    note = '<p class="best">on the aerial: %s</p>' % e(notes[r['key']]) if r['key'] in notes else ''
     return ('<li class="row %s"><img class="crop" src="%s" alt="%s" width="560" height="560">'
-            '<div class="info">%s%s%s<div class="links">%s</div></div></li>') % (g, src, alt, head, body, fl, links)
+            '<div class="info">%s%s%s%s<div class="links">%s</div></div></li>') % (g, src, alt, head, body, note, fl, links)
 
 
 sections = [
