@@ -7,6 +7,7 @@ the live check at the bottom fetches two real sites from S3 and is skipped
 unless CANOPY_LIVE=1 is set.
 """
 import contextlib
+import http.client
 import io
 import json
 import math
@@ -749,7 +750,8 @@ class TestStandingSpot(unittest.TestCase):
         self.assertGreater(row['open_after'], 25.0)
         self.assertNotIn('best_m', row)
         self.assertIsNone(row['on_path'])   # no osm answer: reach unknown
-        with self.small(25.0), mock.patch.object(bc, 'fetch_site', side_effect=self.fetch_of(RING)),              mock.patch.object(bc, 'osm_access', return_value=[]):
+        with self.small(25.0), mock.patch.object(bc, 'fetch_site', side_effect=self.fetch_of(RING)), \
+             mock.patch.object(bc, 'osm_access', return_value=[]):
             row = bc.suggest(site, rec)
         self.assertIs(row['on_path'], False)   # osm answered with nothing near: off path
 
@@ -858,6 +860,25 @@ class TestAccess(unittest.TestCase):
         self.assertNotEqual(near, far)   # without the mask the nearest wins
         self.assertEqual(int(np.isfinite(raw).sum()), 1)   # stopped at the first that cleared
 
+    def test_trailside_failures_leave_checks_for_a_nearer_clearing(self):
+        """four reachable candidates deep in a solid 20 m stand all pass the
+        grid screen and fail the raw check; with a budget of four they would
+        use it all. half goes to reachable ones, so the open off-path spot
+        nearer the pin is still read, and taken. the off-path half needs only
+        one of its two checks, so the spare one goes to a third reachable"""
+        trees = [(25 + a * .5, -5 + b * .5, float(h), 5) for a in range(23) for b in range(23) for h in range(0, 21, 2)
+                 if math.hypot(25 + a * .5 - 30.5, -5 + b * .5 - 0.5) >= 2.5]
+        dx, dy, z, c = arrays(lattice(lambda a, b: 0.0, r=40) + trees)
+        cx, cy = np.array([30.0, 30.0, 31.0, 31.0, -5.0]), np.array([0.0, 1.0, 0.0, 1.0, 0.0])
+        med, dz = np.full(5, 35.0), np.zeros(5)
+        ok = np.array([True, True, True, True, False])
+        with mock.patch.multiple(bc, CONFIRM_MAX=4, SKY_R=10.0):
+            k, raw = bc.confirm_spot(dx, dy, z, c, 0.0, cx, cy, dz, med, None, ok)
+        self.assertEqual(k, 4)
+        self.assertEqual(int(np.isfinite(raw).sum()), 4)   # three reachable, then the clearing
+        self.assertTrue(np.all(raw[:3] > bc.CLOSED_DEG), raw)
+        self.assertFalse(np.isfinite(raw[3]))
+
     def test_osm_access_caches_an_answer_and_not_a_failure(self):
         site = {'name': 'Gorges', 'ov_id': None, 'view_lat': LAT, 'view_lon': LON}
         body = json.dumps({'elements': [{'type': 'way', 'tags': {'highway': 'service'}, 'geometry': []}]}).encode()
@@ -868,6 +889,16 @@ class TestAccess(unittest.TestCase):
                 self.assertIsNone(bc.osm_access(site))
             self.assertEqual(down.call_count, 2)   # both endpoints tried
             self.assertFalse(os.path.exists(os.path.join(d, 'osm', 'gorges.json')))   # so a later run asks again
+            # a reply cut off mid-read, then a query overpass gave up on (a 200
+            # with a remark): neither is an answer, neither is kept
+            cut = mock.MagicMock()
+            cut.__enter__.return_value.read.side_effect = http.client.IncompleteRead(b'{"elem')
+            gave_up = _fake_response(json.dumps({'elements': [], 'remark': 'runtime error: Query timed out'}).encode())
+            with mock.patch.object(bc.urllib.request, 'urlopen', side_effect=[cut, gave_up]) as tried, \
+                 contextlib.redirect_stdout(io.StringIO()):
+                self.assertIsNone(bc.osm_access(site))
+            self.assertEqual(tried.call_count, 2)
+            self.assertFalse(os.path.exists(os.path.join(d, 'osm', 'gorges.json')))
             with mock.patch.object(bc.urllib.request, 'urlopen', return_value=_fake_response(body)):
                 self.assertEqual(len(bc.osm_access(site)), 1)
             with mock.patch.object(bc.urllib.request, 'urlopen', side_effect=AssertionError('cached')):

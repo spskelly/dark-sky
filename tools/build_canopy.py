@@ -24,6 +24,7 @@ no rasters and no dem. build_horizons is imported for the refraction radius,
 the eye height, the encoder, the spot parser and the block writer.
 """
 import argparse
+import http.client
 import io
 import json
 import math
@@ -504,8 +505,15 @@ def osm_access(site):
         try:
             req = urllib.request.Request(url, data=urllib.parse.urlencode({'data': q}).encode(), headers=UA)
             with urllib.request.urlopen(req, timeout=90) as resp:
-                ways = json.loads(resp.read())['elements']
-        except (OSError, ValueError, KeyError) as err:   # urllib's errors and timeouts are all OSErrors
+                got = json.loads(resp.read())
+            # a query overpass gave up on (timeout, out of memory) still comes
+            # back a 200, with what it had and a remark saying why
+            if 'remark' in got:
+                raise ValueError(got['remark'])
+            ways = got['elements']
+        # urllib's errors and timeouts are OSErrors; a reply cut off mid-read
+        # is an http.client one
+        except (OSError, http.client.HTTPException, ValueError, KeyError) as err:
             print('  overpass %s: %s' % (url, err))
             continue
         _write(path, json.dumps({'at': [lat, lon, r], 'elements': ways}).encode('utf-8'))
@@ -521,15 +529,22 @@ def confirm_spot(dx, dy, z, cls, ground, cx, cy, dz, med, ridge=None, ok_access=
     SKY_R of it, as the median sight floor against the pin's ridge (the tree
     line, or the window under the crowns where there is one), stopping at the
     first at or under CLOSED_DEG. reachable candidates (ok_access) go first,
-    so one on a path farther out wins over a nearer one in the woods.
-    returns that candidate's index (or None) and the raw medians, inf where none was run. a candidate under its own
-    crown reads the cap on the grid, so it never reaches this check."""
+    so one on a path farther out wins over a nearer one in the woods, but
+    they get half the checks: a trail through a stand can offer dozens that
+    all fail, and the nearer off-path clearing gets the other half. a group
+    with fewer than its half hands the rest to the other. returns that
+    candidate's index (or None) and the raw medians, inf where none was run.
+    a candidate under its own crown reads the cap on the grid, so it never
+    reaches this check."""
     raw = np.full(len(med), np.inf)
     tm = np.isin(cls, TREES)
     tx, ty, tz = dx[tm], dy[tm], z[tm]
     reach = np.zeros(len(med), bool) if ok_access is None else np.asarray(ok_access, bool)
-    order = [k for k in np.lexsort((np.hypot(cx, cy), ~reach)) if med[k] <= CLOSED_DEG + CONFIRM_DEG]
-    for k in order[:CONFIRM_MAX]:
+    screened = [k for k in np.argsort(np.hypot(cx, cy), kind='stable') if med[k] <= CLOSED_DEG + CONFIRM_DEG]
+    on = [k for k in screened if reach[k]]
+    off = [k for k in screened if not reach[k]]
+    n_on = min(len(on), max(CONFIRM_MAX // 2, CONFIRM_MAX - len(off)))
+    for k in on[:n_on] + off[:CONFIRM_MAX - n_on]:
         near = (np.abs(tx - cx[k]) < SKY_R) & (np.abs(ty - cy[k]) < SKY_R)
         ex, ey, eye = tx[near] - cx[k], ty[near] - cy[k], ground + dz[k] + bh.EYE
         f, b = canopy_bands(ex, ey, tz[near], eye, MIN_R)   # nan where no window, which sight_floor reads as none
