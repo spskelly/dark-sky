@@ -456,19 +456,22 @@ Sanity sites, 2026-09-18, the lines the run printed:
 
 writes `tools/.canopy-cache/view-review.md`, one row per closed-in site,
 most closed first: `site`, `key` (the site's key, since decisions are filed
-by key: overlooks are `ov:<osm id>`), `now` (median tree altitude at the
-pin), `open now` (open sky at the pin), `proposed` (the spot; with none, "none
+by key: overlooks are `ov:<osm id>`), `now` (median sight floor over the
+pin's best `BEST_ARC` degrees), `open now` (open sky at the pin), `proposed`
+(the spot; with none, "none
 under CLOSED_DEG within SEARCH_R m" and the best candidate's median, distance
 and metres up or down, as in "best 39 at 17 m, 2 m down", with "(grid)"
 when no raw check ran), `moved` (metres
 from the pin), `bearing`, `up/down` (the spot's ground against the pin's,
-signed, metres), `then` (median tree altitude from the spot), `open then`
+signed, metres), `then` (median sight floor over the spot's best `BEST_ARC`
+degrees), `open then`
 (open sky from the spot), `walk under trees` (metres of the straight line
 from the pin to the spot that pass under a crown), and satellite links for
 both `pin` and `spot`. Open sky is the percent of the 360 azimuths whose tree
 line is under `OPEN_DEG`, the number the page can show later as "open sky
 %". Each row is also cached on its own in `tools/.canopy-cache/suggest/`,
-reused while the site's coordinate and the nine tunables below still
+reused while the site's coordinate and the fourteen tunables in
+`suggest_params()` (listed above) still
 match; `--suggest-views --force`, or deleting the directory, recomputes
 every row. A run with `--only` rewrites `view-review.md` with only the sites
 it matched.
