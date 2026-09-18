@@ -54,6 +54,8 @@ CACHE = os.path.join(ROOT, 'tools', '.horizon-cache')
 B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 ALT_MIN, ALT_RANGE = -10.0, 90.0
 DRIVE_TOL_M = 20.0      # the 1/3 arc-second grid is about 10 m
+WINDOW_MIN_DEG = 3.0    # degrees, mirrors build_canopy.WINDOW_MIN_DEG: a run under
+                        # the tree line shorter than this is not a window
 # gaps that have already been researched and written up, so they read as
 # "known" rather than as a warning. a check that repeats four findings you
 # already understand is a check you stop reading. the write-up is the authority;
@@ -92,6 +94,17 @@ def page_horizons(html):
 def decode(s):
     return [ALT_MIN + (B64.index(s[2 * i]) * 64 + B64.index(s[2 * i + 1])) * ALT_RANGE / 4095.0
             for i in range(len(s) // 2)]
+
+
+def has_window(f, b, ridge):
+    """re-implements build_canopy.has_window's rule rather than importing it:
+    build_canopy pulls in build_horizons, and build_horizons imports rasterio,
+    which is the one dependency this file's docstring promises to skip. ridge
+    is the terrain horizon's alt list, or None where there is no terrain
+    record, in which case the floor is ALT_MIN everywhere."""
+    if ridge is None:
+        ridge = [ALT_MIN] * len(f)
+    return any(bv - max(fv, rv) >= WINDOW_MIN_DEG for fv, bv, rv in zip(f, b, ridge))
 
 
 CANOPY_CACHE = os.path.join(ROOT, 'tools', '.canopy-cache')
@@ -218,15 +231,18 @@ def main():
             fail.append('%s: canopy deck %s but the page says %s - rerun tools/build_canopy.py' % (key, d.get('deck_m'), deck))
         if ('deck' in e) != bool(deck):
             fail.append('%s: the page %s a deck profile but the spot %s deck:' % (key, 'has' if 'deck' in e else 'lacks', 'has' if deck else 'lacks'))
-        # a window on one side only is a partial rebuild: the page shipped an
-        # f or b the cache no longer has, or the cache has one the page never
-        # picked up. the value comparison below would just skip a one-sided
-        # pair, so the mismatch needs its own check to be reported at all.
+        # every model 2 cache record carries f and b (equal to t where there is
+        # no window), so the record having them proves nothing. the page only
+        # ships them where has_window clears WINDOW_MIN_DEG above the ridge, so
+        # that is what "the cache has one" has to mean here, not raw presence.
+        tc = cache.get(key) or ov_cache.get(key)
+        expect_fb = (d.get('f') is not None and d.get('b') is not None
+                    and has_window(d['f'], d['b'], tc['alt'] if tc else None))
         for k in ('f', 'b'):
-            if (e.get(k) is not None) != (d.get(k) is not None):
+            if (e.get(k) is not None) != expect_fb:
                 fail.append('%s: the page %s a %s window string but the cache %s'
                             % (key, 'has' if e.get(k) is not None else 'lacks', k,
-                               'has one' if d.get(k) is not None else 'lacks one'))
+                               'would ship one' if expect_fb else 'would not'))
         pairs = [(e.get('t'), d.get('t')), (e.get('s'), d.get('s'))]
         if 'deck' in e and d.get('deck'):
             pairs += [(e['deck'].get('t'), d['deck']['t']), (e['deck'].get('s'), d['deck']['s'])]
@@ -239,7 +255,6 @@ def main():
                                    for a, b in zip(decode(enc), alt)) > ALT_RANGE / 4095 * 1.5:
                 fail.append('%s: a canopy string in the page is not this cached raycast' % key)
                 break
-        tc = cache.get(key) or ov_cache.get(key)
         if tc and d.get('ground_m') is not None and abs(d['ground_m'] - tc['dem_m']) > GROUND_TOL_M:
             warn.append('%s: lidar ground %.1f m, 3DEP %.1f m at the pin, %.1f m apart'
                         % (key, d['ground_m'], tc['dem_m'], d['ground_m'] - tc['dem_m']))
