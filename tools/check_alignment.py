@@ -222,7 +222,11 @@ def main():
         if 'deck' in e and d.get('deck'):
             pairs += [(e['deck'].get('t'), d['deck']['t']), (e['deck'].get('s'), d['deck']['s'])]
         for enc, alt in pairs:
-            if enc and alt and max(abs(a - b) for a, b in zip(decode(enc), alt)) > ALT_RANGE / 4095 * 1.5:
+            # the encoding stops at ALT_MIN + ALT_RANGE: a canopy overhead is
+            # cached at 80 to 85 degrees and ships as 80, which is the page
+            # being right, not the string being stale
+            if enc and alt and max(abs(a - min(max(b, ALT_MIN), ALT_MIN + ALT_RANGE))
+                                   for a, b in zip(decode(enc), alt)) > ALT_RANGE / 4095 * 1.5:
                 fail.append('%s: a canopy string in the page is not this cached raycast' % key)
                 break
         tc = cache.get(key) or ov_cache.get(key)
