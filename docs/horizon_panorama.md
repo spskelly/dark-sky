@@ -145,6 +145,7 @@ again: it needs `playwright`, which the elevation work does not.
 | `tools/overlook-views.json` changes | `node tools/build-overlooks.mjs --replay`, then `build_horizons.py`, `build-skyglow.mjs --fix`, `build_canopy.py` | A reviewed spot replaces the OSM point for that overlook, so the coordinate every downstream block raycasts from changes; the three builds are the same chain a moved curated spot needs, run in the same order |
 | A spot's `view:` moves | `build_horizons.py`, `build_canopy.py` | `view:` is the coordinate the panorama and canopy are actually drawn from when it is set, invalidating both the same way moving `lat, lon` does. `build-skyglow.mjs` is not listed here: it reads a spot's `lat, lon` only (`SPOT_RE`, line 61), never `view:`. The `tools/overlook-views.json` row above keeps `build-skyglow.mjs --fix`, since overlooks are read by their lat/lon, which the override moves |
 | `VGAP_M`, `THROUGH_M`, `BAND_CELL`, `BAND_STEP` or `WINDOW_MIN_DEG` in `build_canopy.py` | `build_canopy.py --force` | These set how a cell's returns become slabs and how a window under them is measured; the cache does not record which rule built a site's bands, so every site needs rebuilding, not just the changed ones. All sites, from the `H:` store, no network: about 26 minutes measured 2026-09-18, 13:29 to 13:55, 150 sites |
+| `MIN_R`, `DECK_MIN_R`, `PIN_R`, `PIN_R_WIDE` in `build_canopy.py`, or `EYE` in `build_horizons.py` | `build_canopy.py --force`; for `EYE`, `build_horizons.py --force` first | None of these is recorded in either cache, so `cache_ok` and the horizons coordinate check reuse every record after a change. `DECK_MIN_R` alone touches only the two tower spots, so `--force --only <name>` for each, then a plain `build_canopy.py` to write the page (`--only` leaves `index.html` alone) |
 | `ACCESS_M`, `BEST_ARC`, or OSM roads, paths and parking near a site | `build_canopy.py --suggest-views --force` | The finder that proposes standing spots and the closed-in test both read these |
 
 Nothing downstream of `index.html` needs regenerating. `build-og.mjs` and
@@ -287,7 +288,7 @@ profiles per site in the same encoding as the ridge. Design record:
 | `S_MIN_DEG` | 0.5 degrees | Structures get a layer only where they stand this far above both ridge and trees somewhere; a shed under the canopy is not a layer |
 | Same-time threshold | 5 minutes | The sentence gives one time when the ridge and the canopy crossings agree within this |
 | Trees opacity | 0.7 | Shawn, 2026-09-17: the moon and the core stay visible behind the tree band while scrubbing the night |
-| Deck (`deck: [lat, lon, m]`) | Fryingpan `[35.393350, -82.774610, 18.5]`; Mount Sterling `[35.702319, -83.122157, 20]` | The tower's own coordinate and the floor a visitor stands on, in metres above the ground there, both from the 2017 lidar (2026-09-18). Neither tower is in the structure classes: the classifier put both lattices in vegetation, and the first probe (within 15 m of the old view points) found only crowns. Taken per 2 m column over 150 m, each tower is a column of returns lit at many heights, with a dense band at the cab. Coordinate: the median position of the cab band's returns, not the highest single return. Fryingpan: ground 1,621.4 m, cab floor 21 m (359 returns in that 1 m layer; the published 70 ft is 21.3 m), cab and roof to 24 m, lesser layers at 8, 11, 15 and 18 to 19 m that read as stair landings. Its cab is locked and the stairs stop just under it (card), so the deck is the top landing, 18.5 m. Mount Sterling: ground 1,779.8 m, densest layer 20 m thinning to 24 m (published 60 ft, 18.3 m); its lower part is mixed with 12 to 17 m crowns, so good to about 1 m. Its cab is open to hikers (June 2025 trip report, flying-squirrel.org; no NPS closure listed 2026-09-18), so the deck is the cab floor, 20 m. Both towers stand 22 to 27 m from their reviewed `view:` spot, which is why the deck carries its own coordinate. From the Fryingpan deck the only thing over 5 degrees is the radio mast 67 m north-northeast (55 m tall, azimuth 10 to 30, up to 20 degrees); from Mount Sterling's cab every tree is under the eye |
+| Deck (`deck: [lat, lon, m]`) | Fryingpan `[35.393350, -82.774610, 18.5]`; Mount Sterling `[35.702319, -83.122157, 20]` | The tower's own coordinate and the floor a visitor stands on, in metres above the ground there, both from the 2017 lidar (2026-09-18). Neither tower is in the structure classes: the classifier put both lattices in vegetation, and the first probe (within 15 m of the old view points) found only crowns. Taken per 2 m column over 150 m, each tower is a column of returns lit at many heights, with a dense band at the cab. Coordinate: the median position of the cab band's returns, not the highest single return. Fryingpan: ground 1,621.4 m, cab floor 21 m (359 returns in that 1 m layer; the published 70 ft is 21.3 m), cab and roof to 24 m, lesser layers at 8, 11, 15 and 18 to 19 m that read as stair landings. Its cab is locked and the stairs stop just under it (card), so the deck is the top landing, 18.5 m. Mount Sterling: ground 1,779.8 m, densest layer 20 m thinning to 24 m (published 60 ft, 18.3 m); its lower part is mixed with 12 to 17 m crowns, so good to about 1 m. Its cab is open to hikers (June 2025 trip report, flying-squirrel.org; no NPS closure listed 2026-09-18), so the deck is the cab floor, 20 m. Both towers stand 22 to 27 m from their reviewed `view:` spot, which is why the deck carries its own coordinate. From the Fryingpan deck the only thing over 5 degrees is the radio mast 67 m north-northeast (55 m tall, azimuth 10 to 30, up to 20 degrees); from Mount Sterling's cab every tree is under the eye. The deck is raycast over the points fetched for the view's `RADIUS` box, not a box of its own, so with the tower 22 to 27 m off centre its field reaches about 173 m on one side and 227 m on the other; harmless at both towers, where nothing past 70 m stands over the eye |
 | `WORKERS` | 32 | Concurrent node downloads. Latency-bound at 0.2 to 0.3 MB/s per connection from us-west-2, so throughput scales with connection count rather than bytes: 8 workers measured about 1.6 MB/s, 32 about 4.5, 64 about 10 (probe below). 32 is the middle value tried, not a peak |
 
 ### Measured runs
@@ -329,7 +330,7 @@ there looks straight through.
 How it works. `canopy_bands` grids the vegetation within `RADIUS` into
 `BAND_CELL` cells. Each cell's returns are one slab from its lowest to its
 highest (a leaf-off crown is sparse, and summer fills it), split in two
-wherever `VGAP_M` or more of height separates them, so understory under a
+wherever more than `VGAP_M` of height separates them, so understory under a
 crown leaves the gap between them open. Past `THROUGH_M` a cell is one solid
 slab from its lowest return up, since trunks add up with distance. Every slab
 blocks its altitude span over the azimuths its cell covers, in `BAND_STEP`
@@ -490,6 +491,12 @@ was 31.5, so a candidate that is open on the raw points can still read over
 a crown in the neighbouring cell, so nearest-first picks tend to land at a
 stand's edge, beside the last trees rather than clear of them. The canopy
 is 2017 and leaf-off, so every spot's sky is a floor on what is there now.
+A site whose ridge alone has a best-half median over `CLOSED_DEG` is closed
+by terrain, and no candidate can confirm there: the sight floor never goes
+under the ridge, so moving a few metres cannot open it. Reach reads OSM ways
+only: parking mapped as a node or a multipolygon relation is not seen, and
+`*_link` roads and `living_street` are outside `ROADS`, so a spot beside one
+of those reads off path.
 
 ```sh
 # for every site whose sight floor over its best BEST_ARC degrees is over
@@ -824,7 +831,7 @@ the sky viewer dialog is that state now, so a flat thumbnail is an invitation
 to open it rather than the whole story. The thumbnail's own scale is
 unchanged and still worth revisiting against the spread above.
 
-**Second limit, same origin.** All 40 spots sit inside about 200 km, so the moon
+**Second limit, same origin.** All 38 spots sit inside about 200 km, so the moon
 and the galactic core land within a degree or two of the same screen position on
 every one of them. Two spots side by side differ only in their ridgeline. That
 is the point of the feature, and it is not obvious from a single screenshot.
