@@ -6,6 +6,8 @@ hand-built octree, stdlib unittest.
 the live check at the bottom fetches two real sites from S3 and is skipped
 unless CANOPY_LIVE=1 is set.
 """
+import contextlib
+import io
 import json
 import math
 import os
@@ -444,6 +446,39 @@ class TestMainKeepsGoing(unittest.TestCase):
             finally:
                 bc.CACHE = saved_cache
 
+    def test_a_store_write_failure_surfaces_before_the_next_site_fetches(self):
+        """flush_store() runs right after each site's cache write, so a
+        failed H: write stops the run there instead of at the end: the fetch
+        try/except only catches network errors, so this propagates out of
+        main() and the site after the failure is never fetched."""
+        HTML = ('const SPOTS = [\n'
+                "  { name: 'Site A (ok)', lat: 35.10, lon: -83.10, elev: 4000, kind: 'view' },\n"
+                "  { name: 'Site B (ok)', lat: 35.90, lon: -82.20, elev: 4000, kind: 'view' },\n"
+                '];\n'
+                'const OVERLOOKS = [\n'
+                '];\n')
+        calls = []
+
+        def fake_fetch_site(lat, lon, radius_m=bc.RADIUS):
+            calls.append(lat)
+            x, y, z, c = self._ground_ring(lat, lon)
+            return x, y, z, c, ['NC_Phase5_Fake_2017'], 5, 12345
+
+        saved_cache = bc.CACHE
+        with tempfile.TemporaryDirectory() as d:
+            bc.CACHE = d
+            try:
+                with mock.patch.object(bh, 'read_html', return_value=HTML), \
+                     mock.patch.object(bh, 'write_html'), \
+                     mock.patch.object(bc, 'fetch_site', side_effect=fake_fetch_site), \
+                     mock.patch.object(bc, 'flush_store', side_effect=OSError('disk full')), \
+                     mock.patch.object(sys, 'argv', ['build_canopy.py']):
+                    with self.assertRaises(OSError):
+                        bc.main()
+                self.assertEqual(len(calls), 1)   # site b never fetched
+            finally:
+                bc.CACHE = saved_cache
+
 
 @unittest.skipUnless(os.environ.get('CANOPY_LIVE'), 'set CANOPY_LIVE=1 to fetch doubletop and pisgah from S3 (about 130 MB)')
 class TestLive(unittest.TestCase):
@@ -583,6 +618,8 @@ class TestStandingSpot(unittest.TestCase):
         md = bc.review_md(rows)
         lines = [l for l in md.splitlines() if l.startswith('| A ') or l.startswith('| B ')]
         self.assertEqual(len(lines), 2)
+        self.assertIn('| key |', md)         # header names the column
+        self.assertIn('| A | A |', lines[0])  # site and key both show for this row
         self.assertIn('35.100010, -83.100020', lines[0])
         self.assertIn('https://www.google.com/maps/@35.100010,-83.100020,40m/data=!3m1!1e3', lines[0])
         self.assertIn('none within 30 m', lines[1])
@@ -634,7 +671,8 @@ class TestSuggestCheckpoint(unittest.TestCase):
                      mock.patch.object(bc, 'load_cached', side_effect=lambda s: dict(self.CLOSED_REC)), \
                      mock.patch.object(bc, 'suggest', side_effect=self.fake_suggest), \
                      mock.patch.object(sys, 'argv', ['build_canopy.py', '--suggest-views']):
-                    bc.main()
+                    with contextlib.redirect_stdout(io.StringIO()):   # keep the suite output clean
+                        bc.main()
                 self.assertEqual(os.listdir(os.path.join(d, 'suggest')), ['site-b-ok.json'])
                 with open(os.path.join(d, 'view-review.md'), encoding='utf-8') as f:
                     self.assertIn('Site B (ok)', f.read())
@@ -658,8 +696,52 @@ class TestSuggestCheckpoint(unittest.TestCase):
                                         side_effect=lambda s: dict(self.CLOSED_REC) if s['name'] == 'Site B (ok)' else None), \
                      mock.patch.object(bc, 'suggest', side_effect=lambda s, r: calls.append(s['name'])), \
                      mock.patch.object(sys, 'argv', ['build_canopy.py', '--suggest-views']):
-                    bc.main()
+                    with contextlib.redirect_stdout(io.StringIO()):   # keep the suite output clean
+                        bc.main()
                 self.assertEqual(calls, [])   # never recomputed
+            finally:
+                bc.CACHE = saved
+
+    def test_force_recomputes_a_row_already_on_disk(self):
+        with tempfile.TemporaryDirectory() as d:
+            saved = bc.CACHE
+            bc.CACHE = d
+            try:
+                os.makedirs(os.path.join(d, 'suggest'))
+                site = {'name': 'Site B (ok)', 'ov_id': None}
+                row = {'name': 'Site B (ok)', 'key': 'Site B (ok)', 'lat': 35.90, 'lon': -82.20,
+                       'before': 60.0, 'spot': None, 'params': bc.suggest_params()}
+                with open(os.path.join(d, 'suggest', bh.cache_name(site)), 'w', encoding='utf-8') as f:
+                    json.dump(row, f)
+                calls = []
+                with mock.patch.object(bh, 'read_html', return_value=self.HTML), \
+                     mock.patch.object(bc, 'load_cached',
+                                        side_effect=lambda s: dict(self.CLOSED_REC) if s['name'] == 'Site B (ok)' else None), \
+                     mock.patch.object(bc, 'suggest', side_effect=lambda s, r: (calls.append(s['name']), dict(row))[1]), \
+                     mock.patch.object(sys, 'argv', ['build_canopy.py', '--suggest-views', '--force']):
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        bc.main()
+                self.assertEqual(calls, ['Site B (ok)'])   # --force recomputed it despite the row on disk
+            finally:
+                bc.CACHE = saved
+
+    def test_summary_line_reports_net_bytes_pulled(self):
+        """the same net figure the main loop prints, so a run over a full
+        store can be seen to use 0 MB"""
+        with tempfile.TemporaryDirectory() as d:
+            saved = bc.CACHE
+            bc.CACHE = d
+            try:
+                with mock.patch.object(bh, 'read_html', return_value=self.HTML), \
+                     mock.patch.object(bc, 'load_cached', side_effect=lambda s: dict(self.CLOSED_REC)), \
+                     mock.patch.object(bc, 'suggest', side_effect=self.fake_suggest), \
+                     mock.patch.object(sys, 'argv', ['build_canopy.py', '--suggest-views']):
+                    out = io.StringIO()
+                    with contextlib.redirect_stdout(out):
+                        bc.main()
+                summary = [l for l in out.getvalue().splitlines() if l.startswith('1 closed-in')]
+                self.assertEqual(len(summary), 1)
+                self.assertIn('net 0 MB', summary[0])   # fake_suggest never calls http_get
             finally:
                 bc.CACHE = saved
 

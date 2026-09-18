@@ -390,15 +390,16 @@ def review_md(rows):
            'say whether the walk to it needs a line on the card. "then" is the median tree altitude '
            'from the spot; "walk under trees" is metres of the straight line from the pin that pass '
            'under a crown.' % CLOSED_DEG, '',
-           '| site | now | proposed | moved | bearing | then | walk under trees | pin | spot |',
-           '|---|---:|---|---:|---:|---:|---:|---|---|']
+           '| site | key | now | proposed | moved | bearing | then | walk under trees | pin | spot |',
+           '|---|---|---:|---|---:|---:|---:|---:|---|---|']
     for r in sorted(rows, key=lambda r: -r['before']):
         pin = '[pin](%s)' % (sat % (r['lat'], r['lon']))
         if r['spot'] is None:
-            out.append('| %s | %.0f | none within %g m | | | | | %s | |' % (r['name'], r['before'], SEARCH_R, pin))
+            out.append('| %s | %s | %.0f | none within %g m | | | | | %s | |' % (
+                r['name'], r['key'], r['before'], SEARCH_R, pin))
             continue
-        out.append('| %s | %.0f | %.6f, %.6f | %.0f m | %03d | %s | %d m | %s | [spot](%s) |' % (
-            r['name'], r['before'], r['spot'][0], r['spot'][1], r['moved_m'], round(r['bearing']) % 360,
+        out.append('| %s | %s | %.0f | %.6f, %.6f | %.0f m | %03d | %s | %d m | %s | [spot](%s) |' % (
+            r['name'], r['key'], r['before'], r['spot'][0], r['spot'][1], r['moved_m'], round(r['bearing']) % 360,
             'n/a' if r['after'] is None else '%.0f' % r['after'], r['under_trees_m'], pin, sat % tuple(r['spot'])))
     return '\n'.join(out) + '\n'
 
@@ -672,8 +673,9 @@ def main():
         os.makedirs(os.path.join(CACHE, 'suggest'), exist_ok=True)
         rows = []
         failed = []
+        net0 = net_bytes()
         for i, (s, r) in enumerate(closed, 1):
-            row = load_suggested(s)
+            row = None if args.force else load_suggested(s)
             if row:
                 rows.append(row)
                 print('[%d/%d] %s ... cached' % (i, len(closed), s['name']), flush=True)
@@ -697,7 +699,9 @@ def main():
         path = os.path.join(CACHE, 'view-review.md')
         with open(path, 'w', encoding='utf-8') as f:
             f.write(review_md(rows))
-        print('%d closed-in sites, review table at %s' % (len(rows), path))
+        # net_bytes() the same way the main loop reports it, so a run over a
+        # full store can be seen to use 0 MB
+        print('%d closed-in sites, net %.0f MB, review table at %s' % (len(rows), (net_bytes() - net0) / 1e6, path))
         if failed:
             print('%d site(s) failed to fetch and were left uncached; re-run the same command to retry them:' % len(failed))
             for s in failed:
@@ -756,6 +760,11 @@ def main():
                 print('  elev check: %s lidar ground %.1f m, 3dep %.1f m' % (s['name'], prof['ground_m'], terrain['dem_m']))
         bh.save_atomic(cache_path(s), bh.write_json(rec))
         results[s['key']] = rec
+        # flushed here, not just at the end, so a failed H: write stops the run
+        # at the next site rather than 50 minutes later, and the pending list
+        # stays bounded. if it raises, let it propagate: the cache file above
+        # is already written, so only the missing raw file is refetched next run.
+        flush_store()
         # nbytes is this site's box, cache hits included; net/mbps is what the
         # run has actually pulled over the wire since it started, since the two
         # can differ a lot once neighbouring sites start sharing octree nodes.
