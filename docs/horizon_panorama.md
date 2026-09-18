@@ -378,9 +378,14 @@ within `SKY_R` of it, with the plain point `skyline()`. The first whose raw
 median is at or under `CLOSED_DEG` is the spot. An under-crown candidate
 reads 80 on the grid, so it never reaches the raw check. With no spot, the
 row's best is the lowest raw median among those checked, or the lowest grid
-median when none was checked, and the table marks that one "(grid)". `then`
-and `open then` are raycast again from the spot through the whole box's raw
-points (the same `profiles_for` the pin uses).
+median when none was checked, and the table marks that one "(grid)".
+
+`then` and `open then` are an independent re-measure from the spot, not the
+raw figure that confirmed it. They come from the same `profiles_for` the
+pin uses: the eye on the median ground within 3 m of the spot (not the
+1 m cell's lowest return), the whole fetched box rather than `SKY_R` around
+the spot, and returns that `structure_mask` routes to built taken out of
+the trees. So a confirmed spot's `then` can land a little over 30.
 
 Grid against raw points, measured 2026-09-18 on Wayah Bald (20 sampled
 candidates not under a crown, raw raycast over trees within 110 m). One
@@ -402,6 +407,14 @@ none either: the lowest raw median is 34.0 at 22.6 m, 3 m down (grid 37.7),
 against the probe's 35.8 at 23 m. The cap hid no spot there, but it does
 make the row's best the lowest among the 40 nearest (39 at 17 m), not the
 lowest there is.
+
+Limits of the finder. `CONFIRM_DEG` is margin over the 10.7 degree average
+gap between grid and raw points, not over the worst one: the measured worst
+was 31.5, so a candidate that is open on the raw points can still read over
+45 on the grid and be screened out, never raycast raw. `MIN_R` (2 m) hides
+a crown in the neighbouring cell, so nearest-first picks tend to land at a
+stand's edge, beside the last trees rather than clear of them. The canopy
+is 2017 and leaf-off, so every spot's sky is a floor on what is there now.
 
 ```sh
 # for every site whose median tree altitude is over CLOSED_DEG, find the
@@ -445,7 +458,7 @@ it matched.
 | Constant | Value | Evidence |
 |---|---|---|
 | `CLOSED_DEG` | 30 degrees | A median tree altitude over this puts the pin in or against the canopy (2026-09-18: 40 of 150 sites), and a candidate at or under it is a spot. Placeholder, from two probed sites |
-| `SEARCH_R` | 60 m | How far from the pin a spot may be proposed. 30 m found nothing at three of the four probed sites, and Devil's Courthouse's best sat on the 30 m edge; at 60 m its spot is 32 m out (2026-09-18). Placeholder |
+| `SEARCH_R` | 60 m | How far from the pin a spot may be proposed. 30 m found nothing at three of the four probed sites, and Devil's Courthouse's best sat on the 30 m edge; at 60 m its spot is 30 m out, 5.9 m up (2026-09-18, with the raw check). Placeholder |
 | `LEVEL_M` | 10 m | The spot's ground within this of the pin's. 3 m shut out Devil's Courthouse's spot 6 m up; 10 still keeps a cliff lip from being swapped for its foot (a 20 m drop). Placeholder |
 | `CAND_STEP` | 2 m | Spacing of the candidate lattice, the spacing the 2026-09-18 probe used. Placeholder |
 | `SKY_R` | 100 m | Trees further than this past `SEARCH_R` are not gridded. `SEARCH_R + SKY_R` has to stay inside `RADIUS` (200 m), the box that was fetched. Placeholder |

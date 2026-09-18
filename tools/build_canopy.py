@@ -401,8 +401,8 @@ def walk_under_trees(dx, dy, z, cls, ground, spot):
 
 def suggest(site, rec):
     """one review row for a closed-in site. the after number is raycast from
-    the spot through the pin's own box, which is 30 m short on the far side;
-    the real rebuild fetches the spot's own box."""
+    the spot through the pin's own box, which is up to SEARCH_R (60 m) short
+    on the far side; the real rebuild fetches the spot's own box."""
     lat, lon = site['view_lat'], site['view_lon']
     x, y, z, c, _, _, _ = fetch_site(lat, lon)
     x0, y0 = mercator(lat, lon)

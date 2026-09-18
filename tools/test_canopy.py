@@ -568,9 +568,16 @@ def arrays(rows):
     return a[:, 0], a[:, 1], a[:, 2], a[:, 3].astype(np.int64)
 
 
-# 15 m trees from 3 to 12 m out around a clearing, open ground beyond
-RING = lattice(lambda a, b: 0.0, r=30) + [(a + .5, b + .5, 15.0, 5) for a in range(-13, 13) for b in range(-13, 13)
-                                         if 3 <= math.hypot(a + .5, b + .5) <= 12]
+# 15 m trees from 5 to 14 m out around a clearing, open ground beyond. the
+# clearing is wider than the old finder's CLEAR_R, so that finder took it
+RING = lattice(lambda a, b: 0.0, r=30) + [(a + .5, b + .5, 15.0, 5) for a in range(-15, 15) for b in range(-15, 15)
+                                         if 5 <= math.hypot(a + .5, b + .5) <= 14]
+# ground rising 0.3 m per m, 0.5 m shrubs on every metre, and 15 m trees
+# everywhere but uphill past x = 12, where the ground is 3.6 m and more above
+# the pin's: the only open ground is further up than the old LEVEL_M allowed
+SLOPE = (lattice(lambda a, b: 0.3 * a, r=30)
+         + [(a + .5, b + .5, 0.3 * (a + .5) + 0.5, 3) for a in range(-30, 30) for b in range(-30, 30)]
+         + [(a + .5, b + .5, 0.3 * (a + .5) + 15.0, 5) for a in range(-30, 12) for b in range(-30, 30)])
 # 20 m trees on every metre
 FOREST = lattice(lambda a, b: 0.0) + [(a + .5, b + .5, 20.0, 5) for a in range(-20, 20) for b in range(-20, 20)]
 
@@ -609,29 +616,29 @@ class TestStandingSpot(unittest.TestCase):
         self.assertLess(math.hypot(cx[k], cy[k]), 1.5)
 
     def test_a_small_clearing_ringed_by_trees_is_not_a_spot(self):
-        """jackrabbit: the pin in a clearing 3 m in radius, 15 m trees from 3
-        to 12 m out, open ground beyond. the old finder took the gap; the sky
-        from it is still the ring, so the spot is past the trees"""
+        """jackrabbit: the pin in a clearing 5 m in radius, 15 m trees from 5
+        to 14 m out, open ground beyond. the old finder took the clearing
+        itself, 0.7 m from the pin; the sky from it is still the ring, so the
+        spot is past the trees"""
         with self.small(25.0):
             cx, cy, dz, med, op = bc.sky_candidates(*arrays(RING), 0.0)
         k = bc.pick_spot(cx, cy, med)
         self.assertIsNotNone(k)
-        self.assertGreaterEqual(math.hypot(cx[k], cy[k]), 12.0)
+        self.assertGreaterEqual(math.hypot(cx[k], cy[k]), 14.0)
         self.assertLessEqual(med[k], bc.CLOSED_DEG)
         pin = int(np.argmin(np.hypot(cx, cy)))
         self.assertGreater(med[pin], bc.CLOSED_DEG)
 
     def test_a_slope_with_shrubs_still_finds_a_spot(self):
-        """devil's courthouse: ground rising 0.3 m per m, 0.5 m shrubs on every
-        metre, 15 m trees within 10 m of the pin. neither the slope nor the
-        shrubs uphill is a reason to refuse the open ground past the trees"""
-        rows = lattice(lambda a, b: 0.3 * a, r=30)
-        rows += [(a + .5, b + .5, 0.3 * (a + .5) + 0.5, 3) for a in range(-30, 30) for b in range(-30, 30)]
-        rows += [(a + .5, b + .5, 0.3 * (a + .5) + 15.0, 5) for a in range(-11, 11) for b in range(-11, 11)
-                 if math.hypot(a + .5, b + .5) <= 10]
+        """devil's courthouse: the only open ground is uphill past the trees,
+        3.6 m and more above the pin on a 0.3 m per m slope with shrubs on
+        every metre. the old finder's 3 m level window refused it; this one
+        takes it, and neither the slope nor the shrubs is in the way"""
         with self.small(25.0):
-            cx, cy, dz, med, op = bc.sky_candidates(*arrays(rows), 0.0)
-        self.assertIsNotNone(bc.pick_spot(cx, cy, med))
+            cx, cy, dz, med, op = bc.sky_candidates(*arrays(SLOPE), 0.0)
+        k = bc.pick_spot(cx, cy, med)
+        self.assertIsNotNone(k)
+        self.assertGreater(dz[k], 3.0)
 
     def test_open_ground_below_the_lip_is_refused(self):
         """the pin on a wooded ledge; the open ground 20 m down past x = 3 is
@@ -695,7 +702,7 @@ class TestStandingSpot(unittest.TestCase):
         self.assertTrue(bc.CLOSED_DEG < row['best_median'] < bc.CLOSED_DEG + bc.CONFIRM_DEG, row['best_median'])
         with self.small(25.0), mock.patch.object(bc, 'fetch_site', side_effect=self.fetch_of(RING)):
             row = bc.suggest(site, rec)
-        self.assertGreaterEqual(row['moved_m'], 12.0)
+        self.assertGreaterEqual(row['moved_m'], 14.0)
         self.assertEqual(row['dz_m'], 0.0)
         self.assertGreater(row['open_after'], 25.0)
         self.assertNotIn('best_m', row)
