@@ -626,6 +626,31 @@ class TestStandingSpot(unittest.TestCase):
         self.assertFalse(bc.closed_in({'t': [10.0] * 360}))
         self.assertFalse(bc.closed_in({'t': None}))
 
+    @staticmethod
+    def arc(start, width, low, high=80.0):
+        """low over width degrees from start (wrapping at 360), high elsewhere"""
+        p = np.full(360, high)
+        p[(np.arange(width) + start) % 360] = low
+        return p
+
+    def test_best_arc_median_is_the_open_half_wherever_it_starts(self):
+        for start in (0, 90, 135, 270, 300):   # 270 and 300 wrap through north
+            self.assertEqual(bc.best_arc_median(self.arc(start, 180, 0.0)), 0.0, start)
+
+    def test_an_overlook_on_one_valley_is_judged_by_its_open_side(self):
+        """north cove: open over a valley, woods behind. low over 120 degrees
+        reads 80 on the 360 median, but most of its best half is the valley"""
+        valley = self.arc(120, 120, 2.0)
+        self.assertGreater(float(np.median(valley)), bc.CLOSED_DEG)   # the old rule flagged it
+        self.assertEqual(bc.best_arc_median(valley), 2.0)
+        self.assertFalse(bc.closed_in({'t': list(valley)}))
+        # a view a quarter of the way round is under half the best arc: its
+        # median is the midpoint of valley and wall, and it is still closed
+        quarter = self.arc(135, 90, 2.0)
+        self.assertEqual(bc.best_arc_median(quarter), 41.0)
+        self.assertTrue(bc.closed_in({'t': list(quarter)}))
+        self.assertTrue(bc.closed_in({'t': [60.0] * 360}))   # closed all round
+
     def small(self, search_r, sky_r=5.0):
         """a smaller search and sky box keeps a synthetic site fast"""
         return mock.patch.multiple(bc, SEARCH_R=search_r, SKY_R=sky_r)
@@ -1143,6 +1168,7 @@ class TestSightFloor(unittest.TestCase):
 
     def test_suggest_params_carry_the_window_tunables(self):
         self.assertEqual(bc.suggest_params()[-4:], [bc.VGAP_M, bc.THROUGH_M, bc.WINDOW_MIN_DEG, bc.ACCESS_M])
+        self.assertEqual(bc.suggest_params()[:2], [bc.CLOSED_DEG, bc.BEST_ARC])   # rows judged on another arc recompute
 
 
 class TestCanopyEntryWindows(unittest.TestCase):

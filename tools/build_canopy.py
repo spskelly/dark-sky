@@ -80,6 +80,7 @@ CLUSTER_CELL = 2.0   # metres. an unclassified return needs company in its cell
 CLUSTER_MIN = 3      # returns. fewer than this in a cell is a bird or a stray, not a tower
 S_MIN_DEG = 0.5      # degrees. structures get a layer only where they stand this far above ridge and trees
 CLOSED_DEG = 30.0    # degrees. a median sight floor over this puts the pin in or against the canopy (2026-09-18: 40 of 150 sites, counted on the median tree line before the sight floor). placeholder, from two probed sites
+BEST_ARC = 180       # degrees. a place is judged by the median of its best arc this wide, so an overlook facing one valley with woods behind it reads open. shawn's call, 2026-09-18 (north cove valley overlook: 33.2 on the 360 median, 14.9 on its best half; 24 sites closed against 35)
 SEARCH_R = 60.0      # metres. how far from the pin a standing spot may be proposed; 30 found nothing at three of four probed sites and devil's courthouse's best sat on its edge (2026-09-18). placeholder
 LEVEL_M = 10.0       # metres. the spot's ground within this of the pin's; 3 shut out devil's courthouse's spot 6 m up, and 10 still keeps a cliff lip from being swapped for its 20 m foot (2026-09-18). placeholder
 CAND_STEP = 2.0      # metres between candidate spots, the spacing the 2026-09-18 probe used. placeholder
@@ -376,12 +377,20 @@ def sight_floor(t, f=None, b=None, ridge=None):
     return np.minimum(np.where(np.asarray(b, float) - lo >= WINDOW_MIN_DEG, lo, wall), wall)
 
 
+def best_arc_median(profile):
+    """the median of the best BEST_ARC contiguous degrees of a 360-degree
+    profile, wrapping through north: the lowest median over every start"""
+    p = np.asarray(profile, float)
+    win = np.lib.stride_tricks.sliding_window_view(np.concatenate([p, p[:BEST_ARC - 1]]), BEST_ARC)
+    return float(np.median(win, axis=1).min())
+
+
 def closed_in(rec, ridge=None):
-    """the pin is in or against the canopy: the median sight floor is over
-    CLOSED_DEG"""
+    """the pin is in or against the canopy: the median sight floor over its
+    best BEST_ARC degrees is over CLOSED_DEG"""
     if rec.get('t') is None:
         return False
-    return float(np.median(sight_floor(rec['t'], rec.get('f'), rec.get('b'), ridge))) > CLOSED_DEG
+    return best_arc_median(sight_floor(rec['t'], rec.get('f'), rec.get('b'), ridge)) > CLOSED_DEG
 
 
 def open_pct(t):
@@ -418,8 +427,9 @@ def sky_candidates(dx, dy, z, cls, ground):
     cell refused every slope (a shrub on ground uphill reads as a tree) and
     took small gaps whose sky was still the trees a few metres off.
     cx, cy (cell centre, metres from the pin), dz (its ground minus the
-    pin's), median tree altitude capped at the top of the encoding (a screen:
-    confirm_spot reads the sight floor), and open_pct."""
+    pin's), the median tree altitude over its best BEST_ARC degrees, capped at
+    the top of the encoding (a screen: confirm_spot reads the sight floor),
+    and open_pct."""
     g, top, c = sky_grid(dx, dy, z, cls)
     veg = np.isfinite(top)
     X, Y = np.meshgrid(c, c, indexing='ij')
@@ -441,7 +451,7 @@ def sky_candidates(dx, dy, z, cls, ground):
                 t = np.full(360, cap)
             else:
                 t = skyline(vx - c[i], vy - c[j], vz, g[i, j] + bh.EYE, MIN_R, cell=1.0)
-            out.append((c[i], c[j], g[i, j] - ground, float(np.median(np.minimum(t, cap))), open_pct(t)))
+            out.append((c[i], c[j], g[i, j] - ground, best_arc_median(np.minimum(t, cap)), open_pct(t)))
     return tuple(np.array(col, float) for col in zip(*out)) if out else tuple(np.zeros(0) for _ in range(5))
 
 
@@ -526,8 +536,9 @@ def confirm_spot(dx, dy, z, cls, ground, cx, cy, dz, med, ridge=None, ok_access=
     about 10 degrees high on leaf-off crowns, so every candidate within
     CONFIRM_DEG of CLOSED_DEG on the grid, nearest first and at most
     CONFIRM_MAX of them, is read again from the raw vegetation returns within
-    SKY_R of it, as the median sight floor against the pin's ridge (the tree
-    line, or the window under the crowns where there is one), stopping at the
+    SKY_R of it, as the median sight floor over its best BEST_ARC degrees
+    against the pin's ridge (the tree line, or the window under the crowns
+    where there is one), the bar closed_in flagged the site on, stopping at the
     first at or under CLOSED_DEG. reachable candidates (ok_access) go first,
     so one on a path farther out wins over a nearer one in the woods, but
     they get half the checks: a trail through a stand can offer dozens that
@@ -548,7 +559,7 @@ def confirm_spot(dx, dy, z, cls, ground, cx, cy, dz, med, ridge=None, ok_access=
         near = (np.abs(tx - cx[k]) < SKY_R) & (np.abs(ty - cy[k]) < SKY_R)
         ex, ey, eye = tx[near] - cx[k], ty[near] - cy[k], ground + dz[k] + bh.EYE
         f, b = canopy_bands(ex, ey, tz[near], eye, MIN_R)   # nan where no window, which sight_floor reads as none
-        raw[k] = float(np.median(sight_floor(skyline(ex, ey, tz[near], eye, MIN_R), f, b, ridge)))
+        raw[k] = best_arc_median(sight_floor(skyline(ex, ey, tz[near], eye, MIN_R), f, b, ridge))
         if raw[k] <= CLOSED_DEG:
             break
     return pick_spot(cx, cy, raw, ok_access), raw
@@ -591,7 +602,7 @@ def suggest(site, rec):
     ridge = terrain_for(site).get('alt')
     now = sight_floor(rec['t'], rec.get('f'), rec.get('b'), ridge)
     row = {'name': site['name'], 'key': site['key'], 'lat': lat, 'lon': lon,
-           'before': float(np.median(now)), 'open_before': open_pct(now), 'spot': None}
+           'before': best_arc_median(now), 'open_before': open_pct(now), 'spot': None}
     cx, cy, dz, med, _ = sky_candidates(dx, dy, z, c, ground) if ground is not None else [np.zeros(0)] * 5
     # None when overpass did not answer: candidates then go nearest first as
     # before, and the row says reach unknown
@@ -605,7 +616,7 @@ def suggest(site, rec):
         then = sight_floor(p['t'], p['f'], p['b'], ridge) if p else None
         row.update(spot=(round(slat, 6), round(slon, 6)), moved_m=math.hypot(*spot),
                    bearing=math.degrees(math.atan2(spot[0], spot[1])) % 360, dz_m=float(dz[k]),
-                   after=float(np.median(then)) if p else None,
+                   after=best_arc_median(then) if p else None,
                    open_after=open_pct(then) if p else None,
                    under_trees_m=walk_under_trees(dx, dy, z, c, ground, spot),
                    on_path=None if reach is None else bool(reach[k]))
@@ -624,7 +635,7 @@ def suggest(site, rec):
 def suggest_params():
     """the tunables a saved row was computed with; a retuned constant is a
     reason to recompute, the same as a moved pin"""
-    return [CLOSED_DEG, SEARCH_R, LEVEL_M, CAND_STEP, SKY_R, OPEN_DEG, CLEAR_H, CONFIRM_DEG, CONFIRM_MAX,
+    return [CLOSED_DEG, BEST_ARC, SEARCH_R, LEVEL_M, CAND_STEP, SKY_R, OPEN_DEG, CLEAR_H, CONFIRM_DEG, CONFIRM_MAX,
             VGAP_M, THROUGH_M, WINDOW_MIN_DEG, ACCESS_M]
 
 
@@ -670,15 +681,16 @@ def review_md(rows):
     with satellite links for the pin and the proposed spot"""
     sat = 'https://www.google.com/maps/@%.6f,%.6f,40m/data=!3m1!1e3'
     out = ['# Canopy standing spots for review', '',
-           'Sites whose median sight floor from the pin is over %g degrees. For each: approve the '
+           'Sites whose median sight floor from the pin, over the best %g degrees of sky, is over %g '
+           'degrees. For each: approve the '
            'proposed spot, reject it (the site really is under trees), or give a better coordinate, and '
            'say whether the walk to it needs a line on the card. "now" and "open now" are from the '
-           'pin, "then" and "open then" from the spot: the median lowest altitude a star is seen at, '
-           'looking under the canopy where it leaves a window, and the percent of azimuths where that '
-           'is under %g degrees. "up/down" is the spot\'s ground against the '
+           'pin, "then" and "open then" from the spot: the median lowest altitude a star is seen at '
+           'over the best half of the sky (%g degrees), looking under the canopy where it leaves a '
+           'window, and the percent of all azimuths where that is under %g degrees. "up/down" is the spot\'s ground against the '
            'pin\'s; "walk under trees" is metres of the straight line from the pin that pass under a '
            'crown; "reach" is whether the spot is within %g m of an osm road, path or parking area '
-           '(unknown when overpass did not answer).' % (CLOSED_DEG, OPEN_DEG, ACCESS_M), '',
+           '(unknown when overpass did not answer).' % (BEST_ARC, CLOSED_DEG, BEST_ARC, OPEN_DEG, ACCESS_M), '',
            '| site | key | now | open now | proposed | moved | bearing | up/down | then | open then | walk under trees | reach | pin | spot |',
            '|---|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---|---|---|']
     for r in sorted(rows, key=lambda r: -r['before']):
