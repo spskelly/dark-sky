@@ -32,6 +32,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
@@ -86,10 +87,18 @@ CONFIRM_DEG = 15.0   # degrees over CLOSED_DEG a candidate's grid median may rea
 CONFIRM_MAX = 40     # candidates raycast through the raw points at most, so a closed site costs a bounded time. placeholder
 OPEN_DEG = 20.0      # degrees. an azimuth whose tree line is under this counts as open sky, the cut the 2026-09-18 probe counted. placeholder
 CLEAR_H = 3.0        # metres of vegetation over the ground before it is in the way, over the walk and over a candidate spot's own cell; shrubs under this are not. placeholder
+ACCESS_M = 8.0       # metres. a spot this close to an osm road, path or parking area is one people can walk to. placeholder
 WORKERS = 32         # concurrent node downloads. each connection runs at 0.2 to 0.3 MB/s from us-west-2, so throughput scales with connections: 8 gave 1.6 MB/s, 64 about 10 (2026-09-17)
 TREES = (3, 4, 5)
 GROUND, UNCLASS, BUILDING = 2, 1, 6
 NOISE = (7, 18)
+
+# the osm highway values that are a way in on foot or by car; the review crops draw the same two sets
+ROADS = {'motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'unclassified', 'residential', 'service', 'road'}
+PATHS = {'footway', 'path', 'steps', 'track', 'bridleway', 'cycleway', 'pedestrian'}
+# tools/overpass.mjs's first two mirrors and its user agent: overpass-api.de refuses a default one
+OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter']
+UA = {'User-Agent': 'dark-sky-calendar tools (+https://github.com/spskelly/dark-sky)'}
 
 R_MERC = 6378137.0
 
@@ -435,29 +444,91 @@ def sky_candidates(dx, dy, z, cls, ground):
     return tuple(np.array(col, float) for col in zip(*out)) if out else tuple(np.zeros(0) for _ in range(5))
 
 
-def pick_spot(cx, cy, median):
+def pick_spot(cx, cy, median, ok_access=None):
     """index of the nearest candidate whose median is at or under CLOSED_DEG,
-    or None"""
+    the nearest reachable one when any of those is (ok_access, from
+    near_access), or None"""
     ok = np.asarray(median) <= CLOSED_DEG
     if not ok.any():
         return None
+    if ok_access is not None and (ok & ok_access).any():
+        ok = ok & ok_access
     return int(np.argmin(np.where(ok, np.hypot(cx, cy), np.inf)))
 
 
-def confirm_spot(dx, dy, z, cls, ground, cx, cy, dz, med, ridge=None):
+def near_access(cx, cy, ways, lat, lon):
+    """which candidates people can get to: within ACCESS_M of an osm road or
+    path (the ROADS and PATHS highway values) or of a parking area's edge, or
+    inside the parking area. ways are overpass ways with their geometry,
+    around the pin at lat, lon. distance is to the segment itself, not to
+    samples along it"""
+    x0, y0 = mercator(lat, lon)
+    px, py = np.asarray(cx, float)[:, None], np.asarray(cy, float)[:, None]
+    ok = np.zeros(len(px), bool)
+    for w in ways:
+        t = w.get('tags', {})
+        lot = t.get('amenity') == 'parking'
+        if not (lot or t.get('highway') in ROADS | PATHS) or len(w.get('geometry') or []) < 2:
+            continue
+        v = np.array([local_xy(*mercator(g['lat'], g['lon']), x0, y0, lat) for g in w['geometry']])
+        ax, ay, ex, ey = v[:-1, 0], v[:-1, 1], v[1:, 0] - v[:-1, 0], v[1:, 1] - v[:-1, 1]
+        s = np.clip(((px - ax) * ex + (py - ay) * ey) / np.maximum(ex * ex + ey * ey, 1e-12), 0.0, 1.0)
+        ok |= (np.hypot(px - ax - s * ex, py - ay - s * ey) <= ACCESS_M).any(axis=1)
+        if lot and np.allclose(v[0], v[-1]):
+            # even-odd: a ray east from a candidate inside the closed ring
+            # crosses its edges an odd number of times
+            cross = ((ay > py) != (ay + ey > py)) & (px < ax + (py - ay) * ex / np.where(ey == 0, 1.0, ey))
+            ok |= cross.sum(axis=1) % 2 == 1
+    return ok
+
+
+def osm_access(site):
+    """the osm roads, paths and parking within SEARCH_R + ACCESS_M of the pin,
+    as overpass ways with their geometry, or None when no mirror answered. one
+    answer per site is kept under CACHE/osm, written .tmp then renamed and
+    taken only for the same pin and box; a failure is not kept, so the next
+    run asks again"""
+    lat, lon = site['view_lat'], site['view_lon']
+    r = SEARCH_R + ACCESS_M
+    path = os.path.join(CACHE, 'osm', bh.cache_name({'name': site['name'], 'ov_id': site.get('ov_id')}))
+    if os.path.exists(path):
+        with open(path, encoding='utf-8') as f:
+            got = json.load(f)
+        if got.get('at') == [lat, lon, r]:
+            return got['elements']
+    s, w = from_local(-r, -r, lat, lon)
+    n, e = from_local(r, r, lat, lon)
+    bb = '%.6f,%.6f,%.6f,%.6f' % (s, w, n, e)
+    q = '[out:json][timeout:60];(way["highway"](%s);way["amenity"="parking"](%s););out geom;' % (bb, bb)
+    for url in OVERPASS:
+        try:
+            req = urllib.request.Request(url, data=urllib.parse.urlencode({'data': q}).encode(), headers=UA)
+            with urllib.request.urlopen(req, timeout=90) as resp:
+                ways = json.loads(resp.read())['elements']
+        except (OSError, ValueError, KeyError) as err:   # urllib's errors and timeouts are all OSErrors
+            print('  overpass %s: %s' % (url, err))
+            continue
+        _write(path, json.dumps({'at': [lat, lon, r], 'elements': ways}).encode('utf-8'))
+        return ways
+    return None
+
+
+def confirm_spot(dx, dy, z, cls, ground, cx, cy, dz, med, ridge=None, ok_access=None):
     """the grid screens, the raw points decide. the grid's cell tops read
     about 10 degrees high on leaf-off crowns, so every candidate within
     CONFIRM_DEG of CLOSED_DEG on the grid, nearest first and at most
     CONFIRM_MAX of them, is read again from the raw vegetation returns within
     SKY_R of it, as the median sight floor against the pin's ridge (the tree
     line, or the window under the crowns where there is one), stopping at the
-    first at or under CLOSED_DEG. returns that candidate's index (or None)
-    and the raw medians, inf where none was run. a candidate under its own
+    first at or under CLOSED_DEG. reachable candidates (ok_access) go first,
+    so one on a path farther out wins over a nearer one in the woods.
+    returns that candidate's index (or None) and the raw medians, inf where none was run. a candidate under its own
     crown reads the cap on the grid, so it never reaches this check."""
     raw = np.full(len(med), np.inf)
     tm = np.isin(cls, TREES)
     tx, ty, tz = dx[tm], dy[tm], z[tm]
-    order = [k for k in np.argsort(np.hypot(cx, cy), kind='stable') if med[k] <= CLOSED_DEG + CONFIRM_DEG]
+    reach = np.zeros(len(med), bool) if ok_access is None else np.asarray(ok_access, bool)
+    order = [k for k in np.lexsort((np.hypot(cx, cy), ~reach)) if med[k] <= CLOSED_DEG + CONFIRM_DEG]
     for k in order[:CONFIRM_MAX]:
         near = (np.abs(tx - cx[k]) < SKY_R) & (np.abs(ty - cy[k]) < SKY_R)
         ex, ey, eye = tx[near] - cx[k], ty[near] - cy[k], ground + dz[k] + bh.EYE
@@ -465,7 +536,7 @@ def confirm_spot(dx, dy, z, cls, ground, cx, cy, dz, med, ridge=None):
         raw[k] = float(np.median(sight_floor(skyline(ex, ey, tz[near], eye, MIN_R), f, b, ridge)))
         if raw[k] <= CLOSED_DEG:
             break
-    return pick_spot(cx, cy, raw), raw
+    return pick_spot(cx, cy, raw, ok_access), raw
 
 
 def from_local(dx, dy, lat, lon):
@@ -507,7 +578,11 @@ def suggest(site, rec):
     row = {'name': site['name'], 'key': site['key'], 'lat': lat, 'lon': lon,
            'before': float(np.median(now)), 'open_before': open_pct(now), 'spot': None}
     cx, cy, dz, med, _ = sky_candidates(dx, dy, z, c, ground) if ground is not None else [np.zeros(0)] * 5
-    k, raw = confirm_spot(dx, dy, z, c, ground, cx, cy, dz, med, ridge)
+    # None when overpass did not answer: candidates then go nearest first as
+    # before, and the row says reach unknown
+    ways = osm_access(site) if len(cx) else None
+    reach = near_access(cx, cy, ways, lat, lon) if ways is not None else None
+    k, raw = confirm_spot(dx, dy, z, c, ground, cx, cy, dz, med, ridge, reach)
     if k is not None:
         spot = (float(cx[k]), float(cy[k]))
         slat, slon = from_local(spot[0], spot[1], lat, lon)
@@ -517,7 +592,8 @@ def suggest(site, rec):
                    bearing=math.degrees(math.atan2(spot[0], spot[1])) % 360, dz_m=float(dz[k]),
                    after=float(np.median(then)) if p else None,
                    open_after=open_pct(then) if p else None,
-                   under_trees_m=walk_under_trees(dx, dy, z, c, ground, spot))
+                   under_trees_m=walk_under_trees(dx, dy, z, c, ground, spot),
+                   on_path=None if reach is None else bool(reach[k]))
     elif len(med):
         # the lowest candidate, nearest first on a tie (every one under a
         # crown reads the cap), so the table can say how far off it is. the
@@ -534,7 +610,7 @@ def suggest_params():
     """the tunables a saved row was computed with; a retuned constant is a
     reason to recompute, the same as a moved pin"""
     return [CLOSED_DEG, SEARCH_R, LEVEL_M, CAND_STEP, SKY_R, OPEN_DEG, CLEAR_H, CONFIRM_DEG, CONFIRM_MAX,
-            VGAP_M, THROUGH_M, WINDOW_MIN_DEG]
+            VGAP_M, THROUGH_M, WINDOW_MIN_DEG, ACCESS_M]
 
 
 def suggest_path(site):
@@ -544,10 +620,12 @@ def suggest_path(site):
 def suggest_ok(row, site):
     """a saved row is taken only when the coordinate it was computed for and
     the tunables it used still match, the same test cache_ok runs for the
-    canopy cache itself."""
+    canopy cache itself. a spot whose reach is unknown (overpass did not
+    answer) is computed again, so the next run asks overpass again."""
     return (abs(row.get('lat', 1e9) - site['view_lat']) < 1e-9
             and abs(row.get('lon', 1e9) - site['view_lon']) < 1e-9
-            and row.get('params') == suggest_params())
+            and row.get('params') == suggest_params()
+            and not (row.get('spot') is not None and row.get('on_path') is None))
 
 
 def load_suggested(site):
@@ -584,19 +662,21 @@ def review_md(rows):
            'looking under the canopy where it leaves a window, and the percent of azimuths where that '
            'is under %g degrees. "up/down" is the spot\'s ground against the '
            'pin\'s; "walk under trees" is metres of the straight line from the pin that pass under a '
-           'crown.' % (CLOSED_DEG, OPEN_DEG), '',
-           '| site | key | now | open now | proposed | moved | bearing | up/down | then | open then | walk under trees | pin | spot |',
-           '|---|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---|---|']
+           'crown; "reach" is whether the spot is within %g m of an osm road, path or parking area '
+           '(unknown when overpass did not answer).' % (CLOSED_DEG, OPEN_DEG, ACCESS_M), '',
+           '| site | key | now | open now | proposed | moved | bearing | up/down | then | open then | walk under trees | reach | pin | spot |',
+           '|---|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---|---|---|']
     for r in sorted(rows, key=lambda r: -r['before']):
         pin = '[pin](%s)' % (sat % (r['lat'], r['lon']))
         if r['spot'] is None:
-            out.append('| %s | %s | %.0f | %.0f%% | %s | | | | | | | %s | |' % (
+            out.append('| %s | %s | %.0f | %.0f%% | %s | | | | | | | | %s | |' % (
                 r['name'], r['key'], r['before'], r['open_before'], no_spot(r), pin))
             continue
-        out.append('| %s | %s | %.0f | %.0f%% | %.6f, %.6f | %.0f m | %03d | %+.1f m | %s | %s | %d m | %s | [spot](%s) |' % (
+        out.append('| %s | %s | %.0f | %.0f%% | %.6f, %.6f | %.0f m | %03d | %+.1f m | %s | %s | %d m | %s | %s | [spot](%s) |' % (
             r['name'], r['key'], r['before'], r['open_before'], r['spot'][0], r['spot'][1], r['moved_m'],
             round(r['bearing']) % 360, r['dz_m'], 'n/a' if r['after'] is None else '%.0f' % r['after'],
-            'n/a' if r['open_after'] is None else '%.0f%%' % r['open_after'], r['under_trees_m'], pin,
+            'n/a' if r['open_after'] is None else '%.0f%%' % r['open_after'], r['under_trees_m'],
+            {True: 'on path', False: 'off path'}.get(r.get('on_path'), 'unknown'), pin,
             sat % tuple(r['spot'])))
     return '\n'.join(out) + '\n'
 

@@ -26,6 +26,9 @@ import build_horizons as bh
 # no test reads or writes the real lidar store: a stored ept.json would answer
 # a test that stubs the network with a 404, and a test would leave files on H:
 bc.STORE = ''
+# and none reaches overpass: a suggest test that forgets to stub osm_access
+# gets no mirror to ask, so reach reads unknown instead of a real request
+bc.OVERPASS = []
 
 LAT, LON = 35.3907, -83.0372     # doubletop, the site that started this
 
@@ -717,6 +720,9 @@ class TestStandingSpot(unittest.TestCase):
         no_ridge = mock.patch.object(bc, 'terrain_for', return_value={})
         no_ridge.start()
         self.addCleanup(no_ridge.stop)
+        no_osm = mock.patch.object(bc, 'osm_access', return_value=None)   # overpass did not answer
+        no_osm.start()
+        self.addCleanup(no_osm.stop)
         with self.small(15.0), mock.patch.object(bc, 'fetch_site', side_effect=self.fetch_of(FOREST)):
             row = bc.suggest(site, rec)
         self.assertIsNone(row['spot'])
@@ -742,6 +748,10 @@ class TestStandingSpot(unittest.TestCase):
         self.assertEqual(row['dz_m'], 0.0)
         self.assertGreater(row['open_after'], 25.0)
         self.assertNotIn('best_m', row)
+        self.assertIsNone(row['on_path'])   # no osm answer: reach unknown
+        with self.small(25.0), mock.patch.object(bc, 'fetch_site', side_effect=self.fetch_of(RING)),              mock.patch.object(bc, 'osm_access', return_value=[]):
+            row = bc.suggest(site, rec)
+        self.assertIs(row['on_path'], False)   # osm answered with nothing near: off path
 
     def test_from_local_inverts_local_xy(self):
         lat, lon = bc.from_local(12.0, -7.0, LAT, LON)
@@ -760,7 +770,7 @@ class TestStandingSpot(unittest.TestCase):
     def test_review_table_has_a_row_per_site_and_says_when_there_is_no_spot(self):
         rows = [{'name': 'A', 'key': 'A', 'lat': 35.1, 'lon': -83.1, 'before': 70.0, 'spot': (35.10001, -83.10002),
                  'moved_m': 12.3, 'bearing': 45.0, 'after': 20.0, 'under_trees_m': 4,
-                 'open_before': 5.0, 'dz_m': -2.46, 'open_after': 61.4},
+                 'open_before': 5.0, 'dz_m': -2.46, 'open_after': 61.4, 'on_path': False},
                 {'name': 'B', 'key': 'B', 'lat': 35.2, 'lon': -83.2, 'before': 50.0, 'spot': None,
                  'open_before': 0.0, 'best_m': 23.2, 'best_median': 35.8, 'best_dz_m': -3.1, 'best_by': 'raw'},
                 {'name': 'C', 'key': 'C', 'lat': 35.3, 'lon': -83.3, 'before': 40.0, 'spot': None, 'open_before': 0.0},
@@ -776,6 +786,8 @@ class TestStandingSpot(unittest.TestCase):
         self.assertIn('| -2.5 m |', lines[0])
         self.assertIn('| 61% |', lines[0])
         self.assertIn('| key |', md)         # header names the column
+        self.assertIn('| reach |', md)
+        self.assertIn('| off path |', lines[0])
         self.assertIn('| A | A |', lines[0])  # site and key both show for this row
         self.assertIn('35.100010, -83.100020', lines[0])
         self.assertIn('https://www.google.com/maps/@35.100010,-83.100020,40m/data=!3m1!1e3', lines[0])
@@ -790,6 +802,7 @@ class TestStandingSpot(unittest.TestCase):
                  'after': 20.0, 'under_trees_m': 4, 'open_before': 5.0, 'dz_m': 0.0, 'open_after': 61.4}]
         line = [l for l in bc.review_md(rows).splitlines() if l.startswith('| A ')][0]
         self.assertIn('| 000 |', line)
+        self.assertIn('| unknown |', line)   # a row with no on_path, or osm unavailable
 
     def test_review_table_accepts_a_spot_loaded_back_from_json_as_a_list(self):
         """json has no tuples: a row read back from its cache file carries
@@ -799,6 +812,66 @@ class TestStandingSpot(unittest.TestCase):
                  'after': 20.0, 'under_trees_m': 4, 'open_before': 5.0, 'dz_m': 0.0, 'open_after': 61.4}]
         line = [l for l in bc.review_md(rows).splitlines() if l.startswith('| A ')][0]
         self.assertIn('35.100010, -83.100020', line)
+
+
+class TestAccess(unittest.TestCase):
+
+    def test_a_candidate_beside_a_path_is_reachable_and_one_in_the_woods_is_not(self):
+        lat, lon = LAT, LON
+        # a path running east-west 20 m north of the pin
+        way = {'tags': {'highway': 'footway'}, 'geometry': [
+            dict(zip(('lat', 'lon'), bc.from_local(-30.0, 20.0, lat, lon))),
+            dict(zip(('lat', 'lon'), bc.from_local(30.0, 20.0, lat, lon)))]}
+        ok = bc.near_access(np.array([0.0, 0.0]), np.array([18.0, -20.0]), [way], lat, lon)
+        self.assertEqual(list(ok), [True, False])
+
+    def test_inside_a_parking_polygon_is_reachable(self):
+        lat, lon = LAT, LON
+        ring = [bc.from_local(x, y, lat, lon) for x, y in ((-10, -10), (10, -10), (10, 10), (-10, 10), (-10, -10))]
+        lot = {'tags': {'amenity': 'parking'}, 'geometry': [{'lat': a, 'lon': b} for a, b in ring]}
+        self.assertTrue(bc.near_access(np.array([0.0]), np.array([0.0]), [lot], lat, lon)[0])
+
+    def test_pick_prefers_the_reachable_spot_over_a_nearer_one_in_the_woods(self):
+        cx, cy = np.array([5.0, 12.0]), np.array([0.0, 0.0])
+        median = np.array([20.0, 25.0])
+        self.assertEqual(bc.pick_spot(cx, cy, median, np.array([False, True])), 1)
+        self.assertEqual(bc.pick_spot(cx, cy, median, np.array([False, False])), 0)
+
+    def test_a_highway_that_is_not_a_road_or_path_does_not_count(self):
+        lat, lon = LAT, LON
+        way = {'tags': {'highway': 'proposed'}, 'geometry': [
+            dict(zip(('lat', 'lon'), bc.from_local(-30.0, 0.0, lat, lon))),
+            dict(zip(('lat', 'lon'), bc.from_local(30.0, 0.0, lat, lon)))]}
+        self.assertFalse(bc.near_access(np.array([0.0]), np.array([0.0]), [way], lat, lon)[0])
+
+    def test_confirm_walks_reachable_candidates_first(self):
+        """open ground, so every candidate clears: the nearest is the pin, but
+        the one reachable candidate, farther out, is checked first and wins"""
+        dx, dy, z, c = arrays(lattice(lambda a, b: 0.0))
+        with mock.patch.multiple(bc, SEARCH_R=4.0, SKY_R=5.0):
+            cx, cy, dz, med, op = bc.sky_candidates(dx, dy, z, c, 0.0)
+            far = int(np.argmax(np.hypot(cx, cy)))
+            ok = np.arange(len(cx)) == far
+            k, raw = bc.confirm_spot(dx, dy, z, c, 0.0, cx, cy, dz, med, None, ok)
+            near, _ = bc.confirm_spot(dx, dy, z, c, 0.0, cx, cy, dz, med)
+        self.assertEqual(k, far)
+        self.assertNotEqual(near, far)   # without the mask the nearest wins
+        self.assertEqual(int(np.isfinite(raw).sum()), 1)   # stopped at the first that cleared
+
+    def test_osm_access_caches_an_answer_and_not_a_failure(self):
+        site = {'name': 'Gorges', 'ov_id': None, 'view_lat': LAT, 'view_lon': LON}
+        body = json.dumps({'elements': [{'type': 'way', 'tags': {'highway': 'service'}, 'geometry': []}]}).encode()
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(bc, 'CACHE', d), \
+             mock.patch.object(bc, 'OVERPASS', ['http://one.invalid/', 'http://two.invalid/']):
+            with mock.patch.object(bc.urllib.request, 'urlopen', side_effect=urllib.error.URLError('down')) as down, \
+                 contextlib.redirect_stdout(io.StringIO()):   # keep the suite output clean
+                self.assertIsNone(bc.osm_access(site))
+            self.assertEqual(down.call_count, 2)   # both endpoints tried
+            self.assertFalse(os.path.exists(os.path.join(d, 'osm', 'gorges.json')))   # so a later run asks again
+            with mock.patch.object(bc.urllib.request, 'urlopen', return_value=_fake_response(body)):
+                self.assertEqual(len(bc.osm_access(site)), 1)
+            with mock.patch.object(bc.urllib.request, 'urlopen', side_effect=AssertionError('cached')):
+                self.assertEqual(bc.osm_access(site)[0]['tags'], {'highway': 'service'})
 
 
 class TestSuggestCheckpoint(unittest.TestCase):
@@ -838,6 +911,15 @@ class TestSuggestCheckpoint(unittest.TestCase):
                     self.assertIn('Site B (ok)', f.read())
             finally:
                 bc.CACHE = saved
+
+    def test_a_spot_whose_reach_is_unknown_is_asked_again(self):
+        """overpass not answering is not kept, so the next run recomputes the
+        row and asks again; a known reach, or no spot at all, is kept"""
+        site = {'view_lat': 35.9, 'view_lon': -82.2}
+        row = {'lat': 35.9, 'lon': -82.2, 'params': bc.suggest_params(), 'spot': [35.9, -82.2]}
+        self.assertFalse(bc.suggest_ok(dict(row, on_path=None), site))
+        self.assertTrue(bc.suggest_ok(dict(row, on_path=False), site))
+        self.assertTrue(bc.suggest_ok(dict(row, spot=None), site))
 
     def test_a_row_already_on_disk_at_the_same_coordinate_and_params_is_reused(self):
         with tempfile.TemporaryDirectory() as d:
@@ -1022,13 +1104,14 @@ class TestSightFloor(unittest.TestCase):
         rec = {'t': [70.0] * 360, 'f': [-10.0] * 360, 'b': [45.0] * 360}
         fetch = TestStandingSpot.fetch_of(self, FOREST)
         with mock.patch.multiple(bc, SEARCH_R=15.0, SKY_R=5.0), mock.patch.object(bc, 'fetch_site', side_effect=fetch), \
-             mock.patch.object(bc, 'terrain_for', return_value={'alt': [3.0] * 360}):
+             mock.patch.object(bc, 'terrain_for', return_value={'alt': [3.0] * 360}), \
+             mock.patch.object(bc, 'osm_access', return_value=None):
             row = bc.suggest(site, rec)
         self.assertEqual(row['before'], 3.0)
         self.assertEqual(row['open_before'], 100.0)
 
     def test_suggest_params_carry_the_window_tunables(self):
-        self.assertEqual(bc.suggest_params()[-3:], [bc.VGAP_M, bc.THROUGH_M, bc.WINDOW_MIN_DEG])
+        self.assertEqual(bc.suggest_params()[-4:], [bc.VGAP_M, bc.THROUGH_M, bc.WINDOW_MIN_DEG, bc.ACCESS_M])
 
 
 class TestCanopyEntryWindows(unittest.TestCase):

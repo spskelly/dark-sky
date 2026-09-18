@@ -51,6 +51,10 @@ def row_html(n, r):
             flags.append('<span class="flag">%s %.1f m %s the pin</span>' % ('climbs' if r['dz_m'] > 0 else 'drops', abs(r['dz_m']), 'above' if r['dz_m'] > 0 else 'below'))
         if r['under_trees_m'] and r['under_trees_m'] >= 0.8 * r['moved_m']:
             flags.append('<span class="flag">the straight walk is under trees the whole way</span>')
+        if r.get('on_path') is False:
+            flags.append('<span class="flag">off path: no osm road, path or parking within %g m of the spot</span>' % bc.ACCESS_M)
+        elif r.get('on_path') is None:
+            flags.append('<span class="flag">reach unknown: overpass did not answer</span>')
     kind = 'overlook' if r['key'].startswith('ov:') else 'spot'
     head = '<div class="site"><span class="rid">R%d</span><b>%s</b> <span class="kind">%s</span><code>%s</code></div>' % (
         n, e(r['name']), kind, e(r['key']))

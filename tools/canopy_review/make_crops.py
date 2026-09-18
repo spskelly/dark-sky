@@ -19,10 +19,6 @@ HALF_M = 110.0     # metres from the pin to the crop edge: the 60 m ring plus ro
 PX = 560
 NAIP = ('https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPPlus/ImageServer/exportImage'
         '?bbox=%f,%f,%f,%f&bboxSR=3857&imageSR=3857&size=%d,%d&format=jpg&f=image')
-OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter']
-UA = {'User-Agent': 'dark-sky-calendar tools (+https://github.com/spskelly/dark-sky)'}
-ROADS = {'motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'unclassified', 'residential', 'service', 'road'}
-PATHS = {'footway', 'path', 'steps', 'track', 'bridleway', 'cycleway', 'pedestrian'}
 
 params = bc.suggest_params()
 rows = []
@@ -57,9 +53,9 @@ def osm():
         bb = '%f,%f,%f,%f' % (r['lat'] - d, r['lon'] - dl, r['lat'] + d, r['lon'] + dl)
         parts += ['way["highway"](%s);' % bb, 'way["amenity"="parking"](%s);' % bb]
     q = '[out:json][timeout:90];(%s);out geom;' % ''.join(parts)
-    for url in OVERPASS:
+    for url in bc.OVERPASS:
         try:
-            req = urllib.request.Request(url, data=urllib.parse.urlencode({'data': q}).encode(), headers=UA)
+            req = urllib.request.Request(url, data=urllib.parse.urlencode({'data': q}).encode(), headers=bc.UA)
             with urllib.request.urlopen(req, timeout=120) as resp:
                 data = json.loads(resp.read())
             with open(path + '.tmp', 'w', encoding='utf-8') as f:
@@ -74,7 +70,7 @@ def osm():
 
 def naip(r):
     x0, y0, x1, y1 = box(r)
-    with urllib.request.urlopen(urllib.request.Request(NAIP % (x0, y0, x1, y1, PX, PX), headers=UA), timeout=60) as resp:
+    with urllib.request.urlopen(urllib.request.Request(NAIP % (x0, y0, x1, y1, PX, PX), headers=bc.UA), timeout=60) as resp:
         return resp.read()
 
 
@@ -91,10 +87,10 @@ def render(r, blob, ways):
         t = w.get('tags', {})
         if t.get('amenity') == 'parking':
             d.polygon(pts, fill=(255, 255, 255, 45), outline=(255, 255, 255, 230))
-        elif t.get('highway') in ROADS:
+        elif t.get('highway') in bc.ROADS:
             d.line(pts, fill=(20, 20, 20, 200), width=7, joint='curve')
             d.line(pts, fill=(235, 235, 235, 235), width=4, joint='curve')
-        elif t.get('highway') in PATHS:
+        elif t.get('highway') in bc.PATHS:
             for a, b in zip(pts, pts[1:]):
                 n = max(1, int(math.hypot(b[0] - a[0], b[1] - a[1]) // 6))
                 for k in range(0, n, 2):
