@@ -733,6 +733,7 @@
     <div class="group" role="group" aria-label="where to look from">
       <span>from</span>
       <select id="sky-place" aria-label="place to view the sky from"></select>
+      <button id="sky-pick" aria-pressed="false">pick a point on the map</button>
     </div>
   </div>
   <div id="sky-viewer">
@@ -4463,10 +4464,35 @@ function fillSkyPlaces() {
   const ovs = document.createElement('optgroup'); ovs.label = 'parkway overlooks';
   for (const o of OVERLOOKS.filter(o => OVERLOOK_HORIZONS[o.id]).sort(byName))
     ovs.appendChild(opt('ov:' + o.id, o.name + (o.mp !== undefined ? ', mp ' + o.mp : '')));
-  sel.append(spots, ovs);
+  sel.append(spots, ovs, opt('__point', 'a point picked on the map'));
   sel.addEventListener('change', () => {
-    if (sel.value.startsWith('ov:')) openSkyViewerForOverlook(sel.value.slice(3)); else openSkyViewerForSpot(sel.value);
+    if (sel.value === '__point') armPicking('sky');
+    else if (sel.value.startsWith('ov:')) openSkyViewerForOverlook(sel.value.slice(3));
+    else openSkyViewerForSpot(sel.value);
   });
+  document.getElementById('sky-pick').addEventListener('click', () => {
+    if (spotState.picking === 'sky') setPicking(false); else armPicking('sky');
+  });
+}
+
+// anywhere on the map: no terrain yet (phase 2 of the viewer spec brings the
+// tiles), so the horizon is flat at 0 degrees and the caveat says so. the
+// key carries the point, so a return visit needs no second key.
+const SKY_POINT_CAVEAT = 'terrain is not modelled for a picked point yet: the horizon is drawn flat at 0 degrees, so the real ridge sits higher: the moon and the core clear it later, and drop behind it earlier, than shown';
+function openSkyViewerForPoint(lat, lon, opts) {
+  const key = 'pt:' + lat.toFixed(4) + ',' + lon.toFixed(4);
+  openSkyViewer({
+    key, title: 'a point on the map', sub: lat.toFixed(4) + ', ' + lon.toFixed(4),
+    horizon: new Float64Array(360), lat, lon, elevM: 0, caveat: SKY_POINT_CAVEAT,
+  }, opts);
+  placeSkyPoint(lat, lon);
+}
+// the marker for it, once there is a map to put it on
+function placeSkyPoint(lat, lon) {
+  if (!spotState.map) return;
+  if (spotState.skyMarker) spotState.skyMarker.remove();
+  spotState.skyMarker = L.circleMarker([lat, lon], { radius: 7, color: '#ecc878', weight: 2, fillColor: '#ecc878', fillOpacity: 0.35 })
+    .bindPopup('<b>sky from here</b>').addTo(spotState.map);
 }
 
 // the tab showing: the chooser filled, a place loaded if none is yet (the
@@ -4488,7 +4514,10 @@ function paintSkyViewer() {
   const els = skyViewerEls();
   if (!els.root || !viewerState.key) return;
   const { title, sub, horizon, lat, lon, elevM, sky, caveat, date } = viewerState;
-  if (els.place && [...els.place.options].some(o => o.value === viewerState.key)) els.place.value = viewerState.key;
+  if (els.place) {
+    const want = viewerState.key.startsWith('pt:') ? '__point' : viewerState.key;
+    if ([...els.place.options].some(o => o.value === want)) els.place.value = want;
+  }
   // a date other than tonight is named in the title itself, so a screenshot
   // or a link cannot be mistaken for what the sky looks like tonight
   els.title.textContent = date ? `${title}, ${fmtEasternDay(date.getFullYear(), date.getMonth() + 1, date.getDate())}` : title;
@@ -5391,7 +5420,8 @@ function initMap() {
   map.on('baselayerchange', e => remember('darksky.basemap', e.name));
   map.on('click', e => {
     if (!spotState.picking) return;
-    setHome(e.latlng.lat, e.latlng.lng);
+    if (spotState.picking === 'sky') openSkyViewerForPoint(e.latlng.lat, e.latlng.lng);
+    else setHome(e.latlng.lat, e.latlng.lng);
     setPicking(false);
   });
   // open on a wide screen, where it costs nothing; an icon on a phone, where
@@ -5444,6 +5474,10 @@ function initMap() {
   // does not need either
   const panoRaw = String(recall('darksky.pano', ''));
   if (panoRaw.startsWith('ov:')) openSkyViewerForOverlook(panoRaw.slice(3), { show: false });
+  // a picked point likewise; its marker needs this map, which is why the
+  // restore lives here
+  const pt = /^pt:(-?[\d.]+),(-?[\d.]+)$/.exec(panoRaw);
+  if (pt && isFinite(+pt[1]) && isFinite(+pt[2])) openSkyViewerForPoint(+pt[1], +pt[2], { show: false });
   // attached after the framing above, so nothing this function does on load is
   // remembered; a popup's own autopan is skipped by the flag set above.
   map.on('moveend', () => {
@@ -5492,20 +5526,23 @@ function setHome(lat, lon, name) {
 // touch screen has no way to show. say it in words instead.
 function spotMsg(text) { document.getElementById('spot-msg').textContent = text || ''; }
 
-function setPicking(on) {
-  spotState.picking = on;
-  document.getElementById('home-pick').setAttribute('aria-pressed', String(on));
-  document.getElementById('map').classList.toggle('picking', on);
-  spotMsg(on ? 'tap anywhere on the map to set home, or press “pick on map” again to cancel' : '');
+// what the next map click is for: 'home' or 'sky', or false
+function setPicking(mode) {
+  spotState.picking = mode || false;
+  document.getElementById('home-pick').setAttribute('aria-pressed', String(mode === 'home'));
+  document.getElementById('sky-pick').setAttribute('aria-pressed', String(mode === 'sky'));
+  document.getElementById('map').classList.toggle('picking', !!mode);
+  spotMsg(mode === 'home' ? 'tap anywhere on the map to set home, or press “pick on map” again to cancel'
+    : mode === 'sky' ? 'tap anywhere on the map to see the sky from there, or press “pick a point on the map” again to cancel' : '');
 }
 
 // picking needs a click on the map, which only has a real size once the where
 // panel has been shown at least once (leaflet reads 0x0 from a hidden one).
-// the strip that arms picking sits above every tab, so jump to the map's tab
-// first; a real click on it is what the tab bar already listens for.
-function armPicking() {
+// the strip and the sky tab that arm picking are elsewhere, so jump to the
+// map's tab first; a real click on it is what the tab bar already listens for.
+function armPicking(mode = 'home') {
   document.getElementById('tab-where').click();
-  setPicking(true);
+  setPicking(mode);
 }
 
 (function initHomeControls() {

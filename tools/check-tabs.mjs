@@ -272,6 +272,55 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   await page.close();
 }
 
+// --- the sky from a point picked on the map ---
+{
+  const ctx = await browser.newContext({ viewport: DESKTOP });
+  await quiet(ctx);
+  const a = await ctx.newPage();
+  await a.goto(URL_ + '#sky');
+  await a.waitForSelector('#sky-viewer[data-place]');
+  // picking needs a click on the map, so the button goes to the map tab armed
+  await a.click('#sky-pick');
+  ok((await selected(a)).join() === 'tab-where', 'pick a point opens the map tab');
+  ok(await a.evaluate(() => spotState.picking) === 'sky', 'armed for the sky, not for home');
+  ok(/sky/.test(await a.$eval('#spot-msg', e => e.textContent)), 'and says so in words');
+  await a.waitForFunction(() => spotState.map);
+  await a.evaluate(() => spotState.map.fire('click', { latlng: L.latLng(35.5, -82.9) }));
+  await a.waitForSelector('#sky-viewer[data-place]');
+  const got = await a.evaluate(() => ({
+    tab: document.querySelector('[role="tab"][aria-selected="true"]').id, key: viewerState.key,
+    home: spotState.home.lat, picking: spotState.picking,
+    flat: viewerState.horizon && [...viewerState.horizon].every(v => v === 0),
+    title: document.getElementById('sky-viewer-title').textContent,
+    caveat: document.querySelector('.sky-viewer-caveat').textContent,
+    sub: document.querySelector('.sky-viewer-elev').textContent,
+    place: document.getElementById('sky-place').value,
+    marker: !!spotState.skyMarker && spotState.map.hasLayer(spotState.skyMarker),
+    pressed: document.getElementById('sky-pick').getAttribute('aria-pressed'),
+  }));
+  ok(got.tab === 'tab-sky' && got.key === 'pt:35.5000,-82.9000', `the click loads that point into the sky tab (${got.key})`);
+  ok(got.home !== 35.5, 'and did not move home');
+  ok(got.picking === false && got.pressed === 'false', 'and disarms the pick');
+  ok(got.flat, 'the horizon is flat, since no terrain is modelled for a point yet');
+  ok(/flat/.test(got.caveat), `and the caveat says so (${got.caveat})`);
+  ok(got.sub === '35.5000, -82.9000', `the subtitle is the coordinates (${got.sub})`);
+  ok(got.place === '__point', 'the chooser shows a picked point');
+  ok(got.marker, 'and the map carries a marker for it');
+  await a.close();
+
+  // the point comes back on the next visit, marker and all
+  const b = await ctx.newPage();
+  await b.goto(URL_ + '#where');
+  await b.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
+  const back = await b.evaluate(() => ({ key: viewerState.key, marker: !!spotState.skyMarker && spotState.map.hasLayer(spotState.skyMarker) }));
+  ok(back.key === 'pt:35.5000,-82.9000' && back.marker, 'a picked point is loaded again on return, with its marker');
+  // and the home pick still sets home, not the sky
+  await b.click('#home-pick');
+  await b.evaluate(() => spotState.map.fire('click', { latlng: L.latLng(35.6, -83.0) }));
+  ok(await b.evaluate(() => spotState.home.lat === 35.6 && viewerState.key === 'pt:35.5000,-82.9000'), 'pick on map for home still sets home and leaves the sky alone');
+  await ctx.close();
+}
+
 // --- the sky viewer's date picker ---
 {
   const ctx = await browser.newContext({ viewport: DESKTOP });
