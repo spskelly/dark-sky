@@ -351,6 +351,10 @@
   .sky-viewer-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 18px; font-size: 12.5px; color: var(--ink-dim); }
   .sky-viewer-controls input[type="date"] { background: var(--night-3); color: var(--ink); border: 1px solid var(--line);
     border-radius: 6px; padding: 3px 6px; font-size: 12.5px; }
+  .sky-viewer-eye { display: inline-flex; gap: 4px; }
+  .sky-viewer-eye button { background: var(--night-3); color: var(--ink-dim); border: 1px solid var(--line); border-radius: 4px; padding: 3px 8px; font: inherit; cursor: pointer; }
+  .sky-viewer-eye button[aria-pressed="true"] { color: var(--ink); border-color: var(--ink-dim); }
+  .sky-viewer-legend i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; vertical-align: -1px; border: 1px solid rgba(255,255,255,0.18); }
   .sky-viewer-time { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 160px; }
   .sky-viewer-time span { min-width: 58px; font-variant-numeric: tabular-nums; }
   .sky-viewer-time input { flex: 1; accent-color: var(--accent, #5fc2ad); cursor: pointer; }
@@ -747,10 +751,15 @@
       <label class="sky-viewer-time"><span></span><input type="range" min="0" max="1" step="1" value="0" aria-label="time of night"></label>
       <span class="sky-viewer-compass" aria-live="polite"></span>
       <button type="button" class="sky-viewer-reset">reset view</button>
+      <span class="sky-viewer-eye" role="group" aria-label="where the eye is" hidden>
+        <button type="button" data-eye="ground" aria-pressed="true">from the ground</button>
+        <button type="button" data-eye="deck" aria-pressed="false">from the tower deck</button>
+      </span>
     </div>
     <div class="sky-viewer-foot">
       <p class="sky-viewer-sum"></p>
       <p class="sky-viewer-sky"></p>
+      <p class="sky-viewer-legend"></p>
       <p class="sky-viewer-caveat"></p>
     </div>
   </div>
@@ -4415,14 +4424,14 @@ function fmtClock(d) {
 // the cards and the overlook popups both come through here, so a fix to one
 // is a fix to both. the open, turnable sky is the dialog's job now.
 function paintPano(box, o) {
-  const { horizon, lat, lon, elevM } = o;
+  const { horizon, canopy, lat, lon, elevM } = o;
   const cv = box.querySelector('canvas.skyline');
-  try { drawPanorama(cv, { horizon, lat, lon, elevM, mode: 'thumb' }); }
+  try { drawPanorama(cv, { horizon, canopy, lat, lon, elevM, mode: 'thumb' }); }
   catch (e) { if (!window.__panoWarned) { window.__panoWarned = true; console.warn('panorama:', e); } }
 
   const sum = box.querySelector('.pano-sum');
   if (!sum) return;
-  try { sum.textContent = horizonSummary({ horizon, lat, lon, elevM, date: new Date() }); }
+  try { sum.textContent = horizonSummary({ horizon, canopy, lat, lon, elevM, date: new Date() }); }
   catch (e) { sum.remove(); }
 }
 
@@ -4437,10 +4446,8 @@ function drawSkylines() {
   document.querySelectorAll('#spot-list .pano').forEach(box => {
     const cv = box.querySelector('canvas.skyline');
     const s = SPOTS.find(x => x.name === cv.dataset.pano);
-    const enc = s && HORIZONS[s.name];
-    if (!enc) { box.remove(); return; }
-    let horizon;
-    try { horizon = decodeHorizon(enc); } catch (e) { box.remove(); return; }
+    const p = s && placeProfiles(s.name);
+    if (!p) { box.remove(); return; }
 
     // the skyline belongs to the viewpoint, which for a hike-in spot is not
     // the coordinate the pin and the driving directions use
@@ -4448,7 +4455,7 @@ function drawSkylines() {
     const lon = s.view ? s.view[1] : s.lon;
     const elevM = s.elev * 0.3048;
 
-    paintPano(box, { horizon, lat, lon, elevM });
+    paintPano(box, { horizon: p.horizon, canopy: p.canopy, lat, lon, elevM });
   });
 }
 
@@ -4510,8 +4517,8 @@ let skyView = loadSkyView();
 // somewhere to write back to. sky/caveat are pre-built html/text -- what a
 // spot's model can and cannot see differs by kind, and the viewer itself has
 // no opinion on it.
-const viewerState = { key: null, title: '', sub: '', horizon: null, lat: 0, lon: 0, elevM: 0,
-  sky: '', caveat: '', date: null };
+const viewerState = { key: null, title: '', sub: '', horizon: null, canopy: null, deck: null, fromDeck: false,
+  lat: 0, lon: 0, elevM: 0, sky: '', caveat: '', date: null };
 
 function skyViewerEls() {
   const d = document.getElementById('sky-viewer');
@@ -4523,6 +4530,7 @@ function skyViewerEls() {
     time: d.querySelector('.sky-viewer-time input'), clock: d.querySelector('.sky-viewer-time span'),
     compass: d.querySelector('.sky-viewer-compass'),
     sum: d.querySelector('.sky-viewer-sum'), sky: d.querySelector('.sky-viewer-sky'), caveat: d.querySelector('.sky-viewer-caveat'),
+    eye: d.querySelector('.sky-viewer-eye'), legend: d.querySelector('.sky-viewer-legend'),
   };
 }
 
@@ -4541,6 +4549,10 @@ function openSkyViewer(o, { show = true } = {}) {
   viewerState.title = o.title || '';
   viewerState.sub = o.sub || '';
   viewerState.horizon = o.horizon || null;
+  viewerState.canopy = o.canopy || null;
+  viewerState.deck = o.deck || null;
+  // the eye is back on the ground for every new place, like the date
+  viewerState.fromDeck = false;
   viewerState.lat = o.lat;
   viewerState.lon = o.lon;
   viewerState.elevM = o.elevM || 0;
@@ -4566,14 +4578,14 @@ function openSkyViewer(o, { show = true } = {}) {
 
 function openSkyViewerForSpot(name, opts) {
   const s = SPOTS.find(x => x.name === name);
-  const enc = s && HORIZONS[s.name];
-  if (!s || !enc) return;
-  let horizon;
-  try { horizon = decodeHorizon(enc); } catch (e) { return; }
+  const p = s && placeProfiles(s.name);
+  if (!s || !p) return;
   const lat = s.view ? s.view[0] : s.lat, lon = s.view ? s.view[1] : s.lon;
   openSkyViewer({
-    key: s.name, title: s.name, sub: elevTag(s).replace('&middot;', '\u00b7'), horizon, lat, lon, elevM: s.elev * 0.3048,
+    key: s.name, title: s.name, sub: elevTag(s).replace('&middot;', '\u00b7'), horizon: p.horizon, canopy: p.canopy, deck: p.deck,
+    lat, lon, elevM: s.elev * 0.3048,
     sky: SKY[s.name] ? skySwatch(SKY[s.name][0]) + SKY[s.name][1] : '',
+    caveat: canopyCaveat(p.entry),
   }, opts);
 }
 
@@ -4605,6 +4617,42 @@ function fillSkyPlaces() {
 // tiles), so the horizon is flat at 0 degrees and the caveat says so. the
 // key carries the point, so a return visit needs no second key.
 const SKY_POINT_CAVEAT = 'terrain is not modelled for a picked point yet: the horizon is drawn flat at 0 degrees, so the real ridge sits higher: the moon and the core clear it later, and drop behind it earlier, than shown';
+
+// the canopy block's vintage, split into the year and the season it was
+// flown, for the legend and the caveat. no block, no canopy anywhere.
+const [CANOPY_YEAR, CANOPY_SEASON] = (typeof CANOPY_VINTAGE === 'string' ? CANOPY_VINTAGE : ', ').split(', ');
+const CANOPY_CAVEAT = `ridge from bare earth; trees and structures from ${CANOPY_YEAR} lidar within 200 m of the pin, ${CANOPY_SEASON}, so a floor; the cut bank is not in it`;
+const NO_CANOPY_CAVEAT = 'trees not modelled here, so the sky may be smaller than drawn';
+// a place without an entry is never presented as confirmed open sky
+const canopyCaveat = entry => entry ? CANOPY_CAVEAT : NO_CANOPY_CAVEAT;
+
+// only the layers present at the site, as html under the canvas
+function canopyLegend(horizon, canopy) {
+  if (!horizon) return '';
+  const chip = c => `<i style="background:${c}"></i>`;
+  const items = [chip('#0b1226') + 'ridge'];
+  if (canopy && canopy.t) items.push(chip('rgba(8,28,16,0.7)') + `trees, ${CANOPY_YEAR} lidar, ${CANOPY_SEASON}, likely taller now`);
+  if (canopy && canopy.s) items.push(chip('#343946') + 'structures');
+  return items.join(' &middot; ');
+}
+
+// the three profiles for a place, decoded: key is a spot name or 'ov:<id>'.
+// the deck pair exists only where the spot carries deck: and both tools
+// have been run since, so a half-built deck is a missing toggle rather than
+// a wrong drawing.
+function placeProfiles(key) {
+  const isOv = key.startsWith('ov:');
+  const entry = CANOPY[isOv ? key.slice(3) : key];
+  const enc = isOv ? (OVERLOOK_HORIZONS[key.slice(3)] || [])[1] : HORIZONS[key];
+  if (!enc) return null;
+  let horizon;
+  try { horizon = decodeHorizon(enc); } catch (e) { return null; }
+  const out = { horizon, canopy: decodeCanopy(entry), entry, deck: null };
+  const deckEnc = !isOv && entry && entry.deck && DECK_HORIZONS[key];
+  if (deckEnc) out.deck = { horizon: decodeHorizon(deckEnc), canopy: decodeCanopy(entry.deck), m: entry.deck.m };
+  return out;
+}
+
 function openSkyViewerForPoint(lat, lon, opts) {
   const key = 'pt:' + lat.toFixed(4) + ',' + lon.toFixed(4);
   openSkyViewer({
@@ -4639,7 +4687,10 @@ function showSkyTab() {
 function paintSkyViewer() {
   const els = skyViewerEls();
   if (!els.root || !viewerState.key) return;
-  const { title, sub, horizon, lat, lon, elevM, sky, caveat, date } = viewerState;
+  const { title, sub, lat, lon, elevM, sky, caveat, date } = viewerState;
+  // from the deck when the toggle says so and the place has one
+  const eye = viewerState.fromDeck && viewerState.deck ? viewerState.deck : viewerState;
+  const horizon = eye.horizon, canopy = eye.canopy;
   if (els.place) {
     const want = viewerState.key.startsWith('pt:') ? '__point' : viewerState.key;
     if ([...els.place.options].some(o => o.value === want)) els.place.value = want;
@@ -4650,6 +4701,12 @@ function paintSkyViewer() {
   els.elev.textContent = sub;
   els.sky.innerHTML = sky;
   els.caveat.textContent = caveat;
+  els.legend.innerHTML = canopyLegend(horizon, canopy);
+  els.eye.hidden = !viewerState.deck;
+  if (viewerState.deck) {
+    els.eye.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String((b.dataset.eye === 'deck') === viewerState.fromDeck)));
+    els.eye.querySelector('[data-eye="deck"]').textContent = `from the tower deck, ${viewerState.deck.m} m up`;
+  }
 
   const nights = panoNight(lat, lon, date);
   els.time.max = String(nights.length - 1);
@@ -4665,13 +4722,13 @@ function paintSkyViewer() {
   els.clock.textContent = fmtClock(when);
   els.compass.textContent = 'looking ' + panDir16(skyView.az) + ', '
     + (skyView.alt >= 0 ? Math.round(skyView.alt) + ' degrees up' : Math.round(-skyView.alt) + ' degrees down');
-  try { els.sum.textContent = horizon ? horizonSummary({ horizon, lat, lon, elevM, date: when }) : ''; }
+  try { els.sum.textContent = horizon ? horizonSummary({ horizon, canopy, lat, lon, elevM, date: when }) : ''; }
   catch (e) { els.sum.textContent = ''; }
   // the canvas last, and only while its tab shows: hidden, it has no size to
   // draw at, and showSkyTab paints it the moment it gets one
   if (!els.canvas.clientWidth) return;
   try {
-    drawPanorama(els.canvas, { horizon, lat, lon, elevM, date: when, mode: 'view', az0: skyView.az, alt0: skyView.alt, fov: skyView.fov });
+    drawPanorama(els.canvas, { horizon, canopy, lat, lon, elevM, date: when, mode: 'view', az0: skyView.az, alt0: skyView.alt, fov: skyView.fov });
   } catch (e) {
     if (!window.__panoWarned) { window.__panoWarned = true; console.warn('sky viewer:', e); }
   }
@@ -4723,6 +4780,12 @@ function bindSkyViewer() {
   els.root.querySelector('.sky-viewer-reset').addEventListener('click', () => {
     skyView = { ...SKY_VIEW_DEFAULT };
     saveSkyView();
+    paintSkyViewer();
+  });
+  els.eye.addEventListener('click', ev => {
+    const b = ev.target.closest('button[data-eye]');
+    if (!b) return;
+    viewerState.fromDeck = b.dataset.eye === 'deck';
     paintSkyViewer();
   });
 
@@ -5387,26 +5450,21 @@ const OVL_esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&
 // the same #rrggbb test the card swatch uses rather than being trusted
 const OVL_fill = hex => (/^#[0-9a-f]{6}$/.test(hex || '') ? hex : 'transparent');
 
-// the caveat text: said once here, in the popup that never opens the sky
-// viewer, and again as the caveat the viewer itself shows when it does
-const OVL_CAVEAT = 'modelled from bare earth, not visited; trees and the cut bank are not in it';
-
-// used by the popup's own button and by the restore on return; OVERLOOKS and
-// its generated horizon/sky blocks are declared further down the file, which
-// function hoisting makes fine to call from up here
+// the caveat text: said once in the popup that never opens the sky viewer,
+// and again as the caveat the viewer itself shows when it does. which of the
+// two depends on whether the 2017 lidar reached this pull-off.
 function openSkyViewerForOverlook(id, opts) {
   const o = OVERLOOKS.find(x => x.id === id);
   const h = o && OVERLOOK_HORIZONS[id];
-  if (!o || !h) return;
-  let horizon;
-  try { horizon = decodeHorizon(h[1]); } catch (e) { return; }
+  const p = h && placeProfiles('ov:' + id);
+  if (!o || !p) return;
   const sky = OVERLOOK_SKY[id];
   openSkyViewer({
     key: 'ov:' + id, title: o.name,
     sub: [o.mp !== undefined ? 'parkway mp ' + o.mp : '', h[0].toLocaleString() + ' ft'].filter(Boolean).join(' · '),
-    horizon, lat: o.lat, lon: o.lon, elevM: h[0] * 0.3048,
+    horizon: p.horizon, canopy: p.canopy, lat: o.lat, lon: o.lon, elevM: h[0] * 0.3048,
     sky: sky ? skySwatch(sky[0]) + OVL_esc(sky[1]) : '',
-    caveat: OVL_CAVEAT,
+    caveat: canopyCaveat(p.entry),
   }, opts);
 }
 
@@ -5416,7 +5474,7 @@ function OVL_popup(o) {
   return `<div class="ovl"><b>${OVL_esc(o.name)}</b><br>${[o.mp !== undefined ? 'parkway mp ' + o.mp : '', h ? h[0].toLocaleString() + ' ft' : ''].filter(Boolean).join(' &middot; ')}
     ${h ? `<div class="pano"><canvas class="skyline" role="img" aria-label="skyline and sky from ${OVL_esc(o.name)}"></canvas></div>
       <button type="button" class="ovl-open">open sky view</button>` : ''}
-    <p class="ovl-caveat">${OVL_CAVEAT}</p>
+    <p class="ovl-caveat">${canopyCaveat(CANOPY[o.id])}</p>
     <div class="links"><a href="${gm}" target="_blank" rel="noopener">directions</a></div></div>`;
 }
 
@@ -5466,11 +5524,11 @@ function OVL_layer() {
       spotState.map.getContainer().classList.toggle('ovl-popup-narrow', maxW < 420);
 
       const h = OVERLOOK_HORIZONS[o.id];
-      let horizon = null;
-      if (h) { try { horizon = decodeHorizon(h[1]); } catch (err) { horizon = null; } }
+      const p = placeProfiles('ov:' + o.id);
+      const horizon = p ? p.horizon : null;
 
       const box = e.popup.getElement().querySelector('.pano');
-      if (box) { if (horizon) paintPano(box, { horizon, lat: o.lat, lon: o.lon, elevM: h[0] * 0.3048 }); else box.remove(); }
+      if (box) { if (p) paintPano(box, { horizon: p.horizon, canopy: p.canopy, lat: o.lat, lon: o.lon, elevM: h[0] * 0.3048 }); else box.remove(); }
 
       const openBtn = e.popup.getElement().querySelector('.ovl-open');
       if (openBtn) {
