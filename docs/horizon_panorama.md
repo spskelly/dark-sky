@@ -132,9 +132,11 @@ again: it needs `playwright`, which the elevation work does not.
 | `SKY` or `OVERLOOK_SKY` might be stale | `node tools/build-skyglow.mjs --check` | Neither block records what it was generated from, so nothing else notices. Exit 1 names the entries that differ. Run it after any spot move and after every overlook rebuild |
 | An overlook's OSM id changes | nothing required | Orphans the old `tools/.horizon-cache/ov-<old-id>.json`, harmlessly; the new id gets its own cache file on the next `build_horizons.py` run |
 | A spot's `lat, lon` or its `view:` | `build_canopy.py` as well as `build_horizons.py` | The canopy cache records the coordinate; a moved site recomputes |
-| A spot's `deck:` | `build_horizons.py`, then `build_canopy.py` | Both cache the deck height. `build_horizons.py` recomputes that spot (about 2 s); `build_canopy.py` refetches its box (about 8 s). Run the terrain first: the block's structures rule compares against the deck terrain line |
+| A spot's `deck:` | `build_horizons.py`, then `build_canopy.py` | Both cache the deck height. `build_horizons.py` recomputes that spot (about 2 s); `build_canopy.py` refetches its box (about 25 s from the network at 32 workers, a second or two from the store). Run the terrain first: the block's structures rule compares against the deck terrain line |
 | `RADIUS`, `MAX_DEPTH`, `TREE_MAX_M`, the class routing or `COUNTIES` in `build_canopy.py` | `build_canopy.py` | `RADIUS` and `COUNTIES` are recorded per site and recompute by themselves; a routing or depth change, `TREE_MAX_M` included, needs `--force`, since the cache does not record which routing rule computed it. `TREE_MAX_M` shipped 2026-09-18 after the live check found the Pisgah tower routed to vegetation, not partly unclassified as first assumed; that day's full run was `--force` for this reason |
 | The 2025 point clouds arrive | change `VINTAGE` and the dataset source in `build_canopy.py`, then `--force` | The vintage is one page constant, so every site is rebuilt together |
+| `tools/overlook-views.json` changes | `node tools/build-overlooks.mjs --replay`, then `build_horizons.py`, `build-skyglow.mjs --fix`, `build_canopy.py` | A reviewed spot replaces the OSM point for that overlook, so the coordinate every downstream block raycasts from changes; the three builds are the same chain a moved curated spot needs, run in the same order |
+| A spot's `view:` moves | `build_horizons.py`, `build-skyglow.mjs --fix`, `build_canopy.py` | `view:` is the coordinate the panorama, sky block and canopy are actually drawn from when it is set; moving it invalidates all three the same way moving `lat, lon` does |
 
 Nothing downstream of `index.html` needs regenerating. `build-og.mjs` and
 `build-moon-preview.mjs` do not read any of this.
@@ -169,9 +171,15 @@ Nothing downstream of `index.html` needs regenerating. `build-og.mjs` and
 raycast from 3DEP bare earth from 150 m out, but trees and structures within
 200 m now come from the 2017 NC Phase 5 lidar as their own layers (see
 Canopy below). What remains true: the canopy is leaf-off and nine growing
-seasons old, so every tree line is a floor; the 8 Doughton Park area sites
-have no 2017 lidar and say "trees not modelled"; the cut bank inside 150 m is
+seasons old, so every tree line is a floor; the 9 sites without 2017 lidar
+(the 8 Doughton Park area sites and The Lump, MP 264, Wilkes) have none and
+say "trees not modelled"; the cut bank inside 150 m is
 still in neither line.
+
+**Cliff-lip terrain eye, follow-up 2026-09-18.** At cliff-lip sites the
+terrain line is raycast from the 3DEP cell, up to 7 m below the lidar ground
+at the pin, so near ridges read up to about 2.7 degrees high at 150 m. Using
+the lidar ground as the terrain eye where it exists would fix it; not done.
 
 **UTC is treated as TD.** Delta-T is about 70 s, which is 0.04 arcmin of lunar
 motion. The existing chapter 49 phase code makes the same choice, so this
@@ -281,7 +289,7 @@ The full run (started 2026-09-18 00:28, `--force`, 32 workers) held a steady
 4.0 MB/s, about 25 s and 100 to 130 MB a site, which is where "about 15 GB
 and about 65 to 80 minutes from cold" in the commands above comes from.
 
-- Full run 2026-09-18: <filled in after the run: sites covered, GB, minutes, MB/s, ground warnings>
+- Full run 2026-09-18 00:28 to 01:21: 150 of 159 sites; the 9 without 2017 lidar are the 8 Doughton Park area sites and The Lump (MP 264, Wilkes). 12.6 GB over the network in 53 min at 4.0 MB/s, 32 workers, no failed fetches. Lidar pin ground against the 3DEP cell: median +0.11 m, sd 1.5 m over 127 sites; five over 5 m (East Fork, Lake James, Wiseman's View, Chestoa View, Jumpinoff Rock), all on cliff or bank lips where neighbouring 3DEP cells differ by 14 to 34 m against 0.9 at Max Patch and 2.4 at Doubletop: a resolution effect, the lidar is the better number. 40 sites read a median tree altitude over 30 degrees; see Standing spots.
 
 ### What the page shows
 
@@ -293,6 +301,79 @@ brackets when it differs by more than five minutes; with no canopy entry
 the sentence is exactly what it was. Tower spots with `deck:` get a
 two-button toggle, from the ground and from the deck, that swaps all three
 profiles; it resets on every new place and is not remembered.
+
+### Raw lidar store
+
+Every EPT file a site's box touches is kept at
+`H:/dark-sky/ept/<dataset>/{ept.json, ept-hierarchy/*.json, ept-data/*.laz}`,
+one file per node, at the same relative path the EPT bucket itself uses.
+`CANOPY_STORE` overrides the path; set it empty and the store is off, the
+same as running on a machine with no `H:` attached. A file already on disk
+is read instead of fetched, so a probe, a moved pin, or the 2025 comparison
+never downloads the same node twice.
+
+One writer thread, not one per download worker: `H:` is a USB spinning disk,
+and TALON measured 8 interleaved writers running it at 26 MB/s against 88
+MB/s sequential (2026-09-15; TALON `docs/lidar_chm_pipeline.md`). Every
+write lands as `<path>.tmp`, then `os.replace`s onto the real name, so a
+`.tmp` left by a killed run is refetched rather than trusted. A write that
+fails is only found at `flush_store()`, which raises the first one. `main()`
+turns the store off for the run when its drive doesn't exist on this
+machine, and `--dry-run` prints where the store is (`raw ept files kept in:
+...`, or `nowhere (CANOPY_STORE is empty)`) without writing to it.
+
+Size on disk: (pending: measured size after the store fill run, `du -sh
+H:/dark-sky/ept`).
+
+Reversed 2026-09-18: the spec said nothing is written per node; Shawn: "we
+can afford 12gb", and every probe after the first run had to download its
+box again.
+
+### Standing spots
+
+40 of 150 sites read a median tree altitude over 30 degrees from the pin:
+the pin is in or against the canopy. At Chestoa View and Devil's Courthouse,
+the two probed sites, the pin sits under 12 to 19 m trees and the open
+ground is 14 to 19 m away; the skyline is set by trees 2.5 m from the pin on
+every azimuth. Doubletop's pin is on open ground and does not move with
+`SEARCH_R`. The coordinates were good to about 10 m, which was enough for a
+terrain raycast from 150 m out and is not enough for trees 2 m from where
+somebody would actually stand.
+
+```sh
+# for every site whose median tree altitude is over CLOSED_DEG, find the
+# nearest open standing spot and write a review table. no network beyond the
+# few nodes a spot's own box needs; never touches index.html.
+python tools/build_canopy.py --suggest-views
+```
+
+writes `tools/.canopy-cache/view-review.md`, one row per closed-in site,
+most closed first: `site`, `now` (median tree altitude at the pin),
+`proposed` (the spot, or "none within SEARCH_R m"), `moved` (metres from the
+pin), `bearing`, `then` (median tree altitude from the spot), `walk under
+trees` (metres of the straight line from the pin to the spot that pass under
+a crown), and satellite links for both `pin` and `spot`.
+
+| Constant | Value | Evidence |
+|---|---|---|
+| `CLOSED_DEG` | 30 degrees | A median tree altitude over this puts the pin in or against the canopy (2026-09-18: 40 of 150 sites). Placeholder, from two probed sites |
+| `SEARCH_R` | 30 m | How far from the pin a standing spot may be proposed; the probed sites had open ground 14 and 19 m away. Placeholder, from two probed sites |
+| `CLEAR_R` | 3 m | No vegetation within this of a standing spot, so the nearest crown is not the skyline. Placeholder, from two probed sites |
+| `CLEAR_H` | 3 m | Metres above the spot's ground before vegetation is in the way; shrubs under this are not. Placeholder, from two probed sites |
+| `LEVEL_M` | 3 m | The spot's ground within this of the pin's, so the lip of a cliff is never swapped for its foot. Placeholder, from two probed sites |
+
+A decision is recorded, never applied by itself. For a curated spot, set
+`view:` on its `SPOTS` record to the approved coordinate. For an overlook,
+add its osm id to `tools/overlook-views.json` as `"<osm id>": [lat, lon,
+note]`. Either way the map dot moves to sit on the viewpoint itself, never
+on the OSM point or the old pin, and any off-path walk to it is said as a
+line on the card or in the overlook popup, not left for the reader to find
+out (Shawn, 2026-09-18). A rejected row changes nothing: the site stays
+under trees and the review record says so.
+
+Review outcome (Task 15): (pending: review outcome, Task 15 -- approved,
+rejected and corrected counts). Over-30 count: 40 before the review,
+(pending: over-30 count after the review).
 
 ## Behaviours worth keeping
 
