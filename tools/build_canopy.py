@@ -346,7 +346,38 @@ def suggest(site, rec):
                    bearing=math.degrees(math.atan2(spot[0], spot[1])) % 360,
                    after=float(np.median(np.minimum(p['t'], top))) if p else None,
                    under_trees_m=walk_under_trees(dx, dy, z, c, ground, spot))
+    row['params'] = suggest_params()
     return row
+
+
+def suggest_params():
+    """the tunables a saved row was computed with; a retuned constant is a
+    reason to recompute, the same as a moved pin"""
+    return [CLOSED_DEG, SEARCH_R, CLEAR_R, CLEAR_H, LEVEL_M]
+
+
+def suggest_path(site):
+    return os.path.join(CACHE, 'suggest', bh.cache_name({'name': site['name'], 'ov_id': site.get('ov_id')}))
+
+
+def suggest_ok(row, site):
+    """a saved row is taken only when the coordinate it was computed for and
+    the tunables it used still match, the same test cache_ok runs for the
+    canopy cache itself."""
+    return (abs(row.get('lat', 1e9) - site['view_lat']) < 1e-9
+            and abs(row.get('lon', 1e9) - site['view_lon']) < 1e-9
+            and row.get('params') == suggest_params())
+
+
+def load_suggested(site):
+    """the saved review row for a site, or None. only the final name counts:
+    a .tmp left by a killed run was never renamed, and so never finished."""
+    path = suggest_path(site)
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding='utf-8') as f:
+        row = json.load(f)
+    return row if suggest_ok(row, site) else None
 
 
 def review_md(rows):
@@ -366,9 +397,9 @@ def review_md(rows):
         if r['spot'] is None:
             out.append('| %s | %.0f | none within %g m | | | | | %s | |' % (r['name'], r['before'], SEARCH_R, pin))
             continue
-        out.append('| %s | %.0f | %.6f, %.6f | %.0f m | %03.0f | %s | %d m | %s | [spot](%s) |' % (
-            r['name'], r['before'], r['spot'][0], r['spot'][1], r['moved_m'], r['bearing'],
-            'n/a' if r['after'] is None else '%.0f' % r['after'], r['under_trees_m'], pin, sat % r['spot']))
+        out.append('| %s | %.0f | %.6f, %.6f | %.0f m | %03d | %s | %d m | %s | [spot](%s) |' % (
+            r['name'], r['before'], r['spot'][0], r['spot'][1], r['moved_m'], round(r['bearing']) % 360,
+            'n/a' if r['after'] is None else '%.0f' % r['after'], r['under_trees_m'], pin, sat % tuple(r['spot'])))
     return '\n'.join(out) + '\n'
 
 
@@ -638,9 +669,25 @@ def main():
     if args.suggest_views:
         closed = [(s, load_cached(s)) for s in todo]
         closed = [(s, r) for s, r in closed if r and closed_in(r)]
+        os.makedirs(os.path.join(CACHE, 'suggest'), exist_ok=True)
         rows = []
+        failed = []
         for i, (s, r) in enumerate(closed, 1):
-            row = suggest(s, r)
+            row = load_suggested(s)
+            if row:
+                rows.append(row)
+                print('[%d/%d] %s ... cached' % (i, len(closed), s['name']), flush=True)
+                continue
+            # a fetch or H: read that exhausts its retries is one site's bad
+            # luck, not the whole run's: no row file is written for it, so the
+            # next run of the same command picks it back up where this one left it.
+            try:
+                row = suggest(s, r)
+            except (urllib.error.URLError, urllib.error.HTTPError, OSError, TimeoutError) as e:
+                failed.append(s)
+                print('[%s] %s ... fetch failed: %s' % (time.strftime('%H:%M:%S'), s['name'], e), flush=True)
+                continue
+            bh.save_atomic(suggest_path(s), bh.write_json(row))
             rows.append(row)
             print('[%s] [%d/%d] %s ... %s' % (time.strftime('%H:%M:%S'), i, len(closed), s['name'],
                   'no open ground within %g m' % SEARCH_R if row['spot'] is None else
@@ -651,6 +698,10 @@ def main():
         with open(path, 'w', encoding='utf-8') as f:
             f.write(review_md(rows))
         print('%d closed-in sites, review table at %s' % (len(rows), path))
+        if failed:
+            print('%d site(s) failed to fetch and were left uncached; re-run the same command to retry them:' % len(failed))
+            for s in failed:
+                print('    %s' % s['name'])
         return
 
     # a dry run says what the real run would do and stops. it fetches nothing,

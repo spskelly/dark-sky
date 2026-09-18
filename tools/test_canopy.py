@@ -587,6 +587,82 @@ class TestStandingSpot(unittest.TestCase):
         self.assertIn('https://www.google.com/maps/@35.100010,-83.100020,40m/data=!3m1!1e3', lines[0])
         self.assertIn('none within 30 m', lines[1])
 
+    def test_bearing_wraps_to_000_not_360(self):
+        rows = [{'name': 'A', 'key': 'A', 'lat': 35.1, 'lon': -83.1, 'before': 70.0,
+                 'spot': (35.10001, -83.10002), 'moved_m': 12.3, 'bearing': 359.8,
+                 'after': 20.0, 'under_trees_m': 4}]
+        line = [l for l in bc.review_md(rows).splitlines() if l.startswith('| A ')][0]
+        self.assertIn('| 000 |', line)
+
+    def test_review_table_accepts_a_spot_loaded_back_from_json_as_a_list(self):
+        """json has no tuples: a row read back from its cache file carries
+        spot as a list, and the table has to format that the same way"""
+        rows = [{'name': 'A', 'key': 'A', 'lat': 35.1, 'lon': -83.1, 'before': 70.0,
+                 'spot': [35.10001, -83.10002], 'moved_m': 12.3, 'bearing': 45.0,
+                 'after': 20.0, 'under_trees_m': 4}]
+        line = [l for l in bc.review_md(rows).splitlines() if l.startswith('| A ')][0]
+        self.assertIn('35.100010, -83.100020', line)
+
+
+class TestSuggestCheckpoint(unittest.TestCase):
+    """--suggest-views is a 20+ minute, 40-site run: each site's row is its
+    own file, so a fetch failure partway through loses only that site, and a
+    re-run reuses every row already on disk at the same coordinate and
+    tunables."""
+
+    HTML = ('const SPOTS = [\n'
+            "  { name: 'Site A (fails)', lat: 35.10, lon: -83.10, elev: 4000, kind: 'view' },\n"
+            "  { name: 'Site B (ok)', lat: 35.90, lon: -82.20, elev: 4000, kind: 'view' },\n"
+            '];\n'
+            'const OVERLOOKS = [\n'
+            '];\n')
+
+    CLOSED_REC = {'t': [60.0] * 360}
+
+    def fake_suggest(self, s, r):
+        if s['name'] == 'Site A (fails)':
+            raise OSError('connection reset by peer')
+        return {'name': s['name'], 'key': s['key'], 'lat': s['view_lat'], 'lon': s['view_lon'],
+                'before': 60.0, 'spot': None, 'params': bc.suggest_params()}
+
+    def test_a_failed_site_is_skipped_and_leaves_no_row_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            saved = bc.CACHE
+            bc.CACHE = d
+            try:
+                with mock.patch.object(bh, 'read_html', return_value=self.HTML), \
+                     mock.patch.object(bc, 'load_cached', side_effect=lambda s: dict(self.CLOSED_REC)), \
+                     mock.patch.object(bc, 'suggest', side_effect=self.fake_suggest), \
+                     mock.patch.object(sys, 'argv', ['build_canopy.py', '--suggest-views']):
+                    bc.main()
+                self.assertEqual(os.listdir(os.path.join(d, 'suggest')), ['site-b-ok.json'])
+                with open(os.path.join(d, 'view-review.md'), encoding='utf-8') as f:
+                    self.assertIn('Site B (ok)', f.read())
+            finally:
+                bc.CACHE = saved
+
+    def test_a_row_already_on_disk_at_the_same_coordinate_and_params_is_reused(self):
+        with tempfile.TemporaryDirectory() as d:
+            saved = bc.CACHE
+            bc.CACHE = d
+            try:
+                os.makedirs(os.path.join(d, 'suggest'))
+                site = {'name': 'Site B (ok)', 'ov_id': None}
+                row = {'name': 'Site B (ok)', 'key': 'Site B (ok)', 'lat': 35.90, 'lon': -82.20,
+                       'before': 60.0, 'spot': None, 'params': bc.suggest_params()}
+                with open(os.path.join(d, 'suggest', bh.cache_name(site)), 'w', encoding='utf-8') as f:
+                    json.dump(row, f)
+                calls = []
+                with mock.patch.object(bh, 'read_html', return_value=self.HTML), \
+                     mock.patch.object(bc, 'load_cached',
+                                        side_effect=lambda s: dict(self.CLOSED_REC) if s['name'] == 'Site B (ok)' else None), \
+                     mock.patch.object(bc, 'suggest', side_effect=lambda s, r: calls.append(s['name'])), \
+                     mock.patch.object(sys, 'argv', ['build_canopy.py', '--suggest-views']):
+                    bc.main()
+                self.assertEqual(calls, [])   # never recomputed
+            finally:
+                bc.CACHE = saved
+
 
 if __name__ == '__main__':
     unittest.main()
