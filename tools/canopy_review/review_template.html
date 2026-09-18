@@ -1,0 +1,80 @@
+<title>Canopy Standing Spots</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root {
+  --ground: #f2f5f1; --panel: #ffffff; --ink: #1c2925; --muted: #5a6a64; --rule: #d8e0da;
+  --canopy: #4f7d5b; --canopy-soft: #b9d0bf; --sky: #2f6fa3; --warn: #9a5a14; --warn-soft: #f6e7d2;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #0e1513; --panel: #151e1b; --ink: #dde6e1; --muted: #8fa39b; --rule: #25322d;
+    --canopy: #7fb08c; --canopy-soft: #2f4a38; --sky: #86b9e2; --warn: #e0a55e; --warn-soft: #3a2a17;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #0e1513; --panel: #151e1b; --ink: #dde6e1; --muted: #8fa39b; --rule: #25322d;
+  --canopy: #7fb08c; --canopy-soft: #2f4a38; --sky: #86b9e2; --warn: #e0a55e; --warn-soft: #3a2a17;
+}
+body { background: var(--ground); color: var(--ink); font: 15px/1.5 "IBM Plex Sans", system-ui, sans-serif; padding: 0 16px; padding-block: 28px 56px; }
+.wrap { max-width: 980px; margin: 0 auto; display: grid; gap: 28px; }
+h1 { font: 600 30px/1.15 "IBM Plex Sans Condensed", "Arial Narrow", sans-serif; margin: 0; text-wrap: balance; }
+h2 { font: 600 21px/1.2 "IBM Plex Sans Condensed", "Arial Narrow", sans-serif; margin: 0 0 4px; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.count { font: 400 13px "IBM Plex Mono", ui-monospace, monospace; color: var(--muted); }
+header p, .blurb { max-width: 68ch; margin: 6px 0 0; color: var(--muted); }
+.reply { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px; font-size: 14px; }
+.reply code { font: 13px "IBM Plex Mono", ui-monospace, monospace; }
+.summary { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.summary a { text-decoration: none; color: var(--ink); border: 1px solid var(--rule); border-radius: 999px; padding: 3px 12px; font-size: 13px; background: var(--panel); }
+.summary a b { font-variant-numeric: tabular-nums; }
+.summary a:focus-visible, .links a:focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; }
+.rows { list-style: none; margin: 12px 0 0; padding: 0; border-top: 1px solid var(--rule); }
+.row { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px 22px; padding: 16px 0; border-bottom: 1px solid var(--rule); align-items: start; }
+.crop { width: 100%; height: auto; aspect-ratio: 1; border-radius: 4px; display: block; background: var(--rule); }
+.info { display: grid; gap: 10px; align-content: start; }
+.site { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; }
+.rid { font: 500 12px "IBM Plex Mono", ui-monospace, monospace; color: var(--muted); min-width: 2.6em; }
+.kind { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.site code { flex-basis: 100%; padding-left: calc(2.6em + 8px); font: 12px "IBM Plex Mono", ui-monospace, monospace; color: var(--muted); overflow-wrap: anywhere; }
+.nums { display: grid; gap: 4px; }
+.nums > div { display: grid; grid-template-columns: 6.5em auto 1fr; gap: 8px; align-items: center; }
+.lbl { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.v { font: 500 13px "IBM Plex Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.track { position: relative; height: 8px; border-radius: 4px; background: var(--rule); max-width: 160px; min-width: 60px; }
+.track i { position: absolute; left: 0; top: 0; height: 8px; border-radius: 4px; }
+.track .now { background: var(--canopy-soft); }
+.track .then { background: var(--sky); height: 4px; top: 2px; }
+.row.none .track .now { background: var(--canopy); }
+.best { margin: 0; font-size: 13px; color: var(--muted); }
+.flags { display: flex; flex-wrap: wrap; gap: 6px; }
+.flag { font-size: 12px; border: 1px solid var(--rule); border-radius: 4px; padding: 1px 8px; color: var(--muted); }
+.flag.warn { background: var(--warn-soft); border-color: transparent; color: var(--warn); }
+.links { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; font-size: 14px; }
+.links a { color: var(--sky); }
+.coord { flex-basis: 100%; font: 12px "IBM Plex Mono", ui-monospace, monospace; color: var(--muted); }
+.maplegend { font-size: 13px; color: var(--muted); max-width: 68ch; margin: 8px 0 0; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--muted); margin-top: 10px; }
+.legend span::before { content: ""; display: inline-block; width: 18px; height: 8px; border-radius: 4px; margin-right: 6px; vertical-align: middle; background: var(--k); }
+.row.marginal .v { color: var(--muted); }
+@media (max-width: 720px) {
+  .row { grid-template-columns: 1fr; }
+  .crop { max-width: 420px; }
+  .site code { padding-left: 0; }
+}
+</style>
+<div class="wrap">
+  <header>
+    <h1>Canopy standing spots</h1>
+    <p>40 sites read a median tree altitude over 30&deg; from their pin. For each, the finder raycast the 2017 leaf-off lidar from every level spot within 60 m (up to 10 m higher or lower) and proposed the nearest one that gets the trees to 30&deg; or under. &ldquo;Open sky&rdquo; is the share of the 360 compass directions where the trees sit under 20&deg;.</p>
+    <div class="legend"><span style="--k: var(--canopy-soft)">trees from the pin</span><span style="--k: var(--sky)">trees from the spot</span><span>bars run 0 to 80&deg;</span></div>
+    <p class="maplegend">Maps: USGS NAIP aerial imagery (leaf-on), 220 m across, north up. Orange ring is the pin, blue dot the proposed spot, dashed white circle the 60 m search limit. Grey lines are roads, yellow dashes are footpaths and trails, white outlines are parking, all from OpenStreetMap.</p>
+    <div class="summary">
+      <a href="#move"><b>{{MOVE}}</b> real moves</a>
+      <a href="#marginal"><b>{{MARGINAL}}</b> marginal</a>
+      <a href="#none"><b>{{NONE}}</b> no clear spot</a>
+    </div>
+  </header>
+  <div class="reply">Reply in chat by row number, for example <code>approve R1-R9, R11; reject R10, R16-R40; R3 note: the open rock is 30 m west, up the trail</code>. A correction is <code>R6 at 35.8830, -82.0101</code>. Anything you don't mention stays as it is now.</div>
+  {{SECTIONS}}
+</div>
