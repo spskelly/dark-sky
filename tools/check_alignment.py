@@ -17,6 +17,9 @@ what it checks, in the order that matters:
   3. the encoded string in the page still matches the cached raycast.
   4. the model's ground elevation against the listed elevation, which is the
      only independent word on whether the coordinate is where it claims.
+  5. every CANOPY entry belongs to a live spot or overlook, was computed from
+     the page's current coordinate and deck, decodes to its cache file, and
+     its pin ground agrees with 3DEP within 5 m.
 
 road placement is not here. tools/check-spots.mjs already measures every pin
 against the parkway centreline and against OpenStreetMap, and can snap the
@@ -71,9 +74,10 @@ def spots(html):
     out = {}
     for q, name, lat, lon, elev, rest in SPOT_RE.findall(block):
         view = re.search(r'view: \[(-?[\d.]+), (-?[\d.]+)\]', rest)
+        deck = re.search(r'deck: (-?[\d.]+)', rest)
         out[name] = dict(lat=float(lat), lon=float(lon), elev_ft=float(elev),
                          view=(float(view.group(1)), float(view.group(2))) if view else None,
-                         )
+                         deck=float(deck.group(1)) if deck else None)
     return out
 
 
@@ -89,6 +93,22 @@ def decode(s):
     return [ALT_MIN + (B64.index(s[2 * i]) * 64 + B64.index(s[2 * i + 1])) * ALT_RANGE / 4095.0
             for i in range(len(s) // 2)]
 
+
+CANOPY_CACHE = os.path.join(ROOT, 'tools', '.canopy-cache')
+GROUND_TOL_M = 5.0      # lidar ground against 3DEP at the pin; more is two surveys disagreeing
+
+
+def page_canopy(html):
+    """the CANOPY block: one json object per line, keyed by spot name or osm id"""
+    if 'const CANOPY = {' not in html:
+        return {}
+    block = html.split('const CANOPY = {', 1)[1].split('\n};', 1)[0]
+    out = {}
+    for line in block.splitlines():
+        m = re.match(r'\s*("(?:[^"\\]|\\.)*"): (\{.*\}),?\s*$', line)
+        if m:
+            out[json.loads(m.group(1))] = json.loads(m.group(2))
+    return out
 
 
 def main():
@@ -169,6 +189,50 @@ def main():
         elif max(abs(a - b) for a, b in zip(decode(enc), rec['alt'])) > ALT_RANGE / 4095.0:
             fail.append('%s (%s): the page string is not this raycast' % (o['name'], o['id']))
     say('%d overlooks checked' % len(ovs))
+
+    # the canopy: every entry a live place, computed from the coordinate and
+    # deck the page has now, the strings this cache's, and the pin ground
+    # within GROUND_TOL_M of the 3DEP post the ridge was raycast from
+    can = page_canopy(html)
+    ccache = {}
+    for path in glob.glob(os.path.join(CANOPY_CACHE, '*.json')):
+        d = json.load(open(path, encoding='utf-8'))
+        ccache[d.get('ov_id') or d.get('name')] = d
+    ov_by_id = {o['id']: o for o in ovs}
+    for key, e in sorted(can.items()):
+        if key in sp:
+            want, deck = sp[key]['view'] or (sp[key]['lat'], sp[key]['lon']), sp[key]['deck']
+        elif key in ov_by_id:
+            want, deck = (ov_by_id[key]['lat'], ov_by_id[key]['lon']), None
+        else:
+            fail.append('%s: canopy for a place that is not in the page' % key)
+            continue
+        d = ccache.get(key)
+        if not d:
+            fail.append('%s: canopy in the page but not in tools/.canopy-cache' % key)
+            continue
+        if abs(d['lat'] - want[0]) > 1e-9 or abs(d['lon'] - want[1]) > 1e-9:
+            fail.append('%s: canopy computed from %.4f,%.4f but the page now says %.4f,%.4f'
+                        ' - rerun tools/build_canopy.py' % (key, d['lat'], d['lon'], want[0], want[1]))
+        if d.get('deck_m') != deck:
+            fail.append('%s: canopy deck %s but the page says %s - rerun tools/build_canopy.py' % (key, d.get('deck_m'), deck))
+        if ('deck' in e) != bool(deck):
+            fail.append('%s: the page %s a deck profile but the spot %s deck:' % (key, 'has' if 'deck' in e else 'lacks', 'has' if deck else 'lacks'))
+        pairs = [(e.get('t'), d.get('t')), (e.get('s'), d.get('s'))]
+        if 'deck' in e and d.get('deck'):
+            pairs += [(e['deck'].get('t'), d['deck']['t']), (e['deck'].get('s'), d['deck']['s'])]
+        for enc, alt in pairs:
+            if enc and alt and max(abs(a - b) for a, b in zip(decode(enc), alt)) > ALT_RANGE / 4095 * 1.5:
+                fail.append('%s: a canopy string in the page is not this cached raycast' % key)
+                break
+        tc = cache.get(key) or ov_cache.get(key)
+        if tc and d.get('ground_m') is not None and abs(d['ground_m'] - tc['dem_m']) > GROUND_TOL_M:
+            warn.append('%s: lidar ground %.1f m, 3DEP %.1f m at the pin, %.1f m apart'
+                        % (key, d['ground_m'], tc['dem_m'], d['ground_m'] - tc['dem_m']))
+    for key, d in ccache.items():
+        if d.get('t') is not None and key not in can and (key in sp or key in ov_by_id):
+            fail.append('%s: canopy cached but not in the page - rerun tools/build_canopy.py' % key)
+    say('%d canopy entries checked' % len(can))
 
     for w in warn:
         print('WARN  %s' % w)
