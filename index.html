@@ -4642,15 +4642,21 @@ function canopyLegend(horizon, canopy) {
 // a wrong drawing.
 function placeProfiles(key) {
   const isOv = key.startsWith('ov:');
-  const entry = CANOPY[isOv ? key.slice(3) : key];
+  let entry = CANOPY[isOv ? key.slice(3) : key];
   const enc = isOv ? (OVERLOOK_HORIZONS[key.slice(3)] || [])[1] : HORIZONS[key];
   if (!enc) return null;
   let horizon;
   try { horizon = decodeHorizon(enc); } catch (e) { return null; }
-  const out = { horizon, canopy: decodeCanopy(entry), entry, deck: null };
-  const deckEnc = !isOv && entry && entry.deck && DECK_HORIZONS[key];
-  if (deckEnc) out.deck = { horizon: decodeHorizon(deckEnc), canopy: decodeCanopy(entry.deck), m: entry.deck.m };
-  return out;
+  // a corrupt canopy entry falls back to no entry, same as a missing one: the
+  // ridge still draws, and the caveat still tells the truth, rather than
+  // throwing out of here and leaving every card after this one unpainted
+  let canopy = null, deck = null;
+  try {
+    canopy = decodeCanopy(entry);
+    const deckEnc = !isOv && entry && entry.deck && DECK_HORIZONS[key];
+    if (deckEnc) deck = { horizon: decodeHorizon(deckEnc), canopy: decodeCanopy(entry.deck), m: entry.deck.m };
+  } catch (e) { canopy = null; deck = null; entry = null; }
+  return { horizon, canopy, entry, deck };
 }
 
 function openSkyViewerForPoint(lat, lon, opts) {

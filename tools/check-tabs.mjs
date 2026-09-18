@@ -769,6 +769,9 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   const id = await a.evaluate(() => OVERLOOKS[Math.floor(OVERLOOKS.length / 2)].id);
   await a.evaluate(i => OVL_open(i), id);
   await a.waitForSelector('.leaflet-popup .ovl canvas.skyline');
+  // the caveat the page itself computes for this overlook -- whichever text
+  // that is, empty CANOPY or filled, the popup and the viewer must agree on it
+  const wantCaveat = await a.evaluate(i => canopyCaveat(CANOPY[i]), id);
   const pop = await a.evaluate(() => {
     const c = document.querySelector('.leaflet-popup .ovl canvas.skyline');
     const px = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
@@ -789,7 +792,7 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   ok(pop.sized, 'the popup panorama is painted at its real width');
   ok(pop.colours >= 5, `and paints a real ridge, not a flat fill (${pop.colours} distinct colours, sampled)`);
   ok(/\d,?\d{3} ft/.test(pop.text), 'the popup lists the elevation');
-  ok(pop.text.includes('modelled from bare earth, not visited; trees and the cut bank are not in it'), 'and says what the model cannot see');
+  ok(pop.text.includes(wantCaveat), 'and says what the model computes for this overlook');
   ok(pop.hasOpenBtn, 'the popup has its own "open sky view" button');
   ok(!pop.hasScrubber, 'and no scrubber of its own');
   ok(!pop.hasSky, 'and no sky sentence of its own -- that moved into the viewer');
@@ -803,7 +806,7 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
     place: document.getElementById('sky-place').value,
   }));
   ok((await visible(a)).join() === 'panel-sky' && viewer.title.length > 0, `"open sky view" opens the sky tab, titled ${JSON.stringify(viewer.title)}`);
-  ok(viewer.caveat.includes('modelled from bare earth, not visited'), 'with the same caveat the popup shows');
+  ok(viewer.caveat.includes(wantCaveat), 'with the same caveat the popup shows');
   ok(viewer.place === 'ov:' + id, 'and the chooser lists the overlook');
   await a.close();
 
