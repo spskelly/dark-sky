@@ -1,5 +1,7 @@
-# tools/build_horizons.py and tools/build_terrain_tiles.py only. the page itself has no build step and no
-# dependencies; this is the offline raycast against the USGS 3DEP tiles on S:.
+# tools/build_horizons.py, tools/build_terrain_tiles.py and tools/build_canopy.py only. the page itself
+# has no build step and no dependencies; this is the offline raycast against the USGS 3DEP tiles on S:
+# and the point-cloud fetch from the public USGS EPT buckets.
 # pinned to what the interpreter this was developed against reports.
 rasterio==1.4.3
 numpy==2.3.3
+laspy[lazrs]==2.7.0

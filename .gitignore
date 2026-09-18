@@ -2,6 +2,7 @@ node_modules/
 tools/.osm-cache.json
 tools/.overlooks-raw.json
 tools/.horizon-cache/
+tools/.canopy-cache/
 tools/.starcat-cache/
 tools/__pycache__/
 tools/.shots/
