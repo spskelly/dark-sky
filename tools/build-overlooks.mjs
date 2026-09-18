@@ -24,7 +24,10 @@ const RAW = path.join(ROOT, 'tools', '.overlooks-raw.json');
 // reviewed standing spots, { osm id: [lat, lon, note] }: where a person stands
 // to see the sky from this pull-off, when the osm point sits in the trees. the
 // dot on the map goes here, the skyline is drawn from here, and a note says
-// what the walk is. kept by hand; see docs/horizon_panorama.md#standing-spots
+// what the walk is. an id mapped to null instead means the overlook was
+// reviewed and has no view worth listing (grown in, or covered by a nearby
+// curated spot), and is left out of the OVERLOOKS block entirely. kept by
+// hand; see docs/horizon_panorama.md#standing-spots
 const VIEWS = path.join(ROOT, 'tools', 'overlook-views.json');
 const START = '// --- overlooks:start (generated, do not edit by hand) ---';
 const END = '// --- overlooks:end ---';
@@ -118,24 +121,31 @@ export function pick(elements, spots, views = {}) {
   // a separate list, not a key on the kept rows: kept rows are written into
   // the page as-is, and the moved distance is only for this run's own log.
   const applied = [];
+  // a reviewed overlook with no view worth listing: left off the OVERLOOKS
+  // block, not merely un-moved, so it never gets the osm point's default coordinate
+  const dropped = [];
+  const rows = [];
+  for (const o of kept) {
+    const v = views[o.id];
+    if (v === null) { dropped.push({ id: o.id, name: o.name }); continue; }
+    const mp = milepost(o.name);
+    // three readers (build_horizons.parse_overlooks, check_alignment.py,
+    // build-skyglow.mjs) split the OVERLOOKS block on "];", so a note
+    // carrying it would corrupt every one of them
+    if (v && v[2] && v[2].includes('];'))
+      throw new Error(`overlook-views.json note for ${o.id} contains "];", which the OVERLOOKS block readers split on`);
+    // a reviewed spot is kept exact: it was placed to the metre on purpose,
+    // where the osm point is only cut to the 10 m the terrain needs
+    const at = v ? { lat: v[0], lon: v[1] } : { lat: +o.lat.toFixed(4), lon: +o.lon.toFixed(4) };
+    if (v) applied.push({ id: o.id, name: o.name, movedM: metres({ lat: o.lat, lon: o.lon }, at) });
+    rows.push({ id: o.id, name: o.name, ...at, ...(mp === null ? {} : { mp }), ...(v && v[2] ? { note: v[2] } : {}) });
+  }
   return {
     counts: { returned: elements.length, named: named.length, inNorthCarolina: inNC.length,
               clearOfSpots: clear.length, distinct: kept.length },
-    kept: kept.map(o => {
-      const mp = milepost(o.name);
-      const v = views[o.id];
-      // three readers (build_horizons.parse_overlooks, check_alignment.py,
-      // build-skyglow.mjs) split the OVERLOOKS block on "];", so a note
-      // carrying it would corrupt every one of them
-      if (v && v[2] && v[2].includes('];'))
-        throw new Error(`overlook-views.json note for ${o.id} contains "];", which the OVERLOOKS block readers split on`);
-      // a reviewed spot is kept exact: it was placed to the metre on purpose,
-      // where the osm point is only cut to the 10 m the terrain needs
-      const at = v ? { lat: v[0], lon: v[1] } : { lat: +o.lat.toFixed(4), lon: +o.lon.toFixed(4) };
-      if (v) applied.push({ id: o.id, name: o.name, movedM: metres({ lat: o.lat, lon: o.lon }, at) });
-      return { id: o.id, name: o.name, ...at, ...(mp === null ? {} : { mp }), ...(v && v[2] ? { note: v[2] } : {}) };
-    }),
+    kept: rows,
     applied,
+    dropped,
   };
 }
 
@@ -161,21 +171,25 @@ async function main() {
     fs.renameSync(tmp, RAW);
     elements = data.elements;
   }
-  const { counts, kept, applied } = pick(elements, spots, views);
+  const { counts, kept, applied, dropped } = pick(elements, spots, views);
   console.log(`viewpoints within ${NEAR_ROAD_M} m of the parkway: ${counts.returned}`);
   console.log(`  named, and not just "scenic overlook":   ${counts.named}`);
   console.log(`  south of ${NC_NORTH} n, so in north carolina:   ${counts.inNorthCarolina}`);
   console.log(`  more than ${NEAR_SPOT_M} m from a curated spot:      ${counts.clearOfSpots}`);
   console.log(`  after collapsing one overlook mapped twice: ${counts.distinct}`);
   console.log(`  of which carry a milepost in the name:   ${kept.filter(o => o.mp !== undefined).length}`);
-  const stale = Object.keys(views).filter(id => !kept.some(o => o.id === id));
-  console.log(`standing spots applied: ${Object.keys(views).length - stale.length}`);
+  // a stale id is one that matched no candidate overlook at all, whether its
+  // value is a view or null: a null just means the match, once found, was dropped on purpose
+  const stale = Object.keys(views).filter(id => !kept.some(o => o.id === id) && !dropped.some(d => d.id === id));
+  console.log(`standing spots applied: ${applied.length}`);
   for (const id of stale) console.warn(`  overlook-views.json names ${id}, which is no longer in the list`);
   for (const a of applied) {
     console.log(`  ${a.name} (${a.id}): moved ${a.movedM.toFixed(0)} m from the osm point`);
     if (movedTooFar(a.movedM))
       console.warn(`    over ${MOVED_WARN_M} m, check the coordinate in tools/overlook-views.json`);
   }
+  console.log(`standing spots dropped: ${dropped.length}`);
+  for (const d of dropped) console.log(`  ${d.name} (${d.id}): reviewed, no view worth listing, left off the page`);
   // a run that comes back nearly empty is overpass having a bad day, and
   // writing it would quietly delete the layer
   if (kept.length < 50) throw new Error(`refusing to write: only ${kept.length} overlooks, expected over a hundred`);

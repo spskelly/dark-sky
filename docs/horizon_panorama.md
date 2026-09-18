@@ -512,6 +512,15 @@ line on the card or in the overlook popup, not left for the reader to find
 out (Shawn, 2026-09-18). A rejected row changes nothing: the site stays
 under trees and the review record says so.
 
+An overlook can also be reviewed and found to have nothing worth listing, in
+which case its id maps to `null` instead of `[lat, lon, note]` and the
+overlook is left off the page entirely, rather than kept at the OSM point:
+Balsam Gap Overlook (two sources call the view grown in, and View Waynesville,
+1.7 km east, already covers that stretch), Camp Creek Overlook (several
+sources call it overgrown with no vista), and View Chesnut Cove (the lidar
+reads 74 degrees at the pin and 56 degrees at the pull-off, closed on the
+better half).
+
 Review outcome (Task 15): (pending: review outcome, Task 15 -- approved,
 rejected and corrected counts). Over-30 count: 40 before the review,
 (pending: over-30 count after the review).

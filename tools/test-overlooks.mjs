@@ -128,6 +128,15 @@ test('a standing spot moved more than 60 m from the osm point is flagged, a mist
   assert.equal(movedTooFar(0), false);
 });
 
+test('a null standing spot drops that overlook, other overlooks untouched', () => {
+  const { kept, applied, dropped } = pick([node(1, 'X Overlook', 35.1, -82.9), node(2, 'Y Overlook', 35.3, -82.5)],
+    [], { n1: null, n2: [35.30001, -82.50002, ''] });
+  assert.deepEqual(kept.map(o => o.id), ['n2']);
+  assert.deepEqual(dropped, [{ id: 'n1', name: 'X Overlook' }]);
+  assert.equal(applied.length, 1);
+  assert.equal(applied[0].id, 'n2');
+});
+
 test('a note containing "];" is refused, naming the overlook id', () => {
   assert.throws(
     () => pick([node(1, 'X Overlook', 35.1, -82.9)], [], { n1: [35.10002, -82.90001, 'walk past the gate]; then turn'] }),
