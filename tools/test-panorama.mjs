@@ -285,6 +285,24 @@ test('sentence: a tree line within five minutes of the ridge names the trees but
   assert.doesNotMatch(s, /\(the ridge/, s);
 });
 
+test('sentence: entering the window from above the crowns names the trees at every window height (the crossing altitude, not a ten-minute sample past it)', () => {
+  const t = flat(-10); for (let az = 190; az <= 270; az++) t[az] = 35;
+  const lo = flat(-10);
+  for (const hiVal of [8, 12, 16, 20]) {
+    const hi = flat(-10); for (let az = 190; az <= 270; az++) hi[az] = hiVal;
+    const s = say(ridge, { t, s: null, lo, hi });
+    assert.match(s, /moon clears the (south|southwest|west) trees \d+:\d\d[ap]m \(above the ridge at dusk\)/, `hi=${hiVal}: ${s}`);
+  }
+});
+
+test('sentence: already up inside the window at dusk is named the trees too, not only at a rise or set', () => {
+  const t = flat(-10); for (let az = 190; az <= 270; az++) t[az] = 35;
+  const lo = flat(-10);
+  const hi = flat(-10); for (let az = 190; az <= 270; az++) hi[az] = 12;
+  const s = say(ridge, { t, s: null, lo, hi });
+  assert.match(s, /core already clear of the (south|southwest|west) trees at dusk/, s);
+});
+
 test('sentence: with a canopy the sentence keeps its shape, comma separated parts and no trailing full stop', () => {
   // shape only; the tests above pin down the content.
   const s = say(ridge, { t: swTrees, s: null });

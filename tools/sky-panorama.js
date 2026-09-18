@@ -814,10 +814,16 @@ function trackBody(opts, at, profile) {
     const p = at(now);
     const up = clearsRidge(prof, p);
     if (up && !prevUp && !out.rise) {
-      out.rise = { at: crossingTime(at, prof, prevT, now), az: p.az, alt: p.alt };
+      // the ten-minute sample can sit a couple of degrees past the crossing,
+      // and panLayerAt's window check is a half-degree band, so the sample's
+      // own altitude is not close enough: read the body again at the
+      // bisected crossing time.
+      const x = crossingTime(at, prof, prevT, now);
+      out.rise = { at: x, az: p.az, alt: at(x).alt };
       out.everUp = true;
     } else if (!up && prevUp && !out.set && out.everUp) {
-      out.set = { at: crossingTime(at, prof, prevT, now), az: prevP.az, alt: prevP.alt };
+      const x = crossingTime(at, prof, prevT, now);
+      out.set = { at: x, az: prevP.az, alt: at(x).alt };
     }
     prevT = now; prevP = p; prevUp = up;
   }
@@ -889,7 +895,7 @@ function panCoreParts(a, r, ridge, canopy) {
     return 'drops behind the ' + panLayerPhrase(panDir(a.set.az), c.layer, false) + ' ' + panTime(a.set.at) + c.note;
   };
   if (a.upAtDusk) {
-    parts.push('core already clear of the ' + panLayerPhrase(panDir(a.duskAz), panLayerAt(ridge, canopy, a.duskAz), true) + ' at dusk');
+    parts.push('core already clear of the ' + panLayerPhrase(panDir(a.duskAz), panLayerAt(ridge, canopy, a.duskAz, a.duskAlt), true) + ' at dusk');
     if (a.set) parts.push(drop());
   } else if (a.rise) {
     const c = panCrossing(ridge, canopy, a.rise, r, 'rise');
