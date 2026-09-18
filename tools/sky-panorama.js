@@ -10,8 +10,11 @@
      STARS              from the star block (tools/stars.js)
      HORIZON_ALT_MIN, HORIZON_ALT_RANGE, HORIZONS   from the generated
                         horizons block, which is why they are not declared here
+     CANOPY             from the generated canopy block: decoded here, drawn
+                        as layers under the ridge, never combined in the page
 
-   public: decodeHorizon(s), drawPanorama(canvas, opts), horizonSummary(opts),
+   public: decodeHorizon(s), decodeCanopy(e), drawPanorama(canvas, opts),
+            horizonSummary(opts), panBlocking(horizon, canopy),
             panProject(alt, az, view), panDir16(az),
             easternParts(instant), easternInstant(y, mo, d, hour, minute)
 */
@@ -37,6 +40,40 @@ function horizonAt(horizon, azDeg) {
   const i = Math.floor(a);
   const f = a - i;
   return horizon[i] * (1 - f) + horizon[(i + 1) % 360] * f;
+}
+
+// the canopy block's entry for a place, decoded: { t, s } with a Float64Array
+// per layer that is there and null for one that is not, or null for no
+// entry at all. the two stay separate from the ridge: what is drawn and what
+// is named both need to know which layer a degree belongs to.
+function decodeCanopy(e) {
+  if (!e) return null;
+  return { t: e.t ? decodeHorizon(e.t) : null, s: e.s ? decodeHorizon(e.s) : null };
+}
+
+// per-azimuth maximum of two profiles; a null second returns the first as is
+function panMaxProfile(a, b) {
+  if (!b) return a;
+  const out = new Float64Array(360);
+  for (let i = 0; i < 360; i++) out[i] = Math.max(a[i], b[i]);
+  return out;
+}
+
+// the profile a body actually has to clear: the highest of ridge, trees and
+// structures. with nothing above the ridge it is the ridge itself, the same
+// object, which is what keeps the no-canopy sentence exactly what it was.
+function panBlocking(horizon, canopy) {
+  if (!canopy || (!canopy.t && !canopy.s)) return horizon;
+  return panMaxProfile(panMaxProfile(horizon, canopy.t), canopy.s);
+}
+
+// which layer sits highest at an azimuth. ties go to the ridge, so a tree
+// line flush with the crest is still "the ridge".
+function panLayerAt(horizon, canopy, az) {
+  let word = 'ridge', best = horizonAt(horizon, az);
+  if (canopy && canopy.t && horizonAt(canopy.t, az) > best) { word = 'trees'; best = horizonAt(canopy.t, az); }
+  if (canopy && canopy.s && horizonAt(canopy.s, az) > best) word = 'structure';
+  return word;
 }
 
 // ---------- projection ----------
@@ -183,7 +220,7 @@ function drawPanorama(canvas, opts) {
   ctx.clearRect(0, 0, w, h);
 
   if (opts.mode === 'view') { drawSkyView(ctx, w, h, opts); return true; }
-  if (opts.mode === 'thumb') { drawRidge(ctx, opts.horizon, w, h); return true; }
+  if (opts.mode === 'thumb') { drawRidge(ctx, opts.horizon, w, h, opts.canopy); return true; }
   return false;
 }
 
@@ -199,21 +236,17 @@ const starMagLimit = w => (w < 520 ? 4.2 : 6);
 // the ridge, the thumbnail's whole drawing: the full turn, degree by degree,
 // filled from the crest down to the bottom edge. the open, turnable sky and
 // its own ridge fill, wash, stars and moon live in drawSkyView below now.
-function drawRidge(ctx, horizon, w, h) {
-  const altAt = i => horizon[((Math.round(i) % 360) + 360) % 360];
-
+// one filled strip: the full turn, degree by degree, from the crest down to
+// the bottom edge, plus a one pixel crest line. the thumbnail's whole
+// drawing is three of these back to front.
+function panRidgeStrip(ctx, prof, w, h, style) {
+  const altAt = i => prof[((Math.round(i) % 360) + 360) % 360];
   ctx.beginPath();
   ctx.moveTo(panXLin(0, w), h);
-  for (let i = 0; i <= 360; i++) {
-    ctx.lineTo(panXLin(i, w), panY(altAt(i), h));
-  }
+  for (let i = 0; i <= 360; i++) ctx.lineTo(panXLin(i, w), panY(altAt(i), h));
   ctx.lineTo(panXLin(360, w), h);
   ctx.closePath();
-
-  const g = ctx.createLinearGradient(0, panY(PAN_TOP * 0.3, h), 0, h);
-  g.addColorStop(0, '#121c38');
-  g.addColorStop(1, '#070c1a');
-  ctx.fillStyle = g;
+  ctx.fillStyle = style.fill;
   ctx.fill();
 
   // a rim of sky light along the crest. without it the silhouette reads as a
@@ -224,9 +257,30 @@ function drawRidge(ctx, horizon, w, h) {
     const y = panY(altAt(i), h);
     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   }
-  ctx.strokeStyle = 'rgba(122,140,186,0.75)';
+  ctx.setLineDash(style.dash);
+  ctx.strokeStyle = style.crest;
   ctx.lineWidth = 1;
   ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+// the layers, back to front. structures opaque slate with a dashed crest;
+// trees a dark green at 70 per cent, so a moon or the core sliding behind the
+// tree band stays visible while the reader scrubs the night; the ridge last
+// and as it always was. each ring is the highest of itself and what is
+// below it, so a tree line under the ridge never pokes through.
+const PAN_LAYERS = {
+  structures: { fill: '#343946', crest: 'rgba(196,200,210,0.75)', dash: [4, 3], rim: null },
+  trees: { fill: 'rgba(8,28,16,0.7)', crest: 'rgba(118,168,118,0.6)', dash: [], rim: 'rgba(130,190,130,0.10)' },
+};
+
+function drawRidge(ctx, horizon, w, h, canopy) {
+  if (canopy && canopy.s) panRidgeStrip(ctx, panBlocking(horizon, canopy), w, h, PAN_LAYERS.structures);
+  if (canopy && canopy.t) panRidgeStrip(ctx, panMaxProfile(horizon, canopy.t), w, h, PAN_LAYERS.trees);
+  const g = ctx.createLinearGradient(0, panY(PAN_TOP * 0.3, h), 0, h);
+  g.addColorStop(0, '#121c38');
+  g.addColorStop(1, '#070c1a');
+  panRidgeStrip(ctx, horizon, w, h, { fill: g, crest: 'rgba(122,140,186,0.75)', dash: [] });
 }
 
 // ---------- the dialog viewer (stereographic) ----------
@@ -511,13 +565,10 @@ function panProjectAll(alt, az, view) {
 // within a degree of the point directly behind the viewer a chord can cut the
 // canvas; only reachable looking at or below the horizon. sample finer there
 // if it ever shows.
-function drawRidgeView(ctx, horizon, view, w, h) {
-  const altAt = horizon ? (az => horizonAt(horizon, az)) : (() => 0);
+function panRingView(ctx, prof, view, w, h, style) {
+  const altAt = az => horizonAt(prof, az);
   const top = [];
   for (let az = 0; az < 360; az++) top.push(panProject(altAt(az), az, view));
-  const g = ctx.createLinearGradient(0, 0, 0, h);
-  g.addColorStop(0, '#0b1226');
-  g.addColorStop(1, '#03060f');
   ctx.beginPath();
   for (let az = 0; az < 360; az++) {
     const p = panProjectAll(altAt(az), az, view);
@@ -526,7 +577,7 @@ function drawRidgeView(ctx, horizon, view, w, h) {
   ctx.closePath();
   const behindIsGround = -view.alt0 < altAt(view.az0 + 180);
   if (behindIsGround) ctx.rect(-1, -1, w + 2, h + 2);
-  ctx.fillStyle = g;
+  ctx.fillStyle = style.fill;
   ctx.fill('evenodd');
 
   for (const run of panRuns(top, true)) {
@@ -535,15 +586,29 @@ function drawRidgeView(ctx, horizon, view, w, h) {
     ctx.beginPath();
     ctx.moveTo(top[run[0]].x, top[run[0]].y);
     for (let k = 1; k < run.length; k++) ctx.lineTo(top[run[k]].x, top[run[k]].y);
-    ctx.save();
-    ctx.strokeStyle = 'rgba(140,164,220,0.10)';
-    ctx.lineWidth = 11;
-    ctx.stroke();
-    ctx.restore();
-    ctx.strokeStyle = 'rgba(132,152,204,0.5)';
+    if (style.rim) {
+      ctx.save();
+      ctx.strokeStyle = style.rim;
+      ctx.lineWidth = 11;
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.setLineDash(style.dash);
+    ctx.strokeStyle = style.crest;
     ctx.lineWidth = 1;
     ctx.stroke();
+    ctx.setLineDash([]);
   }
+}
+
+function drawRidgeView(ctx, horizon, view, w, h, canopy) {
+  const terrain = horizon || new Float64Array(360);   // a picked point: flat at 0
+  if (canopy && canopy.s) panRingView(ctx, panBlocking(terrain, canopy), view, w, h, PAN_LAYERS.structures);
+  if (canopy && canopy.t) panRingView(ctx, panMaxProfile(terrain, canopy.t), view, w, h, PAN_LAYERS.trees);
+  const g = ctx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, '#0b1226');
+  g.addColorStop(1, '#03060f');
+  panRingView(ctx, terrain, view, w, h, { fill: g, crest: 'rgba(132,152,204,0.5)', dash: [], rim: 'rgba(140,164,220,0.10)' });
   if (!horizon) {
     const label = panProject(0, view.az0, view);
     if (label) {
@@ -563,7 +628,7 @@ function drawSkyView(ctx, w, h, opts) {
   drawStarsView(ctx, sky, view, w, h);
   drawMoonView(ctx, sky, view);
   drawGridView(ctx, view, w, h);
-  drawRidgeView(ctx, opts.horizon, view, w, h);
+  drawRidgeView(ctx, opts.horizon, view, w, h, opts.canopy);
   drawLevelView(ctx, view);
 }
 

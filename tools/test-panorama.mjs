@@ -25,12 +25,16 @@ import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 
 const src = readFileSync(new URL('./sky-panorama.js', import.meta.url), 'utf8');
+const astro = readFileSync(new URL('./sky-astro.js', import.meta.url), 'utf8');
 // the sky-panorama.js source assumes HORIZON_ALT_MIN/RANGE from the generated
-// horizons block; only decodeHorizon touches them, and nothing here calls it
+// horizons block, and Sky from the astro block for the sentence tests below;
+// both are loaded the way index.html loads them, as earlier scripts in the
+// same scope
 const ctx = { Math, HORIZON_ALT_MIN: -10, HORIZON_ALT_RANGE: 90 };
 vm.createContext(ctx);
+vm.runInContext(astro, ctx);
 vm.runInContext(src, ctx);
-const { azToX, panProject, easternInstant, easternParts } = ctx;
+const { azToX, panProject, easternInstant, easternParts, decodeHorizon, decodeCanopy, panMaxProfile, panBlocking, panLayerAt, horizonSummary } = ctx;
 
 test('azToX is a plain affine map: the window edges land on 0 and w', () => {
   // centre 180, a 120 degree window: the edges are 120 and 240
@@ -161,4 +165,41 @@ test('easternInstant/easternParts do not depend on the process\'s own timezone: 
   });
   assert.deepEqual(fromTokyo, fromHere,
     'a Tokyo process timezone must not change which instant or which eastern date these resolve to');
+});
+
+// the canopy layers: decoded beside the terrain, combined only where a
+// consumer needs the highest thing in the way
+const flat = v => new Float64Array(360).fill(v);
+const enc = v => { const q = Math.round((v + 10) * 4095 / 90); const B = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'; return (B[Math.floor(q / 64)] + B[q % 64]).repeat(360); };
+
+test('decodeCanopy: t and s decode, a missing layer is null, a missing entry is null', () => {
+  const c = decodeCanopy({ t: enc(12), s: enc(30) });
+  assert.ok(Math.abs(c.t[0] - 12) < 0.03 && Math.abs(c.s[359] - 30) < 0.03);
+  assert.equal(decodeCanopy({ t: enc(12) }).s, null);
+  assert.equal(decodeCanopy(undefined), null);
+});
+
+test('panBlocking: the highest of ridge, trees and structures per azimuth', () => {
+  const ridge = flat(2); ridge[100] = 20;
+  const b = panBlocking(ridge, { t: flat(12), s: null });
+  assert.equal(b[0], 12);
+  assert.equal(b[100], 20);
+  const c = panBlocking(ridge, { t: flat(12), s: flat(15) });
+  assert.equal(c[0], 15);
+});
+
+test('panBlocking with no canopy is the ridge itself, the same object', () => {
+  const ridge = flat(2);
+  assert.equal(panBlocking(ridge, null), ridge);
+  assert.equal(panBlocking(ridge, { t: null, s: null }), ridge);
+  assert.equal(panMaxProfile(ridge, null), ridge);
+});
+
+test('panLayerAt names the highest layer and gives ties to the ridge', () => {
+  const ridge = flat(5);
+  assert.equal(panLayerAt(ridge, null, 90), 'ridge');
+  assert.equal(panLayerAt(ridge, { t: flat(5), s: null }, 90), 'ridge');
+  assert.equal(panLayerAt(ridge, { t: flat(6), s: null }, 90), 'trees');
+  assert.equal(panLayerAt(ridge, { t: flat(6), s: flat(7) }, 90), 'structure');
+  assert.equal(panLayerAt(ridge, { t: flat(6), s: flat(6) }, 90), 'trees');
 });
