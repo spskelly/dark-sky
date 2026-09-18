@@ -254,6 +254,21 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   await c.keyboard.press('Home');
   ok(await c.evaluate(() => skyView.az === 180 && skyView.alt === 25 && skyView.fov === 100),
     'Home resets to the default view');
+
+  // looking down has a floor: the bottom edge of the canvas never sits more
+  // than about ten degrees under level, since a wide canvas otherwise fills
+  // its lower half with ground. the floor follows the canvas shape and zoom.
+  for (let i = 0; i < 20; i++) await c.keyboard.press('ArrowDown');
+  const low = await c.evaluate(() => {
+    const cv = document.querySelector('.sky-viewer-canvas');
+    const view = { az0: skyView.az, alt0: skyView.alt, fov: skyView.fov, w: cv.clientWidth, h: cv.clientHeight };
+    // the altitude at the bottom centre, found by walking down from level
+    let bottom = 0;
+    for (let a = 0; a >= -60; a -= 0.5) { const p = panProject(a, skyView.az, view); if (!p || p.y > cv.clientHeight) break; bottom = a; }
+    return { alt: skyView.alt, floor: skyAltFloor(), bottom };
+  });
+  ok(low.alt === low.floor && low.floor > 12, `arrow-down stops at the floor (${low.floor.toFixed(1)} degrees up on this canvas)`);
+  ok(low.bottom >= -11, `where the canvas bottom is about ten degrees under level (${low.bottom})`);
   await ctx.close();
 }
 
@@ -512,6 +527,7 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
     return { bright, tall: cv.height > cv.width };
   });
   ok(low.tall, 'the phone viewer canvas is taller than it is wide');
+  ok(await page.evaluate(() => skyView.alt >= 30 && skyAltFloor() <= 35), `and the default view opens higher there, at the capped floor (${await page.evaluate(() => skyView.alt)})`);
   ok(low.bright === 0, `and the bottom of it is ground, with no sky under the ridge (${low.bright} bright pixels)`);
   const sub = await page.$eval('.sky-viewer-elev', e => e.textContent);
   ok(!sub.includes('&') && sub.includes('ft'), `the elevation line is text, not markup (${sub})`);

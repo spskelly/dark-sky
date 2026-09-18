@@ -4531,6 +4531,11 @@ function paintSkyViewer() {
   els.time.value = String(idx);
   const when = nights[idx];
 
+  // a remembered or default altitude below this canvas's floor is raised to
+  // it, and stays raised: the floor is where the canvas shape puts it
+  const floor = skyAltFloor();
+  if (skyView.alt < floor) { skyView.alt = floor; saveSkyView(); }
+
   els.clock.textContent = fmtClock(when);
   els.compass.textContent = 'looking ' + panDir16(skyView.az) + ', '
     + (skyView.alt >= 0 ? Math.round(skyView.alt) + ' degrees up' : Math.round(-skyView.alt) + ' degrees down');
@@ -4546,8 +4551,25 @@ function paintSkyViewer() {
   }
 }
 
+// how low the view may look: the bottom edge of the canvas stays within
+// about ten degrees under level, since the field of view is set across the
+// width and a wide canvas looking 7 degrees up otherwise fills its lower
+// half with ground. the vertical half-angle comes from the projection
+// itself (r = 2 scale tan(theta/2), scale = w / (4 tan(fov/4))); the cap
+// keeps a tall phone canvas, whose half-angle passes 60 degrees, from being
+// forced to stare upward.
+function skyAltFloor() {
+  const cv = skyViewerEls().canvas;
+  const w = cv && cv.clientWidth, h = cv && cv.clientHeight;
+  if (!w || !h) return -10;
+  const half = 2 * Math.atan(h / w * Math.tan(skyView.fov / 4 * PAN_D2R)) / PAN_D2R;
+  return Math.min(35, half - 10);
+}
+
 function setSkyView(az, alt, fov) {
-  skyView = { az: ((az % 360) + 360) % 360, alt: Math.max(-10, Math.min(90, alt)), fov: Math.max(40, Math.min(140, fov)) };
+  fov = Math.max(40, Math.min(140, fov));
+  skyView = { az: ((az % 360) + 360) % 360, alt, fov };
+  skyView.alt = Math.max(skyAltFloor(), Math.min(90, alt));
   saveSkyView();
   paintSkyViewer();
 }
