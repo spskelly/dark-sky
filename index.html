@@ -130,7 +130,7 @@
   /* the two-word version of each question. only the sticky phone strip wears it */
   .guide .short { display: none; }
   /* in-panel anchors land a heading just under the top edge, not flush against it */
-  .windows, .spots, #tonight, #cal, .controls { scroll-margin-top: 22px; }
+  .windows, .spots, #tonight, #cal, .controls, #sky-viewer { scroll-margin-top: 22px; }
   /* hourly sky row: one icon per hour, weather-app style */
   .tonight { margin-top: 18px; max-width: 640px; width: 100%; }
   /* stacked, not space-between: both labels are long enough to wrap into
@@ -333,21 +333,18 @@
     border-radius: 999px; padding: 4px 12px; font-size: 12px; cursor: pointer; }
   .ovl-open:hover { color: var(--ink); }
   .ovl-caveat { font-size: 11px; opacity: .7; margin: 6px 0; }
-  /* the sky viewer dialog: one canvas that fills whatever height is left,
-     a control row, the two sentences, a close button. showModal gives the
-     focus trap, Escape and the backdrop for free. */
-  #sky-viewer { padding: 0; border: none; border-radius: 14px; background: var(--night-2); color: var(--ink);
-    width: min(1100px, 96vw); height: min(760px, 92vh); max-width: none; max-height: none;
-    display: none; flex-direction: column; overflow: hidden; }
-  #sky-viewer[open] { display: flex; }
-  #sky-viewer::backdrop { background: rgba(6,10,20,0.72); }
-  .sky-viewer-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 14px 18px 0; }
-  .sky-viewer-head h3 { margin: 0; font-family: var(--serif); font-weight: 400; font-size: 19px; color: var(--moon); }
+  /* the sky viewer, the "what will i see?" tab: a canvas with a set share of
+     the screen, a control row and the sentences under it. hidden until a
+     place is loaded into it. */
+  .sky-tab h3 { font-family: var(--serif); font-weight: 400; font-size: 24px; line-height: 1.21; margin: 0 0 6px; }
+  .sky-tab .spot-controls { margin: 12px 0 0; }
+  #sky-place { max-width: min(40ch, 100%); }
+  #sky-viewer { margin-top: 14px; border-radius: 14px; background: var(--night-2); color: var(--ink); overflow: hidden; }
+  #sky-viewer:not([data-place]) { display: none; }
+  .sky-viewer-head { padding: 14px 18px 0; }
+  .sky-viewer-head h4 { margin: 0; font-family: var(--serif); font-weight: 400; font-size: 19px; color: var(--moon); }
   .sky-viewer-elev { margin: 3px 0 0; font-size: 12.5px; color: var(--ink-dim); }
-  .sky-viewer-close { background: none; border: 1px solid var(--line); color: var(--ink-dim); border-radius: 8px;
-    width: 30px; height: 30px; font-size: 16px; line-height: 1; cursor: pointer; flex: none; }
-  .sky-viewer-close:hover { color: var(--ink); border-color: var(--ink-dim); }
-  .sky-viewer-canvas { flex: 1; min-height: 0; width: 100%; margin-top: 10px; background: #070c18;
+  .sky-viewer-canvas { display: block; width: 100%; height: min(620px, 68vh); margin-top: 10px; background: #070c18;
     touch-action: none; cursor: grab; }
   .sky-viewer-canvas:active { cursor: grabbing; }
   .sky-viewer-canvas:focus-visible { outline: 2px solid var(--accent, #5fc2ad); outline-offset: -2px; }
@@ -366,7 +363,7 @@
   .sky-viewer-foot p:first-child { margin-top: 0; }
   .sky-viewer-foot p:empty { display: none; }
   @media (max-width: 720px) {
-    #sky-viewer { width: 100vw; height: 100vh; height: 100dvh; border-radius: 0; }
+    .sky-viewer-canvas { height: 72vh; }
   }
   .spot .links a { color: var(--moon-dim); text-decoration: none; margin-right: 12px; }
   .spot .links a:hover { color: var(--moon); text-decoration: underline; }
@@ -424,9 +421,10 @@
 
   .season { max-width: 1100px; margin: 0 auto; }
   .season h3 { font-family: var(--serif); font-weight: 400; font-size: 24px; line-height: 1.21; margin: 0; }
-  .season ul { margin: 12px 0 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px 24px; }
-  .season li { color: var(--ink-dim); font-size: 14px; line-height: 1.5; }
-  .season li b { color: var(--ink); font-weight: 500; }
+  .season ul, .sky-notes { margin: 12px 0 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px 24px; }
+  .sky-notes { margin-top: 18px; }
+  .season li, .sky-notes li { color: var(--ink-dim); font-size: 14px; line-height: 1.5; }
+  .season li b, .sky-notes li b { color: var(--ink); font-weight: 500; }
 
   /* the list is a scrolling column beside the map on a wide screen. below 900px
      it stacks under the map and loses that scroll box, which put all forty
@@ -479,14 +477,14 @@
 
     /* on a phone three cards of question-and-explanation is most of a screen
        spent on navigation, so the tab bar shrinks to a sticky strip of short
-       labels: the current tab marked, the other two one tap away. */
+       labels: the current tab marked, the others one tap away. */
     .guide {
       position: sticky; top: 0; z-index: 1100; margin-bottom: 20px;
       /* out to the body's gutters, so nothing shows through underneath it */
       margin-inline: calc(-1 * clamp(16px, 4vw, 56px)); padding-inline: clamp(16px, 4vw, 56px);
       background: var(--night); border-bottom: 1px solid var(--night-3);
     }
-    .guide .tablist { grid-template-columns: repeat(3, 1fr); gap: 0; }
+    .guide .tablist { grid-template-columns: repeat(4, 1fr); gap: 0; }
     .guide [role="tab"] {
       display: flex; align-items: center; justify-content: center; text-align: center;
       background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0;
@@ -500,7 +498,7 @@
     .guide [role="tab"][aria-selected="true"] { background: none; border-bottom-color: var(--dark-sky); box-shadow: none; }
     .guide [role="tab"][aria-selected="true"] .short { color: var(--moon); }
     /* in-panel anchors land below the strip rather than under it */
-    .windows, .spots, #tonight, #cal, .controls { scroll-margin-top: 58px; }
+    .windows, .spots, #tonight, #cal, .controls, #sky-viewer { scroll-margin-top: 58px; }
 
     .tonight .summary { min-height: 7.5em; }
     .tonight .sk-lines i:nth-child(3) { width: 90%; }
@@ -620,6 +618,7 @@
   <div class="tablist" role="tablist" aria-label="what this page answers">
     <button role="tab" id="tab-when" aria-controls="panel-when" aria-selected="true"><b>when is it dark?</b><span class="what">every new-moon window for the next twelve months, with the weekend nights called out, and how clear the next week looks</span><span class="short">dark nights</span></button>
     <button role="tab" id="tab-where" aria-controls="panel-where" aria-selected="false" tabindex="-1"><b>where do i go?</b><span class="what">forty dark-sky spots on a map, ranked by drive time from wherever home is</span><span class="short">where to go</span></button>
+    <button role="tab" id="tab-sky" aria-controls="panel-sky" aria-selected="false" tabindex="-1"><b>what will i see?</b><span class="what">the sky from any spot on any night: the ridge, the moon and the milky way, turnable</span><span class="short">the sky</span></button>
     <button role="tab" id="tab-notes" aria-controls="panel-notes" aria-selected="false" tabindex="-1"><b>field notes</b><span class="what">reading the mountains, how the numbers are made, and who the data comes from</span><span class="short">notes</span></button>
   </div>
 </nav>
@@ -723,30 +722,44 @@
 
 </div><!-- /panel-where -->
 
-<!-- the sky viewer: one dialog for a card's thumbnail, an overlook's popup
-     and, later, any picked point. lives outside every tab panel on purpose --
-     a dialog inside a hidden ancestor will not showModal. -->
-<dialog id="sky-viewer" aria-labelledby="sky-viewer-title">
-  <div class="sky-viewer-head">
-    <div>
-      <h3 id="sky-viewer-title"></h3>
+<!-- the sky viewer is a tab of its own: a card's thumbnail, an overlook's
+     popup and the chooser here all load a place into the one viewer. -->
+<div class="panel" role="tabpanel" id="panel-sky" aria-labelledby="tab-sky" tabindex="0" hidden>
+
+<section class="sky-tab" id="sky">
+  <h3>what will i see</h3>
+  <p class="lede">the ridge, the moon and the milky way from a spot, on any night. drag the sky to look around, scroll or pinch to zoom, and slide through the night. the thumbnail on any spot card, and the button on any parkway overlook, bring that place here.</p>
+  <div class="spot-controls">
+    <div class="group" role="group" aria-label="where to look from">
+      <span>from</span>
+      <select id="sky-place" aria-label="place to view the sky from"></select>
+    </div>
+  </div>
+  <div id="sky-viewer">
+    <div class="sky-viewer-head">
+      <h4 id="sky-viewer-title"></h4>
       <p class="sky-viewer-elev"></p>
     </div>
-    <button type="button" class="sky-viewer-close" aria-label="close">&times;</button>
+    <canvas class="sky-viewer-canvas" tabindex="0" aria-label="the sky, drag or use the arrow keys to look around"></canvas>
+    <div class="sky-viewer-controls">
+      <label>date <input type="date" class="sky-viewer-date"></label>
+      <label class="sky-viewer-time"><span></span><input type="range" min="0" max="1" step="1" value="0" aria-label="time of night"></label>
+      <span class="sky-viewer-compass" aria-live="polite"></span>
+      <button type="button" class="sky-viewer-reset">reset view</button>
+    </div>
+    <div class="sky-viewer-foot">
+      <p class="sky-viewer-sum"></p>
+      <p class="sky-viewer-sky"></p>
+      <p class="sky-viewer-caveat"></p>
+    </div>
   </div>
-  <canvas class="sky-viewer-canvas" tabindex="0" aria-label="the sky, drag or use the arrow keys to look around"></canvas>
-  <div class="sky-viewer-controls">
-    <label>date <input type="date" class="sky-viewer-date"></label>
-    <label class="sky-viewer-time"><span></span><input type="range" min="0" max="1" step="1" value="0" aria-label="time of night"></label>
-    <span class="sky-viewer-compass" aria-live="polite"></span>
-    <button type="button" class="sky-viewer-reset">reset view</button>
-  </div>
-  <div class="sky-viewer-foot">
-    <p class="sky-viewer-sum"></p>
-    <p class="sky-viewer-sky"></p>
-    <p class="sky-viewer-caveat"></p>
-  </div>
-</dialog>
+  <ul class="sky-notes">
+    <li><b>milky way core.</b> at this latitude the galactic center sits in the southern sky. it clears the ridge before dawn from late February, is up most of the night by June, and is an evening object August through October. each entry under upcoming dark-sky windows says which.</li>
+    <li><b>south-facing matters.</b> the core rises in the southeast and sets in the southwest, low. overlooks that face south or west across a big valley (Cowee, Devil's Courthouse, Cherohala) beat 360-degree summits with a nearby ridge to the south.</li>
+  </ul>
+</section>
+
+</div><!-- /panel-sky -->
 
 <div class="panel" role="tabpanel" id="panel-notes" aria-labelledby="tab-notes" tabindex="0" hidden>
 <!-- reference reading, not a task: it has a tab of its own now, so it is
@@ -755,8 +768,6 @@
   <h3>reading the mountains</h3>
   <ul>
     <li><b>parkway gates.</b> the high sections between Mount Pisgah and Waterrock Knob close for ice and snow, often for weeks at a time from November into April. check the NPS road status page before driving up; a closed gate at 9pm is a long detour.</li>
-    <li><b>milky way core.</b> at this latitude the galactic center sits in the southern sky. it clears the ridge before dawn from late February, is up most of the night by June, and is an evening object August through October. each entry under upcoming dark-sky windows says which.</li>
-    <li><b>south-facing matters.</b> the core rises in the southeast and sets in the southwest, low. overlooks that face south or west across a big valley (Cowee, Devil's Courthouse, Cherohala) beat 360-degree summits with a nearby ridge to the south.</li>
     <li><b>fog and dew.</b> valleys fog in after midnight most of the year; ridgetops above 5,500 feet usually stay clear of it but everything gets wet. bring a lens warmer and expect the tent fly to be soaked.</li>
     <li><b>temperature.</b> subtract about 15 degrees from whatever your valley forecast says for the 6,000-foot balds, and add wind. July nights on Black Balsam run in the 50s.</li>
     <li><b>leaf season.</b> October new moons are the best of the year for sky, and the worst for finding a parking spot at Graveyard Fields. arrive before sunset or go somewhere less famous.</li>
@@ -4340,11 +4351,11 @@ function bindSkylineToggle() {
   }, true);
 }
 
-// ---------- the sky viewer dialog ----------
-// one dialog, opened from a card's thumbnail (and, once the popup slims
-// down, an overlook's own button, and in phase 2 a picked point).
-// showModal gives the focus trap, Escape and the backdrop for free; this is
-// the canvas, the controls and the one shared heading/zoom the reader turns.
+// ---------- the sky viewer tab ----------
+// one viewer, the "what will i see?" tab, loaded from a card's thumbnail, an
+// overlook's button, the chooser above it or, in phase 2, a picked point.
+// this is the canvas, the controls and the one shared heading/zoom the
+// reader turns.
 
 const SKY_VIEW_KEY = 'darksky.skyView';
 const SKY_VIEW_DEFAULT = { az: 180, alt: 25, fov: 100 };
@@ -4373,13 +4384,13 @@ let skyView = loadSkyView();
 // spot's model can and cannot see differs by kind, and the viewer itself has
 // no opinion on it.
 const viewerState = { key: null, title: '', sub: '', horizon: null, lat: 0, lon: 0, elevM: 0,
-  sky: '', caveat: '', date: null, returnFocus: null };
+  sky: '', caveat: '', date: null };
 
 function skyViewerEls() {
   const d = document.getElementById('sky-viewer');
   if (!d) return {};
   return {
-    dialog: d, canvas: d.querySelector('.sky-viewer-canvas'),
+    root: d, canvas: d.querySelector('.sky-viewer-canvas'), place: document.getElementById('sky-place'),
     title: d.querySelector('#sky-viewer-title'), elev: d.querySelector('.sky-viewer-elev'),
     date: d.querySelector('.sky-viewer-date'),
     time: d.querySelector('.sky-viewer-time input'), clock: d.querySelector('.sky-viewer-time span'),
@@ -4394,9 +4405,11 @@ const isoDate = (y, mo, d) => `${y}-${String(mo).padStart(2, '0')}-${String(d).p
 const easternTodayISO = () => { const p = easternParts(new Date()); return isoDate(p.y, p.mo, p.d); };
 const fmtEasternDay = (y, mo, d) => new Date(y, mo - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
-function openSkyViewer(o) {
+// show: a card or a popup that opens the viewer goes to its tab; a restore
+// on load only loads the place, and leaves the tab where the reader left it
+function openSkyViewer(o, { show = true } = {}) {
   const els = skyViewerEls();
-  if (!els.dialog) return;
+  if (!els.root) return;
   viewerState.key = o.key;
   viewerState.title = o.title || '';
   viewerState.sub = o.sub || '';
@@ -4411,14 +4424,20 @@ function openSkyViewer(o) {
   // remembered between visits -- returning next week to last week's sky
   // would be a bug, not a feature.
   viewerState.date = null;
-  viewerState.returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   remember('darksky.pano', o.key || '');
-  if (!els.dialog.open) els.dialog.showModal();
+  els.root.dataset.place = o.key;
   els.date.value = easternTodayISO();
+  // the tab, then the viewer itself: the tab bar's own click lands the page
+  // at the top, and the sky sits a screen below the heading and the chooser
+  const tab = document.getElementById('tab-sky');
+  if (show) {
+    if (tab.getAttribute('aria-selected') !== 'true') tab.click();
+    els.root.scrollIntoView({ block: 'start' });
+  }
   paintSkyViewer();
 }
 
-function openSkyViewerForSpot(name) {
+function openSkyViewerForSpot(name, opts) {
   const s = SPOTS.find(x => x.name === name);
   const enc = s && HORIZONS[s.name];
   if (!s || !enc) return;
@@ -4428,12 +4447,38 @@ function openSkyViewerForSpot(name) {
   openSkyViewer({
     key: s.name, title: s.name, sub: elevTag(s).replace('&middot;', '\u00b7'), horizon, lat, lon, elevM: s.elev * 0.3048,
     sky: SKY[s.name] ? skySwatch(SKY[s.name][0]) + SKY[s.name][1] : '',
+  }, opts);
+}
+
+// the chooser: every spot with a horizon, then every overlook with one.
+// OVERLOOKS is declared further down the file, so this fills the first time
+// the tab shows rather than at parse time
+function fillSkyPlaces() {
+  const sel = document.getElementById('sky-place');
+  if (!sel || sel.options.length) return;
+  const opt = (v, t) => { const o = document.createElement('option'); o.value = v; o.textContent = t; return o; };
+  const byName = (a, b) => a.name.localeCompare(b.name);
+  const spots = document.createElement('optgroup'); spots.label = 'dark-sky spots';
+  for (const s of SPOTS.filter(s => HORIZONS[s.name]).sort(byName)) spots.appendChild(opt(s.name, s.name));
+  const ovs = document.createElement('optgroup'); ovs.label = 'parkway overlooks';
+  for (const o of OVERLOOKS.filter(o => OVERLOOK_HORIZONS[o.id]).sort(byName))
+    ovs.appendChild(opt('ov:' + o.id, o.name + (o.mp !== undefined ? ', mp ' + o.mp : '')));
+  sel.append(spots, ovs);
+  sel.addEventListener('change', () => {
+    if (sel.value.startsWith('ov:')) openSkyViewerForOverlook(sel.value.slice(3)); else openSkyViewerForSpot(sel.value);
   });
 }
 
-function closeSkyViewer() {
-  const els = skyViewerEls();
-  if (els.dialog && els.dialog.open) els.dialog.close();
+// the tab showing: the chooser filled, a place loaded if none is yet (the
+// spot the list leads with, nearest home by the current sort), and the
+// canvas painted now that it has a size
+function showSkyTab() {
+  fillSkyPlaces();
+  if (!viewerState.key) {
+    const first = visibleSpots().find(s => HORIZONS[s.name]);
+    if (first) openSkyViewerForSpot(first.name);
+  }
+  paintSkyViewer();
 }
 
 // draws the canvas and every text control from viewerState + skyView. called
@@ -4441,8 +4486,9 @@ function closeSkyViewer() {
 // a drag, a zoom.
 function paintSkyViewer() {
   const els = skyViewerEls();
-  if (!els.dialog || !els.dialog.open) return;
+  if (!els.root || !viewerState.key) return;
   const { title, sub, horizon, lat, lon, elevM, sky, caveat, date } = viewerState;
+  if (els.place && [...els.place.options].some(o => o.value === viewerState.key)) els.place.value = viewerState.key;
   // a date other than tonight is named in the title itself, so a screenshot
   // or a link cannot be mistaken for what the sky looks like tonight
   els.title.textContent = date ? `${title}, ${fmtEasternDay(date.getFullYear(), date.getMonth() + 1, date.getDate())}` : title;
@@ -4461,8 +4507,9 @@ function paintSkyViewer() {
     + (skyView.alt >= 0 ? Math.round(skyView.alt) + ' degrees up' : Math.round(-skyView.alt) + ' degrees down');
   try { els.sum.textContent = horizon ? horizonSummary({ horizon, lat, lon, elevM, date: when }) : ''; }
   catch (e) { els.sum.textContent = ''; }
-  // the canvas last: it takes whatever height the text above leaves it, and
-  // a drawing made before that text lands is squashed when the box shrinks
+  // the canvas last, and only while its tab shows: hidden, it has no size to
+  // draw at, and showSkyTab paints it the moment it gets one
+  if (!els.canvas.clientWidth) return;
   try {
     drawPanorama(els.canvas, { horizon, lat, lon, elevM, date: when, mode: 'view', az0: skyView.az, alt0: skyView.alt, fov: skyView.fov });
   } catch (e) {
@@ -4478,22 +4525,8 @@ function setSkyView(az, alt, fov) {
 
 function bindSkyViewer() {
   const els = skyViewerEls();
-  if (!els.dialog || els.dialog.dataset.bound) return;
-  els.dialog.dataset.bound = '1';
-
-  // fires on the close button, Escape (native to showModal) and a click on
-  // the backdrop below -- whatever closed it, the key stops being "open" and
-  // the thumbnail that opened it gets focus back
-  els.dialog.addEventListener('close', () => {
-    remember('darksky.pano', '');
-    const rf = viewerState.returnFocus;
-    viewerState.key = null;
-    if (rf && document.contains(rf)) rf.focus();
-  });
-  els.dialog.querySelector('.sky-viewer-close').addEventListener('click', closeSkyViewer);
-  // a click that lands on the dialog element itself, not on anything inside
-  // it, is a click on the backdrop -- ::backdrop takes no listener of its own
-  els.dialog.addEventListener('click', ev => { if (ev.target === els.dialog) closeSkyViewer(); });
+  if (!els.root || els.root.dataset.bound) return;
+  els.root.dataset.bound = '1';
 
   els.date.addEventListener('change', () => {
     const [y, m, d] = els.date.value.split('-').map(Number);
@@ -4510,7 +4543,7 @@ function bindSkyViewer() {
     remember('darksky.panoWhen', Object.fromEntries(panoState.when));
     paintSkyViewer();
   });
-  els.dialog.querySelector('.sky-viewer-reset').addEventListener('click', () => {
+  els.root.querySelector('.sky-viewer-reset').addEventListener('click', () => {
     skyView = { ...SKY_VIEW_DEFAULT };
     saveSkyView();
     paintSkyViewer();
@@ -4518,7 +4551,7 @@ function bindSkyViewer() {
 
   // pointer drag turns the view; two pointers at once pinch the zoom instead.
   // touch-action: none on the canvas (css) is what keeps a phone from also
-  // trying to scroll a dialog that has no scroll of its own to fight.
+  // scrolling the page under the drag.
   const pointers = new Map();
   let dragging = false, lastX = 0, lastY = 0, pinchDist = null;
   els.canvas.addEventListener('pointerdown', ev => {
@@ -4569,16 +4602,15 @@ function bindSkyViewer() {
     else if (ev.key === 'Home') { ev.preventDefault(); skyView = { ...SKY_VIEW_DEFAULT }; saveSkyView(); paintSkyViewer(); }
   });
 
-  // the canvas has no size until the dialog is shown, so a resize (a phone
-  // rotated, a window dragged wider) repaints it rather than trying to catch
-  // every layout change that could affect it up front
+  // a resize (a phone rotated, a window dragged wider) repaints the canvas
+  // rather than trying to catch every layout change that could affect it
   window.addEventListener('resize', () => paintSkyViewer());
 }
 bindSkyViewer();
 
-// a viewer left open reopens on return, same key as the card toggle it
-// replaces used; the heading, altitude and zoom come back from their own key
-if (spotState.pano) openSkyViewerForSpot(spotState.pano);
+// the place last viewed is loaded again on return, ready for the sky tab;
+// the heading, altitude and zoom come back from their own key
+if (spotState.pano) openSkyViewerForSpot(spotState.pano, { show: false });
 
 // lot and view, off the dem, where there is a walk between them; the listed
 // figure where there is not
@@ -4601,8 +4633,7 @@ function renderSpotList() {
     ${SKY[s.name] ? `<div class="sky">${skySwatch(SKY[s.name][0])}${SKY[s.name][1]}</div>` : ''}
     ${HORIZONS[s.name] ? `<div class="pano">
       <canvas class="skyline" data-pano="${s.name}" role="button" tabindex="0"
-        aria-haspopup="dialog"
-        aria-label="skyline and sky from ${s.name}, select to open"></canvas>
+        aria-label="skyline and sky from ${s.name}, select to open in the sky tab"></canvas>
       <p class="pano-sum"></p>
     </div>` : ''}
     <div class="links">${spotLinks(s)}</div>
@@ -5186,7 +5217,7 @@ const OVL_CAVEAT = 'modelled from bare earth, not visited; trees and the cut ban
 // used by the popup's own button and by the restore on return; OVERLOOKS and
 // its generated horizon/sky blocks are declared further down the file, which
 // function hoisting makes fine to call from up here
-function openSkyViewerForOverlook(id) {
+function openSkyViewerForOverlook(id, opts) {
   const o = OVERLOOKS.find(x => x.id === id);
   const h = o && OVERLOOK_HORIZONS[id];
   if (!o || !h) return;
@@ -5199,7 +5230,7 @@ function openSkyViewerForOverlook(id) {
     horizon, lat: o.lat, lon: o.lon, elevM: h[0] * 0.3048,
     sky: sky ? skySwatch(sky[0]) + OVL_esc(sky[1]) : '',
     caveat: OVL_CAVEAT,
-  });
+  }, opts);
 }
 
 function OVL_popup(o) {
@@ -5408,11 +5439,11 @@ function initMap() {
   // since OVERLOOKS is declared below it in the file; recover it here instead
   const ovBack = String(recall('darksky.active', '')).startsWith('ov:') ? String(recall('darksky.active', '')).slice(3) : null;
   if (ovBack && OVL_markers.has(ovBack) && map.hasLayer(ovl)) { spotState.active = 'ov:' + ovBack; OVL_open(ovBack); }
-  // an overlook's open sky viewer was dropped the same way; recovered here
-  // too, independent of the overlook layer or its marker -- the viewer does
-  // not need either
+  // an overlook loaded in the sky viewer was dropped the same way; recovered
+  // here too, independent of the overlook layer or its marker -- the viewer
+  // does not need either
   const panoRaw = String(recall('darksky.pano', ''));
-  if (panoRaw.startsWith('ov:')) openSkyViewerForOverlook(panoRaw.slice(3));
+  if (panoRaw.startsWith('ov:')) openSkyViewerForOverlook(panoRaw.slice(3), { show: false });
   // attached after the framing above, so nothing this function does on load is
   // remembered; a popup's own autopan is skipped by the flag set above.
   map.on('moveend', () => {
@@ -5785,6 +5816,9 @@ function initTabs() {
   // paints the wrong aspect. both wait for the first time the panel is shown,
   // which also means a visit that never opens the map requests no tiles.
   const firstShow = { 'panel-where': () => { initMap(); drawSkylines(); } };
+  // and the sky canvas is painted on every show, since its place can change
+  // while the tab is hidden (a card's thumbnail, a restore on load)
+  const onShow = { 'panel-sky': showSkyTab };
   // the tab you were last on, so a return visit opens where you left off
   const TAB_KEY = 'darksky.tab';
 
@@ -5799,6 +5833,7 @@ function initTabs() {
     }
     const id = tab.getAttribute('aria-controls');
     if (firstShow[id]) { const run = firstShow[id]; delete firstShow[id]; run(); }
+    if (onShow[id]) onShow[id]();
     if (focus) tab.focus();
     if (top) scrollTo({ top: 0, behavior: 'instant' });
   }
