@@ -21,6 +21,11 @@ import { ask } from './overpass.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FILE = path.join(ROOT, 'index.html');
 const RAW = path.join(ROOT, 'tools', '.overlooks-raw.json');
+// reviewed standing spots, { osm id: [lat, lon, note] }: where a person stands
+// to see the sky from this pull-off, when the osm point sits in the trees. the
+// dot on the map goes here, the skyline is drawn from here, and a note says
+// what the walk is. kept by hand; see docs/horizon_panorama.md#standing-spots
+const VIEWS = path.join(ROOT, 'tools', 'overlook-views.json');
 const START = '// --- overlooks:start (generated, do not edit by hand) ---';
 const END = '// --- overlooks:end ---';
 
@@ -81,7 +86,7 @@ export function parseSpots(html) {
 
 // the whole filter, with the count after each step so a dry run can show where
 // the numbers went
-export function pick(elements, spots) {
+export function pick(elements, spots, views = {}) {
   const all = elements.map(e => ({
     id: e.type[0] + e.id, name: (e.tags?.name || '').trim(),
     lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon, isNode: e.type === 'node',
@@ -110,7 +115,11 @@ export function pick(elements, spots) {
               clearOfSpots: clear.length, distinct: kept.length },
     kept: kept.map(o => {
       const mp = milepost(o.name);
-      return { id: o.id, name: o.name, lat: +o.lat.toFixed(4), lon: +o.lon.toFixed(4), ...(mp === null ? {} : { mp }) };
+      const v = views[o.id];
+      // a reviewed spot is kept exact: it was placed to the metre on purpose,
+      // where the osm point is only cut to the 10 m the terrain needs
+      const at = v ? { lat: v[0], lon: v[1] } : { lat: +o.lat.toFixed(4), lon: +o.lon.toFixed(4) };
+      return { id: o.id, name: o.name, ...at, ...(mp === null ? {} : { mp }), ...(v && v[2] ? { note: v[2] } : {}) };
     }),
   };
 }
@@ -121,6 +130,7 @@ async function main() {
   const html = fs.readFileSync(FILE, 'utf8');
   const spots = parseSpots(html);
   if (!spots.length) throw new Error('no spots parsed from index.html');
+  const views = fs.existsSync(VIEWS) ? JSON.parse(fs.readFileSync(VIEWS, 'utf8')) : {};
   let elements;
   if (replay) {
     // the raw file is written by a real run and is not in the repository, so
@@ -136,13 +146,16 @@ async function main() {
     fs.renameSync(tmp, RAW);
     elements = data.elements;
   }
-  const { counts, kept } = pick(elements, spots);
+  const { counts, kept } = pick(elements, spots, views);
   console.log(`viewpoints within ${NEAR_ROAD_M} m of the parkway: ${counts.returned}`);
   console.log(`  named, and not just "scenic overlook":   ${counts.named}`);
   console.log(`  south of ${NC_NORTH} n, so in north carolina:   ${counts.inNorthCarolina}`);
   console.log(`  more than ${NEAR_SPOT_M} m from a curated spot:      ${counts.clearOfSpots}`);
   console.log(`  after collapsing one overlook mapped twice: ${counts.distinct}`);
   console.log(`  of which carry a milepost in the name:   ${kept.filter(o => o.mp !== undefined).length}`);
+  const stale = Object.keys(views).filter(id => !kept.some(o => o.id === id));
+  console.log(`standing spots applied: ${Object.keys(views).length - stale.length}`);
+  for (const id of stale) console.warn(`  overlook-views.json names ${id}, which is no longer in the list`);
   // a run that comes back nearly empty is overpass having a bad day, and
   // writing it would quietly delete the layer
   if (kept.length < 50) throw new Error(`refusing to write: only ${kept.length} overlooks, expected over a hundred`);

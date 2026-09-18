@@ -93,3 +93,17 @@ test('spots parse with both quote styles and an optional view', () => {
     '  { name: "B\'s", lat: 35.3, lon: -83.3, elev: 2, kind: \'view\' },\n];\n';
   assert.deepEqual(parseSpots(html), [{ name: 'A', lat: 35.1, lon: -83.1, view: [35.2, -83.2] }, { name: "B's", lat: 35.3, lon: -83.3, view: null }]);
 });
+
+test('a reviewed standing spot replaces the osm point, unrounded, and carries its note', () => {
+  const { kept } = pick([node(1, 'X Overlook', 35.123456, -82.987654), node(2, 'Y Overlook', 35.3, -82.5)],
+    [], { n1: [35.1236789, -82.9871234, 'the open rock is 15 m north of the pull-off'] });
+  const x = kept.find(o => o.id === 'n1'), y = kept.find(o => o.id === 'n2');
+  assert.deepEqual([x.lat, x.lon, x.note], [35.1236789, -82.9871234, 'the open rock is 15 m north of the pull-off']);
+  assert.equal(y.note, undefined);
+  assert.deepEqual([y.lat, y.lon], [35.3, -82.5]);
+});
+
+test('a standing spot with no note adds no note key', () => {
+  const { kept } = pick([node(1, 'X Overlook', 35.1, -82.9)], [], { n1: [35.10002, -82.90001, ''] });
+  assert.equal('note' in kept[0], false);
+});
