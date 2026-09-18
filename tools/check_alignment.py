@@ -221,6 +221,7 @@ def main():
         pairs = [(e.get('t'), d.get('t')), (e.get('s'), d.get('s'))]
         if 'deck' in e and d.get('deck'):
             pairs += [(e['deck'].get('t'), d['deck']['t']), (e['deck'].get('s'), d['deck']['s'])]
+        pairs += [(e.get('f'), d.get('f')), (e.get('b'), d.get('b'))]
         for enc, alt in pairs:
             # the encoding stops at ALT_MIN + ALT_RANGE: a canopy overhead is
             # cached at 80 to 85 degrees and ships as 80, which is the page

@@ -25,14 +25,27 @@ const SPOTS = new Function(spotsSrc + ' return SPOTS;')();
 const horSrc = html.slice(html.indexOf('const HORIZONS = {'), html.indexOf('};', html.indexOf('const HORIZONS = {')) + 2);
 const HORIZONS = new Function(horSrc + ' return HORIZONS;')();
 
-// the canopy block, if the page has one: the highest of ridge, trees and
-// structures is what a note's "wide south sky" has to be judged against
+// the canopy block, if the page has one: the highest of ridge, the sight
+// floor and structures is what a note's "wide south sky" has to be judged
+// against
 const canIdx = html.indexOf('const CANOPY = {');
 const CANOPY = canIdx < 0 ? {} : new Function(html.slice(canIdx, html.indexOf('};', canIdx) + 2) + ' return CANOPY;')();
+const WINDOW_MIN_DEG = 3; // build_canopy.py's WINDOW_MIN_DEG: a window under this is not worth reading through
 const withCanopy = (alt, e) => {
   if (!e) return null;
   const out = alt.slice();
-  for (const k of ['t', 's']) if (e[k]) decode(e[k]).forEach((v, i) => { if (v > out[i]) out[i] = v; });
+  if (e.t) {
+    const t = decode(e.t);
+    const f = e.f ? decode(e.f) : null;
+    const b = e.b ? decode(e.b) : null;
+    // the sight floor: f where a canopy window opens at least WINDOW_MIN_DEG
+    // above the higher of ridge and floor, else the tree line itself
+    t.forEach((v, i) => {
+      const floor = f && b && b[i] - Math.max(alt[i], f[i]) >= WINDOW_MIN_DEG ? f[i] : v;
+      if (floor > out[i]) out[i] = floor;
+    });
+  }
+  if (e.s) decode(e.s).forEach((v, i) => { if (v > out[i]) out[i] = v; });
   return out;
 };
 
