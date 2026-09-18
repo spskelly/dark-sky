@@ -112,6 +112,11 @@ redoing finished work.
   node and byte counts, the per-class point counts, the eye height and the
   raw profiles, so a change to any input recomputes that site and a 2025
   re-run is `--force`. About 8 kB a site.
+- `tools/.canopy-cache/suggest/`: one review row per closed-in site, reused
+  while its coordinate and the five standing-spot tunables (`CLOSED_DEG`,
+  `SEARCH_R`, `CLEAR_R`, `CLEAR_H`, `LEVEL_M`) still match. `--suggest-views
+  --force`, or deleting the directory, recomputes every row. The table itself
+  is `tools/.canopy-cache/view-review.md`. See Standing spots below.
 
 `python` here means an interpreter with `numpy` and `rasterio` installed, as
 listed in `tools/requirements.txt`. Screenshot work is a separate interpreter
@@ -132,11 +137,11 @@ again: it needs `playwright`, which the elevation work does not.
 | `SKY` or `OVERLOOK_SKY` might be stale | `node tools/build-skyglow.mjs --check` | Neither block records what it was generated from, so nothing else notices. Exit 1 names the entries that differ. Run it after any spot move and after every overlook rebuild |
 | An overlook's OSM id changes | nothing required | Orphans the old `tools/.horizon-cache/ov-<old-id>.json`, harmlessly; the new id gets its own cache file on the next `build_horizons.py` run |
 | A spot's `lat, lon` or its `view:` | `build_canopy.py` as well as `build_horizons.py` | The canopy cache records the coordinate; a moved site recomputes |
-| A spot's `deck:` | `build_horizons.py`, then `build_canopy.py` | Both cache the deck height. `build_horizons.py` recomputes that spot (about 2 s); `build_canopy.py` refetches its box (about 25 s from the network at 32 workers, a second or two from the store). Run the terrain first: the block's structures rule compares against the deck terrain line |
+| A spot's `deck:` | `build_horizons.py`, then `build_canopy.py` | Both cache the deck height. `build_horizons.py` recomputes that spot (about 2 s); `build_canopy.py` refetches its box (about 25 s from the network at 32 workers, (pending: measure with `--only doubletop --force` after the store fill run)). Run the terrain first: the block's structures rule compares against the deck terrain line |
 | `RADIUS`, `MAX_DEPTH`, `TREE_MAX_M`, the class routing or `COUNTIES` in `build_canopy.py` | `build_canopy.py` | `RADIUS` and `COUNTIES` are recorded per site and recompute by themselves; a routing or depth change, `TREE_MAX_M` included, needs `--force`, since the cache does not record which routing rule computed it. `TREE_MAX_M` shipped 2026-09-18 after the live check found the Pisgah tower routed to vegetation, not partly unclassified as first assumed; that day's full run was `--force` for this reason |
 | The 2025 point clouds arrive | change `VINTAGE` and the dataset source in `build_canopy.py`, then `--force` | The vintage is one page constant, so every site is rebuilt together |
 | `tools/overlook-views.json` changes | `node tools/build-overlooks.mjs --replay`, then `build_horizons.py`, `build-skyglow.mjs --fix`, `build_canopy.py` | A reviewed spot replaces the OSM point for that overlook, so the coordinate every downstream block raycasts from changes; the three builds are the same chain a moved curated spot needs, run in the same order |
-| A spot's `view:` moves | `build_horizons.py`, `build-skyglow.mjs --fix`, `build_canopy.py` | `view:` is the coordinate the panorama, sky block and canopy are actually drawn from when it is set; moving it invalidates all three the same way moving `lat, lon` does |
+| A spot's `view:` moves | `build_horizons.py`, `build_canopy.py` | `view:` is the coordinate the panorama and canopy are actually drawn from when it is set, invalidating both the same way moving `lat, lon` does. `build-skyglow.mjs` is not listed here: it reads a spot's `lat, lon` only (`SPOT_RE`, line 61), never `view:`. The `tools/overlook-views.json` row above keeps `build-skyglow.mjs --fix`, since overlooks are read by their lat/lon, which the override moves |
 
 Nothing downstream of `index.html` needs regenerating. `build-og.mjs` and
 `build-moon-preview.mjs` do not read any of this.
@@ -342,17 +347,23 @@ somebody would actually stand.
 
 ```sh
 # for every site whose median tree altitude is over CLOSED_DEG, find the
-# nearest open standing spot and write a review table. no network beyond the
-# few nodes a spot's own box needs; never touches index.html.
+# nearest open standing spot and write a review table. raycasts from the
+# spot through the pin's own box (up to 30 m short on the far side), so
+# over a filled store it uses no network -- the final line's net figure
+# shows it. never touches index.html.
 python tools/build_canopy.py --suggest-views
 ```
 
 writes `tools/.canopy-cache/view-review.md`, one row per closed-in site,
-most closed first: `site`, `now` (median tree altitude at the pin),
-`proposed` (the spot, or "none within SEARCH_R m"), `moved` (metres from the
-pin), `bearing`, `then` (median tree altitude from the spot), `walk under
-trees` (metres of the straight line from the pin to the spot that pass under
-a crown), and satellite links for both `pin` and `spot`.
+most closed first: `site`, `key` (the site's key, since decisions are filed
+by key: overlooks are `ov:<osm id>`), `now` (median tree altitude at the
+pin), `proposed` (the spot, or "none within SEARCH_R m"), `moved` (metres
+from the pin), `bearing`, `then` (median tree altitude from the spot), `walk
+under trees` (metres of the straight line from the pin to the spot that pass
+under a crown), and satellite links for both `pin` and `spot`. Each row is
+also cached on its own in `tools/.canopy-cache/suggest/`, reused while the
+site's coordinate and the five tunables below still match; `--suggest-views
+--force`, or deleting the directory, recomputes every row.
 
 | Constant | Value | Evidence |
 |---|---|---|
