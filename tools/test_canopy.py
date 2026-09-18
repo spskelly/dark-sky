@@ -9,7 +9,12 @@ unless CANOPY_LIVE=1 is set.
 import json
 import math
 import os
+import sys
+import tempfile
+import time
 import unittest
+import urllib.error
+from unittest import mock
 
 import numpy as np
 
@@ -305,6 +310,114 @@ class TestSites(unittest.TestCase):
         names = [s['name'] for s in bc.site_list(self.HTML)]
         # the two southern sites (35.39 N) come out adjacent, max patch (35.80 N) apart from them
         self.assertEqual(names.index('Max Patch'), 2)
+
+
+def _fake_response(data):
+    """a context-manager stand-in for urllib.request.urlopen's return value"""
+    m = mock.MagicMock()
+    m.__enter__.return_value.read.return_value = data
+    m.__exit__.return_value = False
+    return m
+
+
+class TestHttpGet(unittest.TestCase):
+    """no network: urlopen and time.sleep are stubbed, so these run in
+    milliseconds and never touch S3."""
+
+    def test_retries_a_transient_error_then_succeeds(self):
+        calls = [urllib.error.URLError('reset'), _fake_response(b'ok')]
+
+        def fake_urlopen(url, timeout=60):
+            r = calls.pop(0)
+            if isinstance(r, Exception):
+                raise r
+            return r
+        with mock.patch.object(bc.urllib.request, 'urlopen', side_effect=fake_urlopen), \
+             mock.patch.object(bc.time, 'sleep') as sleep:
+            self.assertEqual(bc.http_get('http://example/x'), b'ok')
+        sleep.assert_called_once_with(1)      # 2**0, the one retry it needed
+
+    def test_a_404_is_raised_at_once_without_retrying(self):
+        calls = []
+
+        def fake_urlopen(url, timeout=60):
+            calls.append(url)
+            raise urllib.error.HTTPError(url, 404, 'not found', {}, None)
+        with mock.patch.object(bc.urllib.request, 'urlopen', side_effect=fake_urlopen), \
+             mock.patch.object(bc.time, 'sleep') as sleep:
+            with self.assertRaises(urllib.error.HTTPError):
+                bc.http_get('http://example/missing')
+        self.assertEqual(len(calls), 1)
+        sleep.assert_not_called()
+
+    def test_the_final_failed_try_does_not_sleep(self):
+        with mock.patch.object(bc.urllib.request, 'urlopen',
+                                side_effect=urllib.error.URLError('down')), \
+             mock.patch.object(bc.time, 'sleep') as sleep:
+            with self.assertRaises(urllib.error.URLError):
+                bc.http_get('http://example/x', tries=3)
+        # three tries, only two gaps between them: 1 s then 2 s, never a third sleep
+        self.assertEqual(sleep.call_args_list, [mock.call(1), mock.call(2)])
+
+    def test_ept_root_returns_none_on_404(self):
+        bc.ept_root.cache_clear()
+
+        def fake_urlopen(url, timeout=60):
+            raise urllib.error.HTTPError(url, 404, 'not found', {}, None)
+        with mock.patch.object(bc.urllib.request, 'urlopen', side_effect=fake_urlopen), \
+             mock.patch.object(bc.time, 'sleep'):
+            self.assertIsNone(bc.ept_root('NC_Phase5_NoSuchCounty_2017'))
+        bc.ept_root.cache_clear()
+
+    def test_network_counter_counts_bytes_actually_downloaded(self):
+        before = bc.net_bytes()
+        with mock.patch.object(bc.urllib.request, 'urlopen',
+                                side_effect=lambda url, timeout=60: _fake_response(b'0123456789')):
+            bc.http_get('http://example/ten-bytes')
+        self.assertEqual(bc.net_bytes() - before, 10)
+
+
+class TestMainKeepsGoing(unittest.TestCase):
+    """main() end to end, with the network and index.html both stubbed out."""
+
+    HTML = ('const SPOTS = [\n'
+            "  { name: 'Site A (fails)', lat: 35.10, lon: -83.10, elev: 4000, kind: 'view' },\n"
+            "  { name: 'Site B (ok)', lat: 35.90, lon: -82.20, elev: 4000, kind: 'view' },\n"
+            '];\n'
+            'const OVERLOOKS = [\n'
+            '];\n')
+
+    @staticmethod
+    def _ground_ring(lat, lon):
+        """a ring of ground returns around the pin, so profiles_for finds an eye"""
+        x0, y0 = bc.mercator(lat, lon)
+        k = math.cos(math.radians(lat))
+        n = 40
+        dx = np.array([2.5 * math.sin(2 * math.pi * i / n) for i in range(n)])
+        dy = np.array([2.5 * math.cos(2 * math.pi * i / n) for i in range(n)])
+        return (x0 + dx / k, y0 + dy / k, np.full(n, 1000.0), np.full(n, bc.GROUND, dtype=np.int64))
+
+    def fake_fetch_site(self, lat, lon, radius_m=bc.RADIUS):
+        if abs(lat - 35.10) < 1e-6:
+            raise OSError('connection reset by peer')
+        x, y, z, c = self._ground_ring(lat, lon)
+        return x, y, z, c, ['NC_Phase5_Fake_2017'], 5, 12345
+
+    def test_a_failed_site_is_skipped_not_cached_and_leaves_html_alone(self):
+        saved_cache = bc.CACHE
+        with tempfile.TemporaryDirectory() as d:
+            bc.CACHE = d
+            try:
+                with mock.patch.object(bh, 'read_html', return_value=self.HTML), \
+                     mock.patch.object(bh, 'write_html') as write_html, \
+                     mock.patch.object(bc, 'fetch_site', side_effect=self.fake_fetch_site), \
+                     mock.patch.object(sys, 'argv', ['build_canopy.py']):
+                    bc.main()
+                write_html.assert_not_called()
+                names = os.listdir(d)
+                self.assertEqual(names, ['site-b-ok.json'])   # site a wrote nothing
+            finally:
+                bc.CACHE = saved_cache
 
 
 @unittest.skipUnless(os.environ.get('CANOPY_LIVE'), 'set CANOPY_LIVE=1 to fetch doubletop and pisgah from S3 (about 130 MB)')

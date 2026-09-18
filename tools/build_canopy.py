@@ -29,6 +29,7 @@ import json
 import math
 import os
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -69,7 +70,7 @@ GROUND_CELL = 5.0    # metres. the ground grid unclassified returns are measured
 CLUSTER_CELL = 2.0   # metres. an unclassified return needs company in its cell
 CLUSTER_MIN = 3      # returns. fewer than this in a cell is a bird or a stray, not a tower
 S_MIN_DEG = 0.5      # degrees. structures get a layer only where they stand this far above ridge and trees
-WORKERS = 8          # concurrent node downloads
+WORKERS = 32         # concurrent node downloads. each connection runs at 0.2 to 0.3 MB/s from us-west-2, so throughput scales with connections: 8 gave 1.6 MB/s, 64 about 10 (2026-09-17)
 TREES = (3, 4, 5)
 GROUND, UNCLASS, BUILDING = 2, 1, 6
 NOISE = (7, 18)
@@ -334,20 +335,37 @@ def canopy_js(sites, results, terrain):
 
 # ---------- fetching ----------
 
+# bytes urlopen has actually returned, across every worker thread. a site's
+# own 'bytes' field counts what its box needed even on a cache hit, since
+# that is the site's data size; this counter is only what came over the
+# wire, for main() to report the run's real throughput against.
+_net_lock = threading.Lock()
+_net_bytes = 0
+
+
+def net_bytes():
+    return _net_bytes
+
+
 def http_get(url, tries=4):
     """stdlib, with backoff. a 404 is an answer, not a failure to retry."""
+    global _net_bytes
     err = None
     for i in range(tries):
         try:
             with urllib.request.urlopen(url, timeout=60) as r:
-                return r.read()
+                data = r.read()
+            with _net_lock:
+                _net_bytes += len(data)
+            return data
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 raise
             err = e
         except (urllib.error.URLError, TimeoutError, OSError) as e:
             err = e
-        time.sleep(2 ** i)
+        if i < tries - 1:
+            time.sleep(2 ** i)
     raise err
 
 
@@ -432,13 +450,14 @@ def main():
     fresh = [s for s in todo if s not in cached]
 
     # a dry run says what the real run would do and stops. it fetches nothing,
-    # not even hierarchy pages: the estimate below is from the two measured
-    # sites (about 63 MB a dataset, 1.7 datasets a site, 8 s a site) and the
-    # real run prints the real numbers as it goes.
+    # not even hierarchy pages: the estimate below is from the 2026-09-17
+    # timing run (sites 83 to 111 MB, 25 to 40 s a site at 32 to 64 workers,
+    # with only 10 to 25 percent of a site's nodes reused from its neighbour)
+    # and the real run prints the real numbers as it goes.
     if args.dry_run:
         print('%d sites in index.html, %d selected' % (len(sites), len(todo)))
         print('  %d already cached, %d to fetch' % (len(cached), len(fresh)))
-        print('  estimated %.1f GB over the network, about %d min' % (len(fresh) * 1.7 * 63 / 1000, len(fresh) * 8 // 60 + 1))
+        print('  estimated %.1f GB over the network, about %d min' % (len(fresh) * 95 / 1000, len(fresh) * 30 // 60 + 1))
         print('  datasets tried: %d (%s ... %s)' % (len(DATASETS), DATASETS[0], DATASETS[-1]))
         for m, label in ((START, 'start'), (END, 'end')):
             if m not in html:
@@ -448,7 +467,9 @@ def main():
         return
 
     results = {}
+    failed = []
     t0 = time.time()
+    net0 = net_bytes()
     for i, s in enumerate(todo, 1):
         rec = None if args.force else load_cached(s)
         if rec:
@@ -456,7 +477,15 @@ def main():
             print('[%d/%d] %s ... cached' % (i, len(todo), s['name']), flush=True)
             continue
         t = time.time()
-        x, y, z, c, used, nodes, nbytes = fetch_site(s['view_lat'], s['view_lon'])
+        # a node fetch that exhausts its retries is one site's bad luck, not the
+        # whole run's: no cache file is written for it, so the next run of the
+        # same command picks it back up where this one left it.
+        try:
+            x, y, z, c, used, nodes, nbytes = fetch_site(s['view_lat'], s['view_lon'])
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError, TimeoutError) as e:
+            failed.append(s)
+            print('[%s] %s ... fetch failed: %s' % (time.strftime('%H:%M:%S'), s['name'], e), flush=True)
+            continue
         rec = {'name': s['name'], 'ov_id': s['ov_id'], 'lat': s['view_lat'], 'lon': s['view_lon'],
                'radius_m': RADIUS, 'deck_m': s['deck'], 'candidates': DATASETS, 'datasets': used,
                'nodes': nodes, 'bytes': nbytes, 'vintage': VINTAGE, 't': None, 's': None, 'deck': None}
@@ -471,20 +500,36 @@ def main():
                 print('  elev check: %s lidar ground %.1f m, 3dep %.1f m' % (s['name'], prof['ground_m'], terrain['dem_m']))
         bh.save_atomic(cache_path(s), bh.write_json(rec))
         results[s['key']] = rec
-        print('[%s] [%d/%d] %s ... %d datasets, %d nodes, %.0f MB, %.1fs'
-              % (time.strftime('%H:%M:%S'), i, len(todo), s['name'], len(used), nodes, nbytes / 1e6, time.time() - t), flush=True)
+        # nbytes is this site's box, cache hits included; net/mbps is what the
+        # run has actually pulled over the wire since it started, since the two
+        # can differ a lot once neighbouring sites start sharing octree nodes.
+        elapsed = time.time() - t0
+        net = net_bytes() - net0
+        mbps = (net / 1e6) / elapsed if elapsed > 0 else 0.0
+        print('[%s] [%d/%d] %s ... %d datasets, %d nodes, %.0f MB, %.1fs, net %.0f MB at %.1f MB/s'
+              % (time.strftime('%H:%M:%S'), i, len(todo), s['name'], len(used), nodes, nbytes / 1e6,
+                 time.time() - t, net / 1e6, mbps), flush=True)
 
     have = [s for s in todo if results.get(s['key'], {}).get('t') is not None]
     print('\n%d of %d sites have canopy, %.0f s' % (len(have), len(todo), time.time() - t0))
     for s in todo:
+        if s in failed:
+            continue
         r = results.get(s['key'], {})
         if r.get('t') is None:
             print('  no canopy: %s (%s)' % (s['name'], r.get('reason', 'not computed')))
+    if failed:
+        print('  %d site(s) failed to fetch and were left uncached; re-run the same command to retry them:' % len(failed))
+        for s in failed:
+            print('    %s' % s['name'])
 
     block = canopy_js(sites, results, {s['key']: terrain_for(s) for s in have})
     print('%.1f kB of index.html' % (len(block.encode()) / 1024))
     if args.only:
         print('--only run, index.html left alone so a partial set cannot replace the full one')
+        return
+    if failed:
+        print('%d site(s) failed; index.html left alone so a partial run never drops their entries' % len(failed))
         return
     nxt = bh.replace_block(html, START, END, block)
     if nxt == html:
