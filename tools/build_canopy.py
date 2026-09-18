@@ -352,14 +352,18 @@ def profiles_for(x, y, z, cls, lat, lon, deck_m=None):
 def sight_floor(t, f=None, b=None, ridge=None):
     """per azimuth, the lowest altitude a star is seen at from here: the
     window's floor where the trees leave WINDOW_MIN_DEG of sky above the
-    ridge, the tree line where they do not, and never under the ridge"""
+    ridge, the tree line where they do not, never under the ridge and never
+    over the tree line. canopy_bands spreads a cell over every degree it
+    covers and skyline on raw points does not, so a window can sit where the
+    tree line reads open; there the tree line is the floor."""
     top = bh.ALT_MIN + bh.ALT_RANGE
     t = np.minimum(np.asarray(t, float), top)
     r = np.asarray(ridge, float) if ridge is not None else np.full(360, bh.ALT_MIN)
+    wall = np.maximum(r, t)
     if f is None or b is None:
-        return np.maximum(r, t)
+        return wall
     lo = np.maximum(r, np.asarray(f, float))
-    return np.where(np.asarray(b, float) - lo >= WINDOW_MIN_DEG, lo, np.maximum(r, t))
+    return np.minimum(np.where(np.asarray(b, float) - lo >= WINDOW_MIN_DEG, lo, wall), wall)
 
 
 def closed_in(rec, ridge=None):

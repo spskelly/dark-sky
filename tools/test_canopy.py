@@ -980,6 +980,20 @@ class TestSightFloor(unittest.TestCase):
         walled = {'t': [70.0] * 360, 'f': [70.0] * 360, 'b': [70.0] * 360}
         self.assertTrue(bc.closed_in(walled, [3.0] * 360))
 
+    def test_the_floor_is_never_above_the_tree_line(self):
+        """canopy_bands spreads a cell's slab over every degree the cell
+        covers, while skyline on raw points fills only the degrees they fall
+        in: a column 3 m east, returns 0 to 3 m and 6 to 9 m, leaves a window
+        on azimuths the tree line reads as open. the open azimuth's floor is
+        its tree line, not the window's"""
+        zs = np.concatenate((np.arange(0.0, 3.01, 0.5), np.arange(6.0, 9.01, 0.5)))
+        dx, dy = np.full(zs.size, 3.0), np.zeros(zs.size)
+        t = bc.skyline(dx, dy, zs, bh.EYE, bc.MIN_R)
+        f, b = bc.canopy_bands(dx, dy, zs, bh.EYE, bc.MIN_R)
+        s = bc.sight_floor(t, f, b)
+        self.assertTrue(np.all(s <= np.maximum(bh.ALT_MIN, np.minimum(t, bh.ALT_MIN + bh.ALT_RANGE))),
+                        (t[80], f[80], b[80], s[80]))
+
     def test_profiles_for_reads_no_window_as_f_and_b_equal_to_t(self):
         """the sight floor leans on this: a stem-to-crown column east has no
         window (canopy_bands gives nan) and an empty west has no trees, and on
