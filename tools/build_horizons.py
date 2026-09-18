@@ -275,17 +275,19 @@ SPOT_RE = re.compile(r"""\{ name: (['"])(.*?)\1, lat: (-?[\d.]+), lon: (-?[\d.]+
 VIEW_RE = re.compile(r"""\{ name: (['"])(.*?)\1,.*?view: \[(-?[\d.]+), *(-?[\d.]+)\]""")
 
 
-# a tower spot: the platform floor above the ground at the view coordinate,
-# in metres, on the first line of the record like view:. the terrain line is
-# raycast a second time from that height into DECK_HORIZONS, and
-# build_canopy.py reads the same field for its own deck profiles.
-DECK_RE = re.compile(r"""\{ name: (['"])(.*?)\1,.*?deck: (-?[\d.]+)""")
+# a tower spot: deck: [lat, lon, m], the tower's own coordinate and the
+# platform floor in metres above the ground there, on the first line of the
+# record like view:. the tower is not where the view: spot is (a clearing 22 to
+# 27 m off at both towers, 2026-09-18), so the terrain line is raycast a second
+# time from the tower into DECK_HORIZONS, and build_canopy.py reads the same
+# field for its own deck profiles.
+DECK_RE = re.compile(r"""\{ name: (['"])(.*?)\1,.*?deck: \[(-?[\d.]+), (-?[\d.]+), (-?[\d.]+)\]""")
 
 
 def parse_spots(html):
     views = {m.group(2): (float(m.group(3)), float(m.group(4)))
              for m in VIEW_RE.finditer(html)}
-    decks = {m.group(2): float(m.group(3)) for m in DECK_RE.finditer(html)}
+    decks = {m.group(2): [float(m.group(k)) for k in (3, 4, 5)] for m in DECK_RE.finditer(html)}
     spots = []
     for m in SPOT_RE.finditer(html):
         name = m.group(2)
@@ -450,7 +452,7 @@ def main():
                      or abs(rec.get('lon', 1e9) - s['view_lon']) > 1e-9)
             # a deck added, removed or retuned recomputes the spot: the deck
             # line is a second raycast, and two seconds beats a stale profile
-            redeck = rec.get('deck_m') != s.get('deck')
+            redeck = rec.get('deck_at') != s.get('deck')
             if not moved and not redeck:
                 results[s['key']] = rec
                 print('[%d/%d] %s ... cached' % (i, len(todo), s['name']), flush=True)
@@ -468,7 +470,9 @@ def main():
         alt, rng = raycast(s['view_lat'], s['view_lon'], h + EYE, fine, coarse[0])
         deck_alt = None
         if s.get('deck'):
-            deck_alt, _ = raycast(s['view_lat'], s['view_lon'], h + EYE + s['deck'], fine, coarse[0])
+            dlat, dlon, dm = s['deck']
+            hd = float(fine.sample(np.array([dlat]), np.array([dlon]))[0])
+            deck_alt, _ = raycast(dlat, dlon, hd + EYE + dm, fine, coarse[0])
             deck_alt = [round(float(a), 4) for a in deck_alt]
         # the cache keeps range to skyline as well as altitude, and only altitude
         # is inlined into index.html. that is deliberate: distance graded haze and
@@ -478,7 +482,7 @@ def main():
                'from_view': s['has_view'], 'dem_m': h,
                'alt': [round(float(a), 4) for a in alt],
                'range_m': [float(x) for x in rng],
-               'deck_m': s.get('deck'), 'deck_alt': deck_alt}
+               'deck_m': s['deck'][2] if s.get('deck') else None, 'deck_at': s.get('deck'), 'deck_alt': deck_alt}
         save_atomic(path, write_json(rec))
         results[s['key']] = rec
         print('[%d/%d] %s ... %.1fs' % (i, len(todo), s['name'], time.time() - t), flush=True)

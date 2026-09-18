@@ -76,10 +76,10 @@ def spots(html):
     out = {}
     for q, name, lat, lon, elev, rest in SPOT_RE.findall(block):
         view = re.search(r'view: \[(-?[\d.]+), (-?[\d.]+)\]', rest)
-        deck = re.search(r'deck: (-?[\d.]+)', rest)
+        deck = re.search(r'deck: \[(-?[\d.]+), (-?[\d.]+), (-?[\d.]+)\]', rest)
         out[name] = dict(lat=float(lat), lon=float(lon), elev_ft=float(elev),
                          view=(float(view.group(1)), float(view.group(2))) if view else None,
-                         deck=float(deck.group(1)) if deck else None)
+                         deck=[float(g) for g in deck.groups()] if deck else None)
     return out
 
 
@@ -227,8 +227,8 @@ def main():
         if abs(d['lat'] - want[0]) > 1e-9 or abs(d['lon'] - want[1]) > 1e-9:
             fail.append('%s: canopy computed from %.4f,%.4f but the page now says %.4f,%.4f'
                         ' - rerun tools/build_canopy.py' % (key, d['lat'], d['lon'], want[0], want[1]))
-        if d.get('deck_m') != deck:
-            fail.append('%s: canopy deck %s but the page says %s - rerun tools/build_canopy.py' % (key, d.get('deck_m'), deck))
+        if d.get('deck_at') != deck:
+            fail.append('%s: canopy deck %s but the page says %s - rerun tools/build_canopy.py' % (key, d.get('deck_at'), deck))
         if ('deck' in e) != bool(deck):
             fail.append('%s: the page %s a deck profile but the spot %s deck:' % (key, 'has' if 'deck' in e else 'lacks', 'has' if deck else 'lacks'))
         # every model 2 cache record carries f and b (equal to t where there is

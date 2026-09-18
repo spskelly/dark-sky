@@ -333,9 +333,10 @@ def structure_mask(dx, dy, z, cls):
     return built | very_tall
 
 
-def profiles_for(x, y, z, cls, lat, lon, deck_m=None):
-    """both layers from one site's points, and the deck pair when deck_m is
-    set. None when no ground return sits near enough to the pin to put an eye
+def profiles_for(x, y, z, cls, lat, lon, deck=None):
+    """both layers from one site's points, and the deck pair when deck, the
+    tower's [lat, lon, m], is set: raycast from the tower's own ground, not
+    the view's. None when no ground return sits near enough to the pin to put an eye
     on. classes are counted before anything is dropped, so the cache says what
     the survey held, not what this tool kept. a TREES return that structure_mask
     has routed to built is a structure, not also a tree, so every return ends
@@ -351,9 +352,9 @@ def profiles_for(x, y, z, cls, lat, lon, deck_m=None):
     built = structure_mask(dx, dy, z, cls)
     trees = np.isin(cls, TREES) & ~built
 
-    def pair(eye_z, min_r):
-        return {'t': [round(float(a), 4) for a in skyline(dx[trees], dy[trees], z[trees], eye_z, min_r)],
-                's': [round(float(a), 4) for a in skyline(dx[built], dy[built], z[built], eye_z, min_r)]}
+    def pair(eye_z, min_r, ex=0.0, ey=0.0):
+        return {'t': [round(float(a), 4) for a in skyline(dx[trees] - ex, dy[trees] - ey, z[trees], eye_z, min_r)],
+                's': [round(float(a), 4) for a in skyline(dx[built] - ex, dy[built] - ey, z[built], eye_z, min_r)]}
 
     out = {'ground_m': ground, 'eye_m': ground + bh.EYE, 'classes': counts}
     out.update(pair(ground + bh.EYE, MIN_R))
@@ -362,7 +363,12 @@ def profiles_for(x, y, z, cls, lat, lon, deck_m=None):
     # no window reads as f = b = t, so the page draws exactly what it drew before
     out['f'] = [round(float(v), 4) for v in np.where(np.isnan(wf), top, np.minimum(wf, top))]
     out['b'] = [round(float(v), 4) for v in np.where(np.isnan(wb), top, np.minimum(wb, top))]
-    out['deck'] = pair(ground + deck_m + bh.EYE, DECK_MIN_R) if deck_m else None
+    out['deck'] = None
+    if deck:
+        ex, ey = local_xy(*mercator(deck[0], deck[1]), x0, y0, lat)
+        dg = ground_at_pin(dx - ex, dy - ey, z, cls)
+        if dg is not None:
+            out['deck'] = pair(dg + deck[2] + bh.EYE, DECK_MIN_R, ex, ey)
     return out
 
 
@@ -858,7 +864,7 @@ def cache_ok(rec, site):
     return (abs(rec.get('lat', 1e9) - site['view_lat']) < 1e-9
             and abs(rec.get('lon', 1e9) - site['view_lon']) < 1e-9
             and rec.get('radius_m') == RADIUS
-            and rec.get('deck_m') == site.get('deck')
+            and rec.get('deck_at') == site.get('deck')
             and rec.get('candidates') == DATASETS
             and rec.get('model') == MODEL)
 
@@ -1196,7 +1202,7 @@ def main():
             print('[%s] %s ... fetch failed: %s' % (time.strftime('%H:%M:%S'), s['name'], e), flush=True)
             continue
         rec = {'name': s['name'], 'ov_id': s['ov_id'], 'lat': s['view_lat'], 'lon': s['view_lon'],
-               'radius_m': RADIUS, 'deck_m': s['deck'], 'candidates': DATASETS, 'datasets': used,
+               'radius_m': RADIUS, 'deck_m': s['deck'][2] if s['deck'] else None, 'deck_at': s['deck'], 'candidates': DATASETS, 'datasets': used,
                'nodes': nodes, 'bytes': nbytes, 'vintage': VINTAGE, 'model': MODEL, 't': None, 's': None, 'deck': None}
         prof = profiles_for(x, y, z, c, s['view_lat'], s['view_lon'], s['deck']) if used else None
         if prof is None:

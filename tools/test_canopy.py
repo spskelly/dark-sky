@@ -223,7 +223,7 @@ class TestDeck(unittest.TestCase):
 
     def test_deck_raises_the_eye_and_excludes_the_tower_itself(self):
         x, y, z, c = pts(*ring(2), (0.0, -4.0, 25.0, 6), (0.0, 40.0, 10.0, 5))
-        p = bc.profiles_for(x, y, z, c, LAT, LON, deck_m=20.0)
+        p = bc.profiles_for(x, y, z, c, LAT, LON, deck=[LAT, LON, 20.0])
         self.assertIsNotNone(p['deck'])
         # from the ground the cab 4 m out is a wall; from the deck it is gone
         self.assertGreater(p['s'][180], 60)
@@ -232,6 +232,21 @@ class TestDeck(unittest.TestCase):
         self.assertGreater(p['t'][0], 0)
         self.assertLess(p['deck']['t'][0], 0)
         self.assertIsNone(bc.profiles_for(x, y, z, c, LAT, LON)['deck'])
+
+    def test_the_deck_stands_on_its_own_tower_not_the_view(self):
+        """the view is a clearing 30 m west of the tower. the deck eye sits on
+        the tower's own ground, 5 m above the view's, so the cab 3 m from it is
+        no wall and a 25 m tree 40 m north of the tower is under a 26.7 m eye.
+        raycast from the view point instead, the cab would stand 30 m east
+        and the tree would clear a 21.7 m eye."""
+        tlat, tlon = bc.from_local(30.0, 0.0, LAT, LON)
+        tower_ground = [(30.0 + e, n, 5.0, 2) for e, n, _, _ in ring(2)]
+        x, y, z, c = pts(*ring(2), *tower_ground, (30.0, -3.0, 25.0, 6), (30.0, 40.0, 25.0, 5))
+        p = bc.profiles_for(x, y, z, c, LAT, LON, deck=[tlat, tlon, 20.0])
+        self.assertTrue(all(a == bh.ALT_MIN for a in p['deck']['s']))
+        self.assertLess(max(p['deck']['t']), 0)
+        # the ground profile is still the view's own: the cab is 30 m east of it
+        self.assertGreater(max(p['s'][80:100]), 0)
 
 
 class TestCache(unittest.TestCase):
@@ -248,8 +263,12 @@ class TestCache(unittest.TestCase):
 
     def test_moved_pin_deck_radius_or_dataset_list_recomputes(self):
         self.assertFalse(bc.cache_ok(self.rec(lat=LAT + 1e-6), self.SITE))
-        self.assertFalse(bc.cache_ok(self.rec(deck_m=18.0), self.SITE))
-        self.assertFalse(bc.cache_ok(self.rec(), dict(self.SITE, deck=18.0)))
+        deck = [LAT, LON, 18.0]
+        self.assertFalse(bc.cache_ok(self.rec(deck_at=deck), self.SITE))
+        self.assertFalse(bc.cache_ok(self.rec(), dict(self.SITE, deck=deck)))
+        self.assertTrue(bc.cache_ok(self.rec(deck_at=deck), dict(self.SITE, deck=deck)))
+        # the tower moved, same height
+        self.assertFalse(bc.cache_ok(self.rec(deck_at=deck), dict(self.SITE, deck=[LAT + 1e-4, LON, 18.0])))
         self.assertFalse(bc.cache_ok(self.rec(radius_m=150.0), self.SITE))
         self.assertFalse(bc.cache_ok(self.rec(candidates=bc.DATASETS[:-1]), self.SITE))
 
@@ -325,7 +344,7 @@ class TestBlock(unittest.TestCase):
 class TestSites(unittest.TestCase):
 
     HTML = ('const SPOTS = [\n'
-            "  { name: 'Fryingpan Mountain tower', lat: 35.3951, lon: -82.7686, elev: 5340, view: [35.3933, -82.7749], deck: 18.5, kind: 'view' },\n"
+            "  { name: 'Fryingpan Mountain tower', lat: 35.3951, lon: -82.7686, elev: 5340, view: [35.3933, -82.7749], deck: [35.393351, -82.774637, 18.5], kind: 'view' },\n"
             "  { name: 'Max Patch', lat: 35.7963, lon: -82.9620, elev: 4629, kind: 'view' },\n"
             '];\n'
             'const OVERLOOKS = [\n'
@@ -336,7 +355,7 @@ class TestSites(unittest.TestCase):
         sites = bc.site_list(self.HTML)
         by = {s['key']: s for s in sites}
         self.assertEqual(sorted(by), ['Fryingpan Mountain tower', 'Max Patch', 'ov:n1'])
-        self.assertEqual(by['Fryingpan Mountain tower']['deck'], 18.5)
+        self.assertEqual(by['Fryingpan Mountain tower']['deck'], [35.393351, -82.774637, 18.5])
         self.assertEqual((by['Fryingpan Mountain tower']['view_lat'], by['Fryingpan Mountain tower']['view_lon']), (35.3933, -82.7749))
         self.assertIsNone(by['Max Patch']['deck'])
         self.assertEqual(by['ov:n1']['ov_id'], 'n1')

@@ -214,13 +214,13 @@ class TestLattice(unittest.TestCase):
 class TestDeck(unittest.TestCase):
 
     HTML = ("const SPOTS = [\n"
-            "  { name: 'Fryingpan Mountain tower', lat: 35.3951, lon: -82.7686, elev: 5340, view: [35.3933, -82.7749], deck: 18.5, kind: 'view' },\n"
+            "  { name: 'Fryingpan Mountain tower', lat: 35.3951, lon: -82.7686, elev: 5340, view: [35.3933, -82.7749], deck: [35.393351, -82.774637, 18.5], kind: 'view' },\n"
             "  { name: 'Max Patch', lat: 35.7963, lon: -82.9620, elev: 4629, kind: 'view' },\n"
             "];\n")
 
-    def test_deck_is_read_in_metres_and_absent_means_none(self):
+    def test_deck_is_the_towers_own_coordinate_and_height_and_absent_means_none(self):
         spots = bh.parse_spots(self.HTML)
-        self.assertEqual(spots[0]['deck'], 18.5)
+        self.assertEqual(spots[0]['deck'], [35.393351, -82.774637, 18.5])
         self.assertIsNone(spots[1]['deck'])
         # the view coordinate still comes through beside it
         self.assertEqual((spots[0]['view_lat'], spots[0]['view_lon']), (35.3933, -82.7749))
