@@ -30,7 +30,7 @@ will be clear, and where to drive.
   earth; the trees and any tower or building within 200 m are drawn as their
   own layers from 2017 lidar and named in the sentence when they are what the
   moon or the core actually sets behind. The place comes from the
-  chooser (the forty spots and every parkway overlook), from a spot card's
+  chooser (the thirty-eight spots and every parkway overlook), from a spot card's
   thumbnail, from an overlook popup's button, or from a point picked on the
   map. A picked point has no terrain model yet, so its horizon is drawn flat
   at 0 degrees and the caveat under the canvas says so.
