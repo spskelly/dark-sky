@@ -24,6 +24,9 @@ const PHONE = { width: 390, height: 844 };
 const N_PANELS = 4;
 
 let failed = 0;
+// how many cards the page draws, read off SPOTS itself rather than typed in
+// twice, so trimming or growing the roster does not also require editing this file
+let N_CARDS = 0;
 function ok(cond, what) {
   console.log(`${cond ? 'ok  ' : 'FAIL'} ${what}`);
   if (!cond) failed++;
@@ -71,6 +74,7 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
 // --- one panel at a time, and the tabs switch it ---
 {
   const page = await open(browser, DESKTOP);
+  N_CARDS = await page.evaluate(() => SPOTS.length);
   ok((await visible(page)).join() === 'panel-when', 'opens on the calendar panel');
   ok((await selected(page)).join() === 'tab-when', 'its tab is the selected one');
 
@@ -665,7 +669,7 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
     base: document.querySelector('.leaflet-control-layers-base input:checked').nextElementSibling.textContent.trim(),
     lat: spotState.map.getCenter().lat, cards: document.querySelectorAll('#spot-list .spot').length }));
   ok(bad.filter === 'all' && bad.sort === 'mins' && bad.base === 'topo', 'garbage under a key loads the default');
-  ok(bad.lat > 34 && bad.lat < 37 && bad.cards === 40, 'a map view off the page is ignored, and all 40 cards draw');
+  ok(bad.lat > 34 && bad.lat < 37 && bad.cards === N_CARDS, `a map view off the page is ignored, and all ${N_CARDS} cards draw`);
 
   // the same for the three keys the earlier block does not cover, since a
   // throw on the way up blanks the page rather than degrading it
@@ -680,8 +684,8 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   await d.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
   const junk = await d.evaluate(() => ({ cards: document.querySelectorAll('#spot-list .spot').length,
     pins: document.querySelectorAll('.ovl-pin').length }));
-  ok(junk.cards === 40 && junk.pins === 0,
-    `junk under the overlook keys still loads 40 cards with the layer off (${junk.cards} cards, ${junk.pins} pins)`);
+  ok(junk.cards === N_CARDS && junk.pins === 0,
+    `junk under the overlook keys still loads ${N_CARDS} cards with the layer off (${junk.cards} cards, ${junk.pins} pins)`);
   await ctx.close();
 }
 
@@ -763,7 +767,7 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   ok(await a.$$eval('.ovl-pin', e => e.length) === 0, 'the layer is off on a first visit');
   await a.click('.leaflet-control-layers-overlays label:has-text("parkway overlooks")');
   ok(await a.$$eval('.ovl-pin', e => e.length) === n, 'switching it on draws one marker per overlook');
-  ok(await a.$$eval('#spot-list .spot', e => e.length) === 40, 'and the 40 cards are still 40');
+  ok(await a.$$eval('#spot-list .spot', e => e.length) === N_CARDS, `and the ${N_CARDS} cards are still ${N_CARDS}`);
 
   // open one from the middle of the list, not an end of it
   const id = await a.evaluate(() => OVERLOOKS[Math.floor(OVERLOOKS.length / 2)].id);
