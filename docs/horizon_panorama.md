@@ -113,8 +113,9 @@ redoing finished work.
   raw profiles, so a change to any input recomputes that site and a 2025
   re-run is `--force`. About 8 kB a site.
 - `tools/.canopy-cache/suggest/`: one review row per closed-in site, reused
-  while its coordinate and the five standing-spot tunables (`CLOSED_DEG`,
-  `SEARCH_R`, `CLEAR_R`, `CLEAR_H`, `LEVEL_M`) still match. `--suggest-views
+  while its coordinate and the seven standing-spot tunables (`CLOSED_DEG`,
+  `SEARCH_R`, `LEVEL_M`, `CAND_STEP`, `SKY_R`, `OPEN_DEG`, `CLEAR_H`) still
+  match. `--suggest-views
   --force`, or deleting the directory, recomputes every row. The table itself
   is `tools/.canopy-cache/view-review.md`. See Standing spots below.
 
@@ -337,41 +338,104 @@ box again.
 ### Standing spots
 
 40 of 150 sites read a median tree altitude over 30 degrees from the pin:
-the pin is in or against the canopy. At Chestoa View and Devil's Courthouse,
-the two probed sites, the pin sits under 12 to 19 m trees and the open
-ground is 14 to 19 m away; the skyline is set by trees 2.5 m from the pin on
-every azimuth. Doubletop's pin is on open ground and does not move with
-`SEARCH_R`. The coordinates were good to about 10 m, which was enough for a
-terrain raycast from 150 m out and is not enough for trees 2 m from where
-somebody would actually stand.
+the pin is in or against the canopy. The coordinates were good to about 10
+m, which was enough for a terrain raycast from 150 m out and is not enough
+for trees 2 m from where somebody would actually stand.
+
+Why spots are chosen by the sky they open (2026-09-18). The first finder
+took the nearest ground with no vegetation standing 3 m over it within 3 m.
+That is a proxy, and on the 2026-09-18 run it failed both ways. On slopes it
+refused every cell, because a 30 cm shrub on ground 3 m uphill reads as 3 m
+of vegetation (Devil's Courthouse and Chestoa View: 0 of about 2,300 ground
+cells within 30 m passed). In small gaps it took a cell whose skyline was
+still set by trees 4 to 10 m away (Jackrabbit, Balsam Gap, Soco Gap, Hominy
+Valley and Camp Creek "moved" 1 to 2 m with no change in tree altitude). A
+direct raycast from every level 2 m candidate found a real spot at Wayah
+Bald (5.7 m, median 43 to 19) and none under 30 degrees within 30 m at
+Jackrabbit (best 35.8 at 23 m), Chestoa (best 71.1) or Devil's Courthouse,
+which reaches 24 at 28 m and 15 at 30 m west on ground 6 m above the pin.
+The design once said the probed sites had "open ground 14 to 19 m away".
+That was wrong: the probe counted 4 m cells with no tree over 3 m above the
+pin's ground, so canopy tops below the pin downslope read as open, not
+places to stand.
+
+How it works. The points in the square `SEARCH_R + SKY_R` either side of the
+pin go into 1 m cells: the lowest ground return (the surface you stand on)
+and the highest vegetation return (the crown top). Every `CAND_STEP` lattice
+point within `SEARCH_R` of the pin, the pin included, whose cell has ground
+within `LEVEL_M` of the pin's is a candidate. From an eye `EYE` over that
+cell's ground, the tree skyline is raycast over every vegetated cell's top,
+with the same `skyline()` and `MIN_R` as the pin's own profile, and each
+cell fills every whole degree its 1 m width spans. The spot is the nearest
+candidate whose median tree altitude is at or under `CLOSED_DEG`. A
+candidate whose own cell has vegetation `CLEAR_H` or more over its ground is
+under a crown, which sits inside `MIN_R` and would otherwise be invisible:
+its sky is the crown, so it reads the capped 80 degrees and 0 % open and is
+never picked. `then` and `open then` are raycast again from the spot through
+the raw points (the same `profiles_for` the pin uses), so the numbers the
+table shows are not the grid's.
+
+Grid against raw points, measured 2026-09-18 on Wayah Bald (20 sampled
+candidates not under a crown, raw raycast over trees within 110 m). One
+point per cell leaves the degrees between cell centres empty within about 57
+m, so it read 7.0 degrees of median low on average, and a solid synthetic
+ring of trees read 122 of 360 degrees open. Filling each cell's full width
+at its top reads 10.7 high on average (absolute median 10.4, worst 31.5):
+the top is the highest return in a 1 m cell of leaf-off crown, and the rest
+of the cell's width is lower or see-through. The finder therefore errs
+towards trees. It can miss a spot whose raw median is a little under 30 (at
+Wayah the pick reads 24.3 on the grid and 2.7 through the raw points). The
+error is an average, not a bound, which is why `then` is always the raw
+raycast from the spot. At Wayah 1,227 of 2,091 candidates were under a
+crown.
 
 ```sh
 # for every site whose median tree altitude is over CLOSED_DEG, find the
-# nearest open standing spot and write a review table. raycasts from the
-# spot through the pin's own box (up to 30 m short on the far side), so
-# over a filled store it uses no network -- the final line's net figure
-# shows it. never touches index.html.
+# nearest candidate that opens the sky and write a review table. raycasts
+# from the pin's own box, so over a filled store it uses no network: the
+# final line's net figure shows it. never touches index.html. 5 to 17 s a
+# site over the filled store (2026-09-18: Wayah Bald 17, Jackrabbit 12,
+# Devil's Courthouse 10, Chestoa 5, wall clock with the H: read), so about
+# 10 minutes for the 40 closed-in sites.
 python tools/build_canopy.py --suggest-views
+```
+
+Sanity sites, 2026-09-18, the lines the run printed:
+
+```
+[11:35:48] [1/1] Wayah Bald ... moved 7 m (+0.0 m), 43 to 3 degrees
+[11:36:00] [1/1] Jackrabbit Mountain ... none under 30 within 60 m; best 37 at 38 m, 1 m down
+[11:36:10] [1/1] Devil's Courthouse ... moved 32 m (+6.1 m), 72 to 11 degrees
+[11:36:15] [1/1] Chestoa View Overlook ... none under 30 within 60 m; best 72 at 29 m, 8 m up
 ```
 
 writes `tools/.canopy-cache/view-review.md`, one row per closed-in site,
 most closed first: `site`, `key` (the site's key, since decisions are filed
 by key: overlooks are `ov:<osm id>`), `now` (median tree altitude at the
-pin), `proposed` (the spot, or "none within SEARCH_R m"), `moved` (metres
-from the pin), `bearing`, `then` (median tree altitude from the spot), `walk
-under trees` (metres of the straight line from the pin to the spot that pass
-under a crown), and satellite links for both `pin` and `spot`. Each row is
-also cached on its own in `tools/.canopy-cache/suggest/`, reused while the
-site's coordinate and the five tunables below still match; `--suggest-views
---force`, or deleting the directory, recomputes every row.
+pin), `open now` (open sky at the pin), `proposed` (the spot; with none, "none
+under CLOSED_DEG within SEARCH_R m" and the best candidate's median, distance
+and metres up or down, as in "best 37 at 38 m, 1 m down"), `moved` (metres
+from the pin), `bearing`, `up/down` (the spot's ground against the pin's,
+signed, metres), `then` (median tree altitude from the spot), `open then`
+(open sky from the spot), `walk under trees` (metres of the straight line
+from the pin to the spot that pass under a crown), and satellite links for
+both `pin` and `spot`. Open sky is the percent of the 360 azimuths whose tree
+line is under `OPEN_DEG`, the number the page can show later as "open sky
+%". Each row is also cached on its own in `tools/.canopy-cache/suggest/`,
+reused while the site's coordinate and the seven tunables below still
+match; `--suggest-views --force`, or deleting the directory, recomputes
+every row. A run with `--only` rewrites `view-review.md` with only the sites
+it matched.
 
 | Constant | Value | Evidence |
 |---|---|---|
-| `CLOSED_DEG` | 30 degrees | A median tree altitude over this puts the pin in or against the canopy (2026-09-18: 40 of 150 sites). Placeholder, from two probed sites |
-| `SEARCH_R` | 30 m | How far from the pin a standing spot may be proposed; the probed sites had open ground 14 and 19 m away. Placeholder, from two probed sites |
-| `CLEAR_R` | 3 m | No vegetation within this of a standing spot, so the nearest crown is not the skyline. Placeholder, from two probed sites |
-| `CLEAR_H` | 3 m | Metres above the spot's ground before vegetation is in the way; shrubs under this are not. Placeholder, from two probed sites |
-| `LEVEL_M` | 3 m | The spot's ground within this of the pin's, so the lip of a cliff is never swapped for its foot. Placeholder, from two probed sites |
+| `CLOSED_DEG` | 30 degrees | A median tree altitude over this puts the pin in or against the canopy (2026-09-18: 40 of 150 sites), and a candidate at or under it is a spot. Placeholder, from two probed sites |
+| `SEARCH_R` | 60 m | How far from the pin a spot may be proposed. 30 m found nothing at three of the four probed sites, and Devil's Courthouse's best sat on the 30 m edge; at 60 m its spot is 32 m out (2026-09-18). Placeholder |
+| `LEVEL_M` | 10 m | The spot's ground within this of the pin's. 3 m shut out Devil's Courthouse's spot 6 m up; 10 still keeps a cliff lip from being swapped for its foot (a 20 m drop). Placeholder |
+| `CAND_STEP` | 2 m | Spacing of the candidate lattice, the spacing the 2026-09-18 probe used. Placeholder |
+| `SKY_R` | 100 m | Trees further than this past `SEARCH_R` are not gridded. `SEARCH_R + SKY_R` has to stay inside `RADIUS` (200 m), the box that was fetched. Placeholder |
+| `OPEN_DEG` | 20 degrees | An azimuth whose tree line is under this counts as open sky, the cut the 2026-09-18 probe counted. Placeholder |
+| `CLEAR_H` | 3 m | Vegetation this far over the ground is in the way: over the walk from the pin, and over a candidate's own cell (it is under a crown). Shrubs under this are not. Placeholder, from two probed sites |
 
 A decision is recorded, never applied by itself. For a curated spot, set
 `view:` on its `SPOTS` record to the approved coordinate. For an overlook,

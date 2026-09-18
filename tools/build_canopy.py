@@ -72,10 +72,12 @@ CLUSTER_CELL = 2.0   # metres. an unclassified return needs company in its cell
 CLUSTER_MIN = 3      # returns. fewer than this in a cell is a bird or a stray, not a tower
 S_MIN_DEG = 0.5      # degrees. structures get a layer only where they stand this far above ridge and trees
 CLOSED_DEG = 30.0    # degrees. a median tree altitude over this puts the pin in or against the canopy (2026-09-18: 40 of 150 sites). placeholder, from two probed sites
-SEARCH_R = 30.0      # metres. how far from the pin a standing spot may be proposed; the probed sites had open ground 14 and 19 m away
-CLEAR_R = 3.0        # metres. no vegetation within this of a standing spot, so the nearest crown is not the skyline
-CLEAR_H = 3.0        # metres above the spot's ground before vegetation is in the way; shrubs under this are not
-LEVEL_M = 3.0        # metres. the spot's ground within this of the pin's, so the lip of a cliff is never swapped for its foot
+SEARCH_R = 60.0      # metres. how far from the pin a standing spot may be proposed; 30 found nothing at three of four probed sites and devil's courthouse's best sat on its edge (2026-09-18). placeholder
+LEVEL_M = 10.0       # metres. the spot's ground within this of the pin's; 3 shut out devil's courthouse's spot 6 m up, and 10 still keeps a cliff lip from being swapped for its 20 m foot (2026-09-18). placeholder
+CAND_STEP = 2.0      # metres between candidate spots, the spacing the 2026-09-18 probe used. placeholder
+SKY_R = 100.0        # metres past SEARCH_R that trees are gridded; SEARCH_R + SKY_R stays inside RADIUS, the box that was fetched. placeholder
+OPEN_DEG = 20.0      # degrees. an azimuth whose tree line is under this counts as open sky, the cut the 2026-09-18 probe counted. placeholder
+CLEAR_H = 3.0        # metres of vegetation over the ground before it is in the way, over the walk and over a candidate spot's own cell; shrubs under this are not. placeholder
 WORKERS = 32         # concurrent node downloads. each connection runs at 0.2 to 0.3 MB/s from us-west-2, so throughput scales with connections: 8 gave 1.6 MB/s, 64 about 10 (2026-09-17)
 TREES = (3, 4, 5)
 GROUND, UNCLASS, BUILDING = 2, 1, 6
@@ -169,20 +171,33 @@ def ground_at_pin(dx, dy, z, cls):
     return None
 
 
-def skyline(dx, dy, z, eye_z, min_r):
+def skyline(dx, dy, z, eye_z, min_r, cell=0.0):
     """the highest apparent altitude per whole degree of azimuth, ALT_MIN where
     nothing was returned. every point is a candidate for its own degree, and
     the maximum is the skyline, which is the same upper-envelope rule the
-    terrain raycast follows with max pooling."""
+    terrain raycast follows with max pooling. with cell set, each point is
+    the centre of a square that wide and fills every degree it spans: a 1 m
+    cell 12 m off spans 5 degrees, and one degree per cell left a third of
+    the sky inside a solid ring of trees reading as open."""
     r = np.hypot(dx, dy)
     keep = r >= min_r
     dx, dy, z, r = dx[keep], dy[keep], z[keep], r[keep]
     out = np.full(360, bh.ALT_MIN)
     if not r.size:
         return out
-    az = np.floor(np.degrees(np.arctan2(dx, dy))).astype(np.int64) % 360
+    deg = np.degrees(np.arctan2(dx, dy))
+    az = np.floor(deg).astype(np.int64)
     alt = np.degrees(np.arctan2(z - eye_z - r ** 2 / (2.0 * bh.R_EFF), r))
-    np.maximum.at(out, az, alt)
+    np.maximum.at(out, az % 360, alt)
+    if cell:
+        w = np.degrees(np.arctan2(cell / 2.0, r))
+        lo, hi = np.floor(deg - w).astype(np.int64), np.floor(deg + w).astype(np.int64)
+        # ponytail: one pass per degree of the widest cell (about 14 at MIN_R), over every cell each pass
+        for s in range(1, int(max((hi - az).max(), (az - lo).max())) + 1):
+            m = az + s <= hi
+            np.maximum.at(out, (az[m] + s) % 360, alt[m])
+            m = az - s >= lo
+            np.maximum.at(out, (az[m] - s) % 360, alt[m])
     return out
 
 
@@ -266,40 +281,73 @@ def closed_in(rec):
     return float(np.median(np.minimum(rec['t'], bh.ALT_MIN + bh.ALT_RANGE))) > CLOSED_DEG
 
 
-def open_spot(dx, dy, z, cls, ground):
-    """the nearest place within SEARCH_R of the pin a person could stand in the
-    open: a 1 m cell whose lowest ground return is within LEVEL_M of the pin's
-    ground, with no vegetation standing CLEAR_H over it within CLEAR_R.
-    (dx, dy) of the cell centre in metres from the pin, or None. a grid rather
-    than point pairs: 30 m of site is tens of thousands of returns."""
-    reach = SEARCH_R + CLEAR_R
-    near = (np.abs(dx) < reach) & (np.abs(dy) < reach)
+def open_pct(t):
+    """percent of the 360 azimuths whose tree line is under OPEN_DEG"""
+    return float(np.mean(np.asarray(t, float) < OPEN_DEG) * 100.0)
+
+
+def sky_grid(dx, dy, z, cls):
+    """1 m cells over the square SEARCH_R + SKY_R either side of the pin: the
+    lowest ground return in each (the surface you stand on, nan when none)
+    and the highest vegetation return (-inf when none), plus the cell centres
+    along one axis. a grid rather than the points: the box is millions of
+    returns and every candidate raycasts all of it."""
+    half = SEARCH_R + SKY_R
+    near = (np.abs(dx) < half) & (np.abs(dy) < half)
     dx, dy, z, cls = dx[near], dy[near], z[near], cls[near]
-    n = int(2 * reach)
-    i = np.clip(np.floor(dx + reach).astype(np.int64), 0, n - 1)
-    j = np.clip(np.floor(dy + reach).astype(np.int64), 0, n - 1)
+    n = int(2 * half)
+    i = np.clip(np.floor(dx + half).astype(np.int64), 0, n - 1)
+    j = np.clip(np.floor(dy + half).astype(np.int64), 0, n - 1)
     g = np.full((n, n), np.nan)
     gm = cls == GROUND
-    np.fmin.at(g, (i[gm], j[gm]), z[gm])            # the surface you would stand on
-    veg = np.full((n, n), -np.inf)
+    np.fmin.at(g, (i[gm], j[gm]), z[gm])
+    top = np.full((n, n), -np.inf)
     tm = np.isin(cls, TREES)
-    np.maximum.at(veg, (i[tm], j[tm]), z[tm])
-    k = int(CLEAR_R)
-    pad = np.pad(veg, k, constant_values=-np.inf)
-    around = np.full((n, n), -np.inf)
-    for a in range(-k, k + 1):
-        for b in range(-k, k + 1):
-            if a * a + b * b <= CLEAR_R * CLEAR_R:
-                around = np.maximum(around, pad[k + a:k + a + n, k + b:k + b + n])
-    c = np.arange(n) - reach + 0.5
+    np.maximum.at(top, (i[tm], j[tm]), z[tm])
+    return g, top, np.arange(n) - half + 0.5
+
+
+def sky_candidates(dx, dy, z, cls, ground):
+    """every CAND_STEP lattice point within SEARCH_R of the pin, the pin among
+    them, whose cell has ground within LEVEL_M of the pin's, with the tree
+    skyline raycast from a standing eye in that cell over every vegetated
+    cell's top. measuring the sky is the point: a clearance test around the
+    cell refused every slope (a shrub on ground uphill reads as a tree) and
+    took small gaps whose sky was still the trees a few metres off.
+    cx, cy (cell centre, metres from the pin), dz (its ground minus the
+    pin's), median tree altitude capped as closed_in caps it, and open_pct."""
+    g, top, c = sky_grid(dx, dy, z, cls)
+    veg = np.isfinite(top)
     X, Y = np.meshgrid(c, c, indexing='ij')
-    r = np.hypot(X, Y)
-    with np.errstate(invalid='ignore'):
-        ok = (np.abs(g - ground) <= LEVEL_M) & (around - g < CLEAR_H) & (r <= SEARCH_R)   # nan compares false
+    vx, vy, vz = X[veg], Y[veg], top[veg]
+    k = int(SEARCH_R // CAND_STEP)
+    at = np.arange(-k, k + 1) * CAND_STEP
+    idx = np.floor(at + SEARCH_R + SKY_R).astype(np.int64)
+    cap = bh.ALT_MIN + bh.ALT_RANGE
+    out = []
+    for a, i in zip(at, idx):
+        for b, j in zip(at, idx):
+            if math.hypot(a, b) > SEARCH_R or not abs(g[i, j] - ground) <= LEVEL_M:   # nan fails too
+                continue
+            # a crown over the cell itself is inside MIN_R, so the raycast
+            # would not see it and the spot came out as the last tree of a
+            # stand, looking out past its own branches. from under a crown
+            # the sky is the crown.
+            if top[i, j] - g[i, j] >= CLEAR_H:
+                t = np.full(360, cap)
+            else:
+                t = skyline(vx - c[i], vy - c[j], vz, g[i, j] + bh.EYE, MIN_R, cell=1.0)
+            out.append((c[i], c[j], g[i, j] - ground, float(np.median(np.minimum(t, cap))), open_pct(t)))
+    return tuple(np.array(col, float) for col in zip(*out)) if out else tuple(np.zeros(0) for _ in range(5))
+
+
+def pick_spot(cx, cy, median):
+    """index of the nearest candidate whose median is at or under CLOSED_DEG,
+    or None"""
+    ok = np.asarray(median) <= CLOSED_DEG
     if not ok.any():
         return None
-    best = int(np.argmin(np.where(ok, r, np.inf)))
-    return float(X.flat[best]), float(Y.flat[best])
+    return int(np.argmin(np.where(ok, np.hypot(cx, cy), np.inf)))
 
 
 def from_local(dx, dy, lat, lon):
@@ -337,15 +385,23 @@ def suggest(site, rec):
     ground = ground_at_pin(dx, dy, z, c)
     top = bh.ALT_MIN + bh.ALT_RANGE
     row = {'name': site['name'], 'key': site['key'], 'lat': lat, 'lon': lon,
-           'before': float(np.median(np.minimum(rec['t'], top))), 'spot': None}
-    spot = open_spot(dx, dy, z, c, ground) if ground is not None else None
-    if spot:
+           'before': float(np.median(np.minimum(rec['t'], top))), 'open_before': open_pct(rec['t']), 'spot': None}
+    cx, cy, dz, med, _ = sky_candidates(dx, dy, z, c, ground) if ground is not None else [np.zeros(0)] * 5
+    k = pick_spot(cx, cy, med)
+    if k is not None:
+        spot = (float(cx[k]), float(cy[k]))
         slat, slon = from_local(spot[0], spot[1], lat, lon)
         p = profiles_for(x, y, z, c, slat, slon)
         row.update(spot=(round(slat, 6), round(slon, 6)), moved_m=math.hypot(*spot),
-                   bearing=math.degrees(math.atan2(spot[0], spot[1])) % 360,
+                   bearing=math.degrees(math.atan2(spot[0], spot[1])) % 360, dz_m=float(dz[k]),
                    after=float(np.median(np.minimum(p['t'], top))) if p else None,
+                   open_after=open_pct(p['t']) if p else None,
                    under_trees_m=walk_under_trees(dx, dy, z, c, ground, spot))
+    elif len(med):
+        # the lowest candidate, nearest first on a tie (every one under a
+        # crown reads the cap), so the table can say how far off it is
+        b = int(np.lexsort((np.hypot(cx, cy), med))[0])
+        row.update(best_m=math.hypot(cx[b], cy[b]), best_median=float(med[b]), best_dz_m=float(dz[b]))
     row['params'] = suggest_params()
     return row
 
@@ -353,7 +409,7 @@ def suggest(site, rec):
 def suggest_params():
     """the tunables a saved row was computed with; a retuned constant is a
     reason to recompute, the same as a moved pin"""
-    return [CLOSED_DEG, SEARCH_R, CLEAR_R, CLEAR_H, LEVEL_M]
+    return [CLOSED_DEG, SEARCH_R, LEVEL_M, CAND_STEP, SKY_R, OPEN_DEG, CLEAR_H]
 
 
 def suggest_path(site):
@@ -380,6 +436,16 @@ def load_suggested(site):
     return row if suggest_ok(row, site) else None
 
 
+def no_spot(r):
+    """what the table and the run say for a site with no spot: how close the
+    best candidate came, when there was one"""
+    out = 'none under %g within %g m' % (CLOSED_DEG, SEARCH_R)
+    if r.get('best_m') is not None:
+        out += '; best %.0f at %.0f m, %.0f m %s' % (r['best_median'], r['best_m'], abs(r['best_dz_m']),
+                                                    'up' if r['best_dz_m'] >= 0 else 'down')
+    return out
+
+
 def review_md(rows):
     """the table shawn reviews: one row per closed-in site, most closed first,
     with satellite links for the pin and the proposed spot"""
@@ -387,20 +453,24 @@ def review_md(rows):
     out = ['# Canopy standing spots for review', '',
            'Sites whose median tree altitude from the pin is over %g degrees. For each: approve the '
            'proposed spot, reject it (the site really is under trees), or give a better coordinate, and '
-           'say whether the walk to it needs a line on the card. "then" is the median tree altitude '
-           'from the spot; "walk under trees" is metres of the straight line from the pin that pass '
-           'under a crown.' % CLOSED_DEG, '',
-           '| site | key | now | proposed | moved | bearing | then | walk under trees | pin | spot |',
-           '|---|---|---:|---|---:|---:|---:|---:|---|---|']
+           'say whether the walk to it needs a line on the card. "now" and "open now" are from the '
+           'pin, "then" and "open then" from the spot: the median tree altitude, and the percent of '
+           'azimuths whose tree line is under %g degrees. "up/down" is the spot\'s ground against the '
+           'pin\'s; "walk under trees" is metres of the straight line from the pin that pass under a '
+           'crown.' % (CLOSED_DEG, OPEN_DEG), '',
+           '| site | key | now | open now | proposed | moved | bearing | up/down | then | open then | walk under trees | pin | spot |',
+           '|---|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---|---|']
     for r in sorted(rows, key=lambda r: -r['before']):
         pin = '[pin](%s)' % (sat % (r['lat'], r['lon']))
         if r['spot'] is None:
-            out.append('| %s | %s | %.0f | none within %g m | | | | | %s | |' % (
-                r['name'], r['key'], r['before'], SEARCH_R, pin))
+            out.append('| %s | %s | %.0f | %.0f%% | %s | | | | | | | %s | |' % (
+                r['name'], r['key'], r['before'], r['open_before'], no_spot(r), pin))
             continue
-        out.append('| %s | %s | %.0f | %.6f, %.6f | %.0f m | %03d | %s | %d m | %s | [spot](%s) |' % (
-            r['name'], r['key'], r['before'], r['spot'][0], r['spot'][1], r['moved_m'], round(r['bearing']) % 360,
-            'n/a' if r['after'] is None else '%.0f' % r['after'], r['under_trees_m'], pin, sat % tuple(r['spot'])))
+        out.append('| %s | %s | %.0f | %.0f%% | %.6f, %.6f | %.0f m | %03d | %+.1f m | %s | %s | %d m | %s | [spot](%s) |' % (
+            r['name'], r['key'], r['before'], r['open_before'], r['spot'][0], r['spot'][1], r['moved_m'],
+            round(r['bearing']) % 360, r['dz_m'], 'n/a' if r['after'] is None else '%.0f' % r['after'],
+            'n/a' if r['open_after'] is None else '%.0f%%' % r['open_after'], r['under_trees_m'], pin,
+            sat % tuple(r['spot'])))
     return '\n'.join(out) + '\n'
 
 
@@ -692,8 +762,8 @@ def main():
             bh.save_atomic(suggest_path(s), bh.write_json(row))
             rows.append(row)
             print('[%s] [%d/%d] %s ... %s' % (time.strftime('%H:%M:%S'), i, len(closed), s['name'],
-                  'no open ground within %g m' % SEARCH_R if row['spot'] is None else
-                  'moved %.0f m, %.0f to %s degrees' % (row['moved_m'], row['before'],
+                  no_spot(row) if row['spot'] is None else
+                  'moved %.0f m (%+.1f m), %.0f to %s degrees' % (row['moved_m'], row['dz_m'], row['before'],
                   'n/a' if row['after'] is None else '%.0f' % row['after'])), flush=True)
         flush_store()
         path = os.path.join(CACHE, 'view-review.md')

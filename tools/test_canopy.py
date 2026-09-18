@@ -568,6 +568,13 @@ def arrays(rows):
     return a[:, 0], a[:, 1], a[:, 2], a[:, 3].astype(np.int64)
 
 
+# 15 m trees from 3 to 12 m out around a clearing, open ground beyond
+RING = lattice(lambda a, b: 0.0, r=30) + [(a + .5, b + .5, 15.0, 5) for a in range(-13, 13) for b in range(-13, 13)
+                                         if 3 <= math.hypot(a + .5, b + .5) <= 12]
+# 20 m trees on every metre
+FOREST = lattice(lambda a, b: 0.0) + [(a + .5, b + .5, 20.0, 5) for a in range(-20, 20) for b in range(-20, 20)]
+
+
 class TestStandingSpot(unittest.TestCase):
 
     def test_closed_in_reads_the_median_tree_altitude_capped_at_the_encoding(self):
@@ -576,26 +583,96 @@ class TestStandingSpot(unittest.TestCase):
         self.assertFalse(bc.closed_in({'t': [10.0] * 360}))
         self.assertFalse(bc.closed_in({'t': None}))
 
+    def small(self, search_r, sky_r=5.0):
+        """a smaller search and sky box keeps a synthetic site fast"""
+        return mock.patch.multiple(bc, SEARCH_R=search_r, SKY_R=sky_r)
+
+    def test_a_grid_cell_covers_every_degree_it_spans(self):
+        """a 1 m cell 3 m due north spans -9.5 to +9.5 degrees, touching the
+        20 whole degrees from 350 to 9; one point per cell would fill one of
+        them and leave the rest reading as open sky"""
+        t = bc.skyline(np.array([0.0]), np.array([3.0]), np.array([10.0]), 0.0, 2.0, cell=1.0)
+        self.assertEqual(int((t > 0).sum()), 20)
+        self.assertTrue(np.all(t[[350, 0, 9]] > 0))
+        raw = bc.skyline(np.array([0.0]), np.array([3.0]), np.array([10.0]), 0.0, 2.0)
+        self.assertEqual(int((raw > 0).sum()), 1)   # the raw-point raycast is unchanged
+
+    def test_open_pct_counts_azimuths_under_open_deg(self):
+        self.assertEqual(bc.open_pct([10.0] * 90 + [40.0] * 270), 25.0)
+
     def test_an_open_pin_is_its_own_spot(self):
         dx, dy, z, c = arrays(lattice(lambda a, b: 0.0))
-        self.assertLess(math.hypot(*bc.open_spot(dx, dy, z, c, 0.0)), 1.0)
+        with self.small(20.0):
+            cx, cy, dz, med, op = bc.sky_candidates(dx, dy, z, c, 0.0)
+        k = bc.pick_spot(cx, cy, med)
+        self.assertIsNotNone(k)
+        self.assertLess(math.hypot(cx[k], cy[k]), 1.5)
 
-    def test_the_nearest_open_ground_beside_a_tree(self):
-        """a 10 m crown 4 m across the pin: the spot is the nearest ground
-        with no crown within CLEAR_R, so about 4 + 3 m out"""
-        rows = lattice(lambda a, b: 0.0)
-        rows += [(a * .5, b * .5, 10.0, 5) for a in range(-8, 9) for b in range(-8, 9)
-                 if (a * .5) ** 2 + (b * .5) ** 2 <= 16]
-        spot = bc.open_spot(*arrays(rows), 0.0)
-        self.assertIsNotNone(spot)
-        self.assertTrue(6.0 <= math.hypot(*spot) <= 9.0, spot)
+    def test_a_small_clearing_ringed_by_trees_is_not_a_spot(self):
+        """jackrabbit: the pin in a clearing 3 m in radius, 15 m trees from 3
+        to 12 m out, open ground beyond. the old finder took the gap; the sky
+        from it is still the ring, so the spot is past the trees"""
+        with self.small(25.0):
+            cx, cy, dz, med, op = bc.sky_candidates(*arrays(RING), 0.0)
+        k = bc.pick_spot(cx, cy, med)
+        self.assertIsNotNone(k)
+        self.assertGreaterEqual(math.hypot(cx[k], cy[k]), 12.0)
+        self.assertLessEqual(med[k], bc.CLOSED_DEG)
+        pin = int(np.argmin(np.hypot(cx, cy)))
+        self.assertGreater(med[pin], bc.CLOSED_DEG)
+
+    def test_a_slope_with_shrubs_still_finds_a_spot(self):
+        """devil's courthouse: ground rising 0.3 m per m, 0.5 m shrubs on every
+        metre, 15 m trees within 10 m of the pin. neither the slope nor the
+        shrubs uphill is a reason to refuse the open ground past the trees"""
+        rows = lattice(lambda a, b: 0.3 * a, r=30)
+        rows += [(a + .5, b + .5, 0.3 * (a + .5) + 0.5, 3) for a in range(-30, 30) for b in range(-30, 30)]
+        rows += [(a + .5, b + .5, 0.3 * (a + .5) + 15.0, 5) for a in range(-11, 11) for b in range(-11, 11)
+                 if math.hypot(a + .5, b + .5) <= 10]
+        with self.small(25.0):
+            cx, cy, dz, med, op = bc.sky_candidates(*arrays(rows), 0.0)
+        self.assertIsNotNone(bc.pick_spot(cx, cy, med))
 
     def test_open_ground_below_the_lip_is_refused(self):
         """the pin on a wooded ledge; the open ground 20 m down past x = 3 is
         the foot of the cliff, not a place to stand and look"""
         rows = lattice(lambda a, b: 0.0 if a <= 3 else -20.0)
         rows += [(a + .5, b + .5, 12.0, 5) for a in range(-20, 4) for b in range(-20, 21)]
-        self.assertIsNone(bc.open_spot(*arrays(rows), 0.0))
+        with self.small(20.0):
+            cx, cy, dz, med, op = bc.sky_candidates(*arrays(rows), 0.0)
+        self.assertIsNone(bc.pick_spot(cx, cy, med))
+
+    def test_closed_forest_has_no_spot_but_a_best_candidate(self):
+        with self.small(15.0):
+            cx, cy, dz, med, op = bc.sky_candidates(*arrays(FOREST), 0.0)
+        self.assertIsNone(bc.pick_spot(cx, cy, med))
+        self.assertGreater(len(med), 0)
+        self.assertGreater(float(np.min(med)), bc.CLOSED_DEG)
+        self.assertEqual(len(op), len(med))
+
+    def fetch_of(self, rows):
+        """fetch_site's return for synthetic local rows around LAT, LON"""
+        dx, dy, z, c = arrays(rows)
+        x0, y0 = bc.mercator(LAT, LON)
+        k = math.cos(math.radians(LAT))
+        return lambda lat, lon: (x0 + dx / k, y0 + dy / k, z, c, [], 0, 0)
+
+    def test_suggest_rows_carry_open_sky_and_the_best_candidate(self):
+        site = {'name': 'S', 'key': 'S', 'view_lat': LAT, 'view_lon': LON}
+        rec = {'t': [10.0] * 90 + [40.0] * 270}
+        with self.small(15.0), mock.patch.object(bc, 'fetch_site', side_effect=self.fetch_of(FOREST)):
+            row = bc.suggest(site, rec)
+        self.assertIsNone(row['spot'])
+        self.assertEqual(row['open_before'], 25.0)
+        self.assertGreater(row['best_median'], bc.CLOSED_DEG)
+        self.assertLessEqual(row['best_m'], 15.0)
+        self.assertEqual(row['best_dz_m'], 0.0)
+        with self.small(25.0), mock.patch.object(bc, 'fetch_site', side_effect=self.fetch_of(RING)):
+            row = bc.suggest(site, rec)
+        self.assertGreaterEqual(row['moved_m'], 12.0)
+        self.assertEqual(row['dz_m'], 0.0)
+        self.assertGreater(row['open_after'], 25.0)
+        self.assertNotIn('best_m', row)
 
     def test_from_local_inverts_local_xy(self):
         lat, lon = bc.from_local(12.0, -7.0, LAT, LON)
@@ -613,21 +690,31 @@ class TestStandingSpot(unittest.TestCase):
 
     def test_review_table_has_a_row_per_site_and_says_when_there_is_no_spot(self):
         rows = [{'name': 'A', 'key': 'A', 'lat': 35.1, 'lon': -83.1, 'before': 70.0, 'spot': (35.10001, -83.10002),
-                 'moved_m': 12.3, 'bearing': 45.0, 'after': 20.0, 'under_trees_m': 4},
-                {'name': 'B', 'key': 'B', 'lat': 35.2, 'lon': -83.2, 'before': 50.0, 'spot': None}]
+                 'moved_m': 12.3, 'bearing': 45.0, 'after': 20.0, 'under_trees_m': 4,
+                 'open_before': 5.0, 'dz_m': -2.46, 'open_after': 61.4},
+                {'name': 'B', 'key': 'B', 'lat': 35.2, 'lon': -83.2, 'before': 50.0, 'spot': None,
+                 'open_before': 0.0, 'best_m': 23.2, 'best_median': 35.8, 'best_dz_m': -3.1},
+                {'name': 'C', 'key': 'C', 'lat': 35.3, 'lon': -83.3, 'before': 40.0, 'spot': None, 'open_before': 0.0}]
         md = bc.review_md(rows)
-        lines = [l for l in md.splitlines() if l.startswith('| A ') or l.startswith('| B ')]
-        self.assertEqual(len(lines), 2)
+        lines = [l for l in md.splitlines() if l[:4] in ('| A ', '| B ', '| C ')]
+        self.assertEqual(len(lines), 3)
+        self.assertIn('| open now |', md)
+        self.assertIn('| up/down |', md)
+        self.assertIn('| open then |', md)
+        self.assertIn('| 5% |', lines[0])
+        self.assertIn('| -2.5 m |', lines[0])
+        self.assertIn('| 61% |', lines[0])
         self.assertIn('| key |', md)         # header names the column
         self.assertIn('| A | A |', lines[0])  # site and key both show for this row
         self.assertIn('35.100010, -83.100020', lines[0])
         self.assertIn('https://www.google.com/maps/@35.100010,-83.100020,40m/data=!3m1!1e3', lines[0])
-        self.assertIn('none within 30 m', lines[1])
+        self.assertIn('none under 30 within 60 m; best 36 at 23 m, 3 m down', lines[1])
+        self.assertIn('none under 30 within 60 m |', lines[2])   # no candidate at all, so no best
 
     def test_bearing_wraps_to_000_not_360(self):
         rows = [{'name': 'A', 'key': 'A', 'lat': 35.1, 'lon': -83.1, 'before': 70.0,
                  'spot': (35.10001, -83.10002), 'moved_m': 12.3, 'bearing': 359.8,
-                 'after': 20.0, 'under_trees_m': 4}]
+                 'after': 20.0, 'under_trees_m': 4, 'open_before': 5.0, 'dz_m': 0.0, 'open_after': 61.4}]
         line = [l for l in bc.review_md(rows).splitlines() if l.startswith('| A ')][0]
         self.assertIn('| 000 |', line)
 
@@ -636,7 +723,7 @@ class TestStandingSpot(unittest.TestCase):
         spot as a list, and the table has to format that the same way"""
         rows = [{'name': 'A', 'key': 'A', 'lat': 35.1, 'lon': -83.1, 'before': 70.0,
                  'spot': [35.10001, -83.10002], 'moved_m': 12.3, 'bearing': 45.0,
-                 'after': 20.0, 'under_trees_m': 4}]
+                 'after': 20.0, 'under_trees_m': 4, 'open_before': 5.0, 'dz_m': 0.0, 'open_after': 61.4}]
         line = [l for l in bc.review_md(rows).splitlines() if l.startswith('| A ')][0]
         self.assertIn('35.100010, -83.100020', line)
 
@@ -660,7 +747,7 @@ class TestSuggestCheckpoint(unittest.TestCase):
         if s['name'] == 'Site A (fails)':
             raise OSError('connection reset by peer')
         return {'name': s['name'], 'key': s['key'], 'lat': s['view_lat'], 'lon': s['view_lon'],
-                'before': 60.0, 'spot': None, 'params': bc.suggest_params()}
+                'before': 60.0, 'open_before': 0.0, 'spot': None, 'params': bc.suggest_params()}
 
     def test_a_failed_site_is_skipped_and_leaves_no_row_file(self):
         with tempfile.TemporaryDirectory() as d:
@@ -687,7 +774,7 @@ class TestSuggestCheckpoint(unittest.TestCase):
                 os.makedirs(os.path.join(d, 'suggest'))
                 site = {'name': 'Site B (ok)', 'ov_id': None}
                 row = {'name': 'Site B (ok)', 'key': 'Site B (ok)', 'lat': 35.90, 'lon': -82.20,
-                       'before': 60.0, 'spot': None, 'params': bc.suggest_params()}
+                       'before': 60.0, 'open_before': 0.0, 'spot': None, 'params': bc.suggest_params()}
                 with open(os.path.join(d, 'suggest', bh.cache_name(site)), 'w', encoding='utf-8') as f:
                     json.dump(row, f)
                 calls = []
@@ -710,7 +797,7 @@ class TestSuggestCheckpoint(unittest.TestCase):
                 os.makedirs(os.path.join(d, 'suggest'))
                 site = {'name': 'Site B (ok)', 'ov_id': None}
                 row = {'name': 'Site B (ok)', 'key': 'Site B (ok)', 'lat': 35.90, 'lon': -82.20,
-                       'before': 60.0, 'spot': None, 'params': bc.suggest_params()}
+                       'before': 60.0, 'open_before': 0.0, 'spot': None, 'params': bc.suggest_params()}
                 with open(os.path.join(d, 'suggest', bh.cache_name(site)), 'w', encoding='utf-8') as f:
                     json.dump(row, f)
                 calls = []
