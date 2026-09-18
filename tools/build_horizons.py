@@ -275,9 +275,17 @@ SPOT_RE = re.compile(r"""\{ name: (['"])(.*?)\1, lat: (-?[\d.]+), lon: (-?[\d.]+
 VIEW_RE = re.compile(r"""\{ name: (['"])(.*?)\1,.*?view: \[(-?[\d.]+), *(-?[\d.]+)\]""")
 
 
+# a tower spot: the platform floor above the ground at the view coordinate,
+# in metres, on the first line of the record like view:. the terrain line is
+# raycast a second time from that height into DECK_HORIZONS, and
+# build_canopy.py reads the same field for its own deck profiles.
+DECK_RE = re.compile(r"""\{ name: (['"])(.*?)\1,.*?deck: (-?[\d.]+)""")
+
+
 def parse_spots(html):
     views = {m.group(2): (float(m.group(3)), float(m.group(4)))
              for m in VIEW_RE.finditer(html)}
+    decks = {m.group(2): float(m.group(3)) for m in DECK_RE.finditer(html)}
     spots = []
     for m in SPOT_RE.finditer(html):
         name = m.group(2)
@@ -285,7 +293,8 @@ def parse_spots(html):
         vlat, vlon = views.get(name, (lat, lon))
         spots.append({'name': name, 'lat': lat, 'lon': lon,
                       'view_lat': vlat, 'view_lon': vlon,
-                      'has_view': name in views, 'elev_ft': float(m.group(5))})
+                      'has_view': name in views, 'elev_ft': float(m.group(5)),
+                      'deck': decks.get(name)})
     return spots
 
 
@@ -331,6 +340,41 @@ def write_json(rec):
     return go
 
 
+def deck_horizons_js(spots, results):
+    """the terrain line from the tower deck, for the spots that have one."""
+    body = '\n'.join('  %s: %s,' % (json.dumps(s['name']), json.dumps(encode(results[s['name']]['deck_alt'])))
+                     for s in spots if results.get(s['name'], {}).get('deck_alt'))
+    return 'const DECK_HORIZONS = {\n' + body + '\n};'
+
+
+# ---------- index.html in and out, shared with build_canopy.py ----------
+
+def read_html():
+    # newline='' on both the read and the write: python would otherwise hand
+    # back the file with every crlf translated to lf, the eol sniff below would
+    # always say lf, and the rewrite would quietly reline the whole page
+    with open(HTML, encoding='utf-8', newline='') as f:
+        return f.read()
+
+
+def replace_block(html, start, end, block):
+    """the generated block between two markers, replaced. refuses rather than
+    guesses when a marker is missing: a page without markers is a page somebody
+    reformatted, and appending a block to it would ship two."""
+    a, b = html.find(start), html.find(end)
+    if a < 0 or b < 0:
+        sys.exit('markers %r / %r missing from index.html' % (start, end))
+    # a windows checkout with core.autocrlf on holds the file as crlf; writing an
+    # lf-only block into it would leave the page mixed and the diff noisy
+    eol = '\r\n' if '\r\n' in html else '\n'
+    return html[:a] + block.replace('\n', eol) + html[b + len(end):]
+
+
+def write_html(html):
+    with open(HTML, 'w', encoding='utf-8', newline='') as f:
+        f.write(html)
+
+
 def view_elev_js(spots, results, lots):
     """[lot ft, view ft] for each spot with a walk, both off the dem, so the card
     can show the climb. the hand typed elev cannot do this: it means the view on
@@ -349,11 +393,7 @@ def main():
     args = ap.parse_args()
 
     os.makedirs(CACHE, exist_ok=True)
-    # newline='' on both the read and the write: python would otherwise hand
-    # back the file with every crlf translated to lf, the eol sniff below would
-    # always say lf, and the rewrite would quietly reline the whole page
-    with open(HTML, encoding='utf-8', newline='') as f:
-        html = f.read()
+    html = read_html()
     spots = parse_spots(html)
     if not spots:
         sys.exit('no spots found in index.html; the SPOTS block may have been reformatted')
@@ -408,11 +448,15 @@ def main():
             # the profile was actually computed from.
             moved = (abs(rec.get('lat', 1e9) - s['view_lat']) > 1e-9
                      or abs(rec.get('lon', 1e9) - s['view_lon']) > 1e-9)
-            if not moved:
+            # a deck added, removed or retuned recomputes the spot: the deck
+            # line is a second raycast, and two seconds beats a stale profile
+            redeck = rec.get('deck_m') != s.get('deck')
+            if not moved and not redeck:
                 results[s['key']] = rec
                 print('[%d/%d] %s ... cached' % (i, len(todo), s['name']), flush=True)
                 continue
-            print('[%d/%d] %s ... coordinate moved, recomputing' % (i, len(todo), s['name']), flush=True)
+            print('[%d/%d] %s ... %s, recomputing' % (i, len(todo), s['name'],
+                                                     'coordinate moved' if moved else 'deck changed'), flush=True)
         t = time.time()
         if not coarse:
             coarse.append(coarse_lattice(args.force))
@@ -422,6 +466,10 @@ def main():
             print('[%d/%d] %s ... skipped, no dem coverage' % (i, len(todo), s['name']), flush=True)
             continue
         alt, rng = raycast(s['view_lat'], s['view_lon'], h + EYE, fine, coarse[0])
+        deck_alt = None
+        if s.get('deck'):
+            deck_alt, _ = raycast(s['view_lat'], s['view_lon'], h + EYE + s['deck'], fine, coarse[0])
+            deck_alt = [round(float(a), 4) for a in deck_alt]
         # the cache keeps range to skyline as well as altitude, and only altitude
         # is inlined into index.html. that is deliberate: distance graded haze and
         # peak labels both want the range, and holding it here means adding them
@@ -429,7 +477,8 @@ def main():
         rec = {'name': s['name'], 'ov_id': s.get('ov_id'), 'lat': s['view_lat'], 'lon': s['view_lon'],
                'from_view': s['has_view'], 'dem_m': h,
                'alt': [round(float(a), 4) for a in alt],
-               'range_m': [float(x) for x in rng]}
+               'range_m': [float(x) for x in rng],
+               'deck_m': s.get('deck'), 'deck_alt': deck_alt}
         save_atomic(path, write_json(rec))
         results[s['key']] = rec
         print('[%d/%d] %s ... %.1fs' % (i, len(todo), s['name'], time.time() - t), flush=True)
@@ -476,7 +525,8 @@ def main():
              + '\nconst HORIZON_ALT_RANGE = %g;  // degrees, so %g .. %g'
              % (ALT_RANGE, ALT_MIN, ALT_MIN + ALT_RANGE)
              + '\nconst HORIZONS = {\n' + body + '\n};\n'
-             + view_elev_js(spots, results, lots) + '\n' + overlook_horizons_js(overlooks, results) + '\n' + END)
+             + view_elev_js(spots, results, lots) + '\n' + overlook_horizons_js(overlooks, results) + '\n'
+             + deck_horizons_js(spots, results) + '\n' + END)
 
     print('\n%d spots and %d overlooks, %.1f kB of index.html'
           % (len([s for s in spots if s['key'] in results]),
@@ -485,18 +535,11 @@ def main():
         print('--only run, index.html left alone so a partial set cannot replace the full one')
         return
 
-    a, b = html.find(START), html.find(END)
-    if a < 0 or b < 0:
-        sys.exit('markers missing from index.html')
-    # a windows checkout with core.autocrlf on holds the file as crlf; writing an
-    # lf-only block into it would leave the page mixed and the diff noisy
-    eol = '\r\n' if '\r\n' in html else '\n'
-    nxt = html[:a] + block.replace('\n', eol) + html[b + len(END):]
+    nxt = replace_block(html, START, END, block)
     if nxt == html:
         print('unchanged')
         return
-    with open(HTML, 'w', encoding='utf-8', newline='') as f:
-        f.write(nxt)
+    write_html(nxt)
     print('index.html updated')
 
 

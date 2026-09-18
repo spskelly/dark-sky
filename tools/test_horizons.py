@@ -211,5 +211,47 @@ class TestLattice(unittest.TestCase):
         self.assertEqual(off[0], bh.NODATA)
 
 
+class TestDeck(unittest.TestCase):
+
+    HTML = ("const SPOTS = [\n"
+            "  { name: 'Fryingpan Mountain tower', lat: 35.3951, lon: -82.7686, elev: 5340, view: [35.3933, -82.7749], deck: 18.5, kind: 'view' },\n"
+            "  { name: 'Max Patch', lat: 35.7963, lon: -82.9620, elev: 4629, kind: 'view' },\n"
+            "];\n")
+
+    def test_deck_is_read_in_metres_and_absent_means_none(self):
+        spots = bh.parse_spots(self.HTML)
+        self.assertEqual(spots[0]['deck'], 18.5)
+        self.assertIsNone(spots[1]['deck'])
+        # the view coordinate still comes through beside it
+        self.assertEqual((spots[0]['view_lat'], spots[0]['view_lon']), (35.3933, -82.7749))
+
+    def test_deck_block_lists_only_spots_with_a_deck_profile(self):
+        spots = [{'name': 'Fryingpan Mountain tower'}, {'name': 'Max Patch'}]
+        results = {'Fryingpan Mountain tower': {'alt': [0.0] * 360, 'deck_m': 18.5, 'deck_alt': [1.0] * 360},
+                   'Max Patch': {'alt': [0.0] * 360, 'deck_m': None, 'deck_alt': None}}
+        js = bh.deck_horizons_js(spots, results)
+        self.assertTrue(js.startswith('const DECK_HORIZONS = {\n  "Fryingpan Mountain tower": "'))
+        self.assertNotIn('Max Patch', js)
+        self.assertTrue(js.endswith('\n};'))
+        self.assertEqual(bh.deck_horizons_js([], {}), 'const DECK_HORIZONS = {\n\n};')
+
+
+class TestBlockWriter(unittest.TestCase):
+
+    def test_replaces_between_markers_and_keeps_crlf(self):
+        html = 'a\r\n// --- x:start ---\r\nold\r\n// --- x:end ---\r\nb\r\n'
+        out = bh.replace_block(html, '// --- x:start ---', '// --- x:end ---', '// --- x:start ---\nnew\n// --- x:end ---')
+        self.assertEqual(out, 'a\r\n// --- x:start ---\r\nnew\r\n// --- x:end ---\r\nb\r\n')
+
+    def test_lf_file_stays_lf(self):
+        html = 'a\n// --- x:start ---\nold\n// --- x:end ---\nb\n'
+        out = bh.replace_block(html, '// --- x:start ---', '// --- x:end ---', '// --- x:start ---\nnew\n// --- x:end ---')
+        self.assertEqual(out, 'a\n// --- x:start ---\nnew\n// --- x:end ---\nb\n')
+
+    def test_missing_marker_refuses(self):
+        with self.assertRaises(SystemExit):
+            bh.replace_block('nothing here', '// --- x:start ---', '// --- x:end ---', 'block')
+
+
 if __name__ == '__main__':
     unittest.main()
