@@ -523,5 +523,70 @@ class TestStore(unittest.TestCase):
             bc.flush_store()
 
 
+def lattice(z_of, r=20):
+    """ground returns on a 1 m grid, in metres east and north of the pin"""
+    return [(float(a), float(b), z_of(a, b), 2) for a in range(-r, r + 1) for b in range(-r, r + 1)]
+
+
+def arrays(rows):
+    a = np.array(rows, float)
+    return a[:, 0], a[:, 1], a[:, 2], a[:, 3].astype(np.int64)
+
+
+class TestStandingSpot(unittest.TestCase):
+
+    def test_closed_in_reads_the_median_tree_altitude_capped_at_the_encoding(self):
+        self.assertTrue(bc.closed_in({'t': [60.0] * 360}))
+        self.assertTrue(bc.closed_in({'t': [85.0] * 360}))
+        self.assertFalse(bc.closed_in({'t': [10.0] * 360}))
+        self.assertFalse(bc.closed_in({'t': None}))
+
+    def test_an_open_pin_is_its_own_spot(self):
+        dx, dy, z, c = arrays(lattice(lambda a, b: 0.0))
+        self.assertLess(math.hypot(*bc.open_spot(dx, dy, z, c, 0.0)), 1.0)
+
+    def test_the_nearest_open_ground_beside_a_tree(self):
+        """a 10 m crown 4 m across the pin: the spot is the nearest ground
+        with no crown within CLEAR_R, so about 4 + 3 m out"""
+        rows = lattice(lambda a, b: 0.0)
+        rows += [(a * .5, b * .5, 10.0, 5) for a in range(-8, 9) for b in range(-8, 9)
+                 if (a * .5) ** 2 + (b * .5) ** 2 <= 16]
+        spot = bc.open_spot(*arrays(rows), 0.0)
+        self.assertIsNotNone(spot)
+        self.assertTrue(6.0 <= math.hypot(*spot) <= 9.0, spot)
+
+    def test_open_ground_below_the_lip_is_refused(self):
+        """the pin on a wooded ledge; the open ground 20 m down past x = 3 is
+        the foot of the cliff, not a place to stand and look"""
+        rows = lattice(lambda a, b: 0.0 if a <= 3 else -20.0)
+        rows += [(a + .5, b + .5, 12.0, 5) for a in range(-20, 4) for b in range(-20, 21)]
+        self.assertIsNone(bc.open_spot(*arrays(rows), 0.0))
+
+    def test_from_local_inverts_local_xy(self):
+        lat, lon = bc.from_local(12.0, -7.0, LAT, LON)
+        x0, y0 = bc.mercator(LAT, LON)
+        x, y = bc.mercator(lat, lon)
+        dx, dy = bc.local_xy(np.array([x]), np.array([y]), x0, y0, LAT)
+        self.assertAlmostEqual(float(dx[0]), 12.0, places=6)
+        self.assertAlmostEqual(float(dy[0]), -7.0, places=6)
+
+    def test_the_walk_counts_metres_under_trees(self):
+        rows = lattice(lambda a, b: 0.0) + [(5.0 + a * .5, b * .5, 10.0, 5) for a in range(0, 5) for b in range(-2, 3)]
+        dx, dy, z, c = arrays(rows)
+        self.assertGreater(bc.walk_under_trees(dx, dy, z, c, 0.0, (12.0, 0.0)), 0)
+        self.assertEqual(bc.walk_under_trees(dx, dy, z, c, 0.0, (0.0, 12.0)), 0)
+
+    def test_review_table_has_a_row_per_site_and_says_when_there_is_no_spot(self):
+        rows = [{'name': 'A', 'key': 'A', 'lat': 35.1, 'lon': -83.1, 'before': 70.0, 'spot': (35.10001, -83.10002),
+                 'moved_m': 12.3, 'bearing': 45.0, 'after': 20.0, 'under_trees_m': 4},
+                {'name': 'B', 'key': 'B', 'lat': 35.2, 'lon': -83.2, 'before': 50.0, 'spot': None}]
+        md = bc.review_md(rows)
+        lines = [l for l in md.splitlines() if l.startswith('| A ') or l.startswith('| B ')]
+        self.assertEqual(len(lines), 2)
+        self.assertIn('35.100010, -83.100020', lines[0])
+        self.assertIn('https://www.google.com/maps/@35.100010,-83.100020,40m/data=!3m1!1e3', lines[0])
+        self.assertIn('none within 30 m', lines[1])
+
+
 if __name__ == '__main__':
     unittest.main()

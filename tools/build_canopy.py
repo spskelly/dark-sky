@@ -71,6 +71,11 @@ GROUND_CELL = 5.0    # metres. the ground grid unclassified returns are measured
 CLUSTER_CELL = 2.0   # metres. an unclassified return needs company in its cell
 CLUSTER_MIN = 3      # returns. fewer than this in a cell is a bird or a stray, not a tower
 S_MIN_DEG = 0.5      # degrees. structures get a layer only where they stand this far above ridge and trees
+CLOSED_DEG = 30.0    # degrees. a median tree altitude over this puts the pin in or against the canopy (2026-09-18: 40 of 150 sites). placeholder, from two probed sites
+SEARCH_R = 30.0      # metres. how far from the pin a standing spot may be proposed; the probed sites had open ground 14 and 19 m away
+CLEAR_R = 3.0        # metres. no vegetation within this of a standing spot, so the nearest crown is not the skyline
+CLEAR_H = 3.0        # metres above the spot's ground before vegetation is in the way; shrubs under this are not
+LEVEL_M = 3.0        # metres. the spot's ground within this of the pin's, so the lip of a cliff is never swapped for its foot
 WORKERS = 32         # concurrent node downloads. each connection runs at 0.2 to 0.3 MB/s from us-west-2, so throughput scales with connections: 8 gave 1.6 MB/s, 64 about 10 (2026-09-17)
 TREES = (3, 4, 5)
 GROUND, UNCLASS, BUILDING = 2, 1, 6
@@ -248,6 +253,123 @@ def profiles_for(x, y, z, cls, lat, lon, deck_m=None):
     out.update(pair(ground + bh.EYE, MIN_R))
     out['deck'] = pair(ground + deck_m + bh.EYE, DECK_MIN_R) if deck_m else None
     return out
+
+
+# ---------- where a person would stand ----------
+
+def closed_in(rec):
+    """the pin is in or against the canopy: its median tree altitude, read the
+    way the page reads it (capped at the top of the encoding), is over
+    CLOSED_DEG"""
+    if rec.get('t') is None:
+        return False
+    return float(np.median(np.minimum(rec['t'], bh.ALT_MIN + bh.ALT_RANGE))) > CLOSED_DEG
+
+
+def open_spot(dx, dy, z, cls, ground):
+    """the nearest place within SEARCH_R of the pin a person could stand in the
+    open: a 1 m cell whose lowest ground return is within LEVEL_M of the pin's
+    ground, with no vegetation standing CLEAR_H over it within CLEAR_R.
+    (dx, dy) of the cell centre in metres from the pin, or None. a grid rather
+    than point pairs: 30 m of site is tens of thousands of returns."""
+    reach = SEARCH_R + CLEAR_R
+    near = (np.abs(dx) < reach) & (np.abs(dy) < reach)
+    dx, dy, z, cls = dx[near], dy[near], z[near], cls[near]
+    n = int(2 * reach)
+    i = np.clip(np.floor(dx + reach).astype(np.int64), 0, n - 1)
+    j = np.clip(np.floor(dy + reach).astype(np.int64), 0, n - 1)
+    g = np.full((n, n), np.nan)
+    gm = cls == GROUND
+    np.fmin.at(g, (i[gm], j[gm]), z[gm])            # the surface you would stand on
+    veg = np.full((n, n), -np.inf)
+    tm = np.isin(cls, TREES)
+    np.maximum.at(veg, (i[tm], j[tm]), z[tm])
+    k = int(CLEAR_R)
+    pad = np.pad(veg, k, constant_values=-np.inf)
+    around = np.full((n, n), -np.inf)
+    for a in range(-k, k + 1):
+        for b in range(-k, k + 1):
+            if a * a + b * b <= CLEAR_R * CLEAR_R:
+                around = np.maximum(around, pad[k + a:k + a + n, k + b:k + b + n])
+    c = np.arange(n) - reach + 0.5
+    X, Y = np.meshgrid(c, c, indexing='ij')
+    r = np.hypot(X, Y)
+    with np.errstate(invalid='ignore'):
+        ok = (np.abs(g - ground) <= LEVEL_M) & (around - g < CLEAR_H) & (r <= SEARCH_R)   # nan compares false
+    if not ok.any():
+        return None
+    best = int(np.argmin(np.where(ok, r, np.inf)))
+    return float(X.flat[best]), float(Y.flat[best])
+
+
+def from_local(dx, dy, lat, lon):
+    """local_xy the other way: the point dx, dy metres east and north of
+    lat, lon, back to degrees through the same mercator"""
+    x0, y0 = mercator(lat, lon)
+    k = math.cos(math.radians(lat))
+    x, y = x0 + dx / k, y0 + dy / k
+    return math.degrees(2.0 * math.atan(math.exp(y / R_MERC)) - math.pi / 2.0), math.degrees(x / R_MERC)
+
+
+def walk_under_trees(dx, dy, z, cls, ground, spot):
+    """metres of the straight walk from the pin to the spot that pass within a
+    metre of vegetation standing CLEAR_H over the pin's ground. 0 is an open
+    line; anything else is a walk the card may need to mention"""
+    d = math.hypot(*spot)
+    tm = np.isin(cls, TREES) & (z - ground > CLEAR_H)
+    tx, ty = dx[tm], dy[tm]
+    covered = 0
+    for s in np.arange(0.5, d, 1.0):
+        px, py = spot[0] * s / d, spot[1] * s / d
+        if np.any((np.abs(tx - px) < 1.0) & (np.abs(ty - py) < 1.0)):
+            covered += 1
+    return covered
+
+
+def suggest(site, rec):
+    """one review row for a closed-in site. the after number is raycast from
+    the spot through the pin's own box, which is 30 m short on the far side;
+    the real rebuild fetches the spot's own box."""
+    lat, lon = site['view_lat'], site['view_lon']
+    x, y, z, c, _, _, _ = fetch_site(lat, lon)
+    x0, y0 = mercator(lat, lon)
+    dx, dy = local_xy(x, y, x0, y0, lat)
+    ground = ground_at_pin(dx, dy, z, c)
+    top = bh.ALT_MIN + bh.ALT_RANGE
+    row = {'name': site['name'], 'key': site['key'], 'lat': lat, 'lon': lon,
+           'before': float(np.median(np.minimum(rec['t'], top))), 'spot': None}
+    spot = open_spot(dx, dy, z, c, ground) if ground is not None else None
+    if spot:
+        slat, slon = from_local(spot[0], spot[1], lat, lon)
+        p = profiles_for(x, y, z, c, slat, slon)
+        row.update(spot=(round(slat, 6), round(slon, 6)), moved_m=math.hypot(*spot),
+                   bearing=math.degrees(math.atan2(spot[0], spot[1])) % 360,
+                   after=float(np.median(np.minimum(p['t'], top))) if p else None,
+                   under_trees_m=walk_under_trees(dx, dy, z, c, ground, spot))
+    return row
+
+
+def review_md(rows):
+    """the table shawn reviews: one row per closed-in site, most closed first,
+    with satellite links for the pin and the proposed spot"""
+    sat = 'https://www.google.com/maps/@%.6f,%.6f,40m/data=!3m1!1e3'
+    out = ['# Canopy standing spots for review', '',
+           'Sites whose median tree altitude from the pin is over %g degrees. For each: approve the '
+           'proposed spot, reject it (the site really is under trees), or give a better coordinate, and '
+           'say whether the walk to it needs a line on the card. "then" is the median tree altitude '
+           'from the spot; "walk under trees" is metres of the straight line from the pin that pass '
+           'under a crown.' % CLOSED_DEG, '',
+           '| site | now | proposed | moved | bearing | then | walk under trees | pin | spot |',
+           '|---|---:|---|---:|---:|---:|---:|---|---|']
+    for r in sorted(rows, key=lambda r: -r['before']):
+        pin = '[pin](%s)' % (sat % (r['lat'], r['lon']))
+        if r['spot'] is None:
+            out.append('| %s | %.0f | none within %g m | | | | | %s | |' % (r['name'], r['before'], SEARCH_R, pin))
+            continue
+        out.append('| %s | %.0f | %.6f, %.6f | %.0f m | %03.0f | %s | %d m | %s | [spot](%s) |' % (
+            r['name'], r['before'], r['spot'][0], r['spot'][1], r['moved_m'], r['bearing'],
+            'n/a' if r['after'] is None else '%.0f' % r['after'], r['under_trees_m'], pin, sat % r['spot']))
+    return '\n'.join(out) + '\n'
 
 
 # ---------- sites, cache, the block ----------
@@ -491,6 +613,8 @@ def main():
     ap.add_argument('--dry-run', action='store_true', help='say what the real run would do, fetch nothing')
     ap.add_argument('--force', action='store_true', help='discard the cache and recompute')
     ap.add_argument('--only', help='run one site, by case-insensitive name substring')
+    ap.add_argument('--suggest-views', action='store_true',
+                    help='propose open standing spots for closed-in pins; writes a review table, not index.html')
     args = ap.parse_args()
 
     global STORE
@@ -510,6 +634,24 @@ def main():
 
     cached = [] if args.force else [s for s in todo if load_cached(s)]
     fresh = [s for s in todo if s not in cached]
+
+    if args.suggest_views:
+        closed = [(s, load_cached(s)) for s in todo]
+        closed = [(s, r) for s, r in closed if r and closed_in(r)]
+        rows = []
+        for i, (s, r) in enumerate(closed, 1):
+            row = suggest(s, r)
+            rows.append(row)
+            print('[%s] [%d/%d] %s ... %s' % (time.strftime('%H:%M:%S'), i, len(closed), s['name'],
+                  'no open ground within %g m' % SEARCH_R if row['spot'] is None else
+                  'moved %.0f m, %.0f to %s degrees' % (row['moved_m'], row['before'],
+                  'n/a' if row['after'] is None else '%.0f' % row['after'])), flush=True)
+        flush_store()
+        path = os.path.join(CACHE, 'view-review.md')
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(review_md(rows))
+        print('%d closed-in sites, review table at %s' % (len(rows), path))
+        return
 
     # a dry run says what the real run would do and stops. it fetches nothing,
     # not even hierarchy pages: the estimate below is from the 2026-09-17
