@@ -1,0 +1,48 @@
+// every card's hand-written note next to what its measured horizon says, so
+// a claim like "wide south-facing sky" can be checked against the ridge that
+// is actually there. prints one block per spot: the eight compass sectors'
+// mean and peak horizon altitude, the high and low sides, and the note with
+// its directional words marked. the judgement is a human's; this only puts
+// the two side by side.
+//
+//   node tools/check-notes-vs-horizon.mjs            # all spots
+//   node tools/check-notes-vs-horizon.mjs "Max Patch" # one
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const html = readFileSync(join(ROOT, 'index.html'), 'utf8');
+const B64 = html.match(/PAN_B64 *= *'([^']+)'/)[1];
+const MIN = +html.match(/HORIZON_ALT_MIN *= *([-\d.]+)/)[1];
+const RANGE = +html.match(/HORIZON_ALT_RANGE *= *([-\d.]+)/)[1];
+
+// the SPOTS array and HORIZONS block, read out of the page rather than by
+// running it: both are plain literals
+const spotsSrc = html.slice(html.indexOf('const SPOTS = ['), html.indexOf('];', html.indexOf('const SPOTS = [')) + 2);
+const SPOTS = new Function(spotsSrc + ' return SPOTS;')();
+const horSrc = html.slice(html.indexOf('const HORIZONS = {'), html.indexOf('};', html.indexOf('const HORIZONS = {')) + 2);
+const HORIZONS = new Function(horSrc + ' return HORIZONS;')();
+
+const decode = s => Array.from({ length: 360 }, (_, i) => MIN + (B64.indexOf(s[2 * i]) * 64 + B64.indexOf(s[2 * i + 1])) * RANGE / 4095);
+const DIRS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+const only = process.argv[2];
+
+for (const s of SPOTS) {
+  if (only && s.name !== only) continue;
+  const h = HORIZONS[s.name];
+  if (!h) { console.log(`\n== ${s.name}: no horizon\n`); continue; }
+  const alt = decode(h);
+  const sectors = DIRS.map((d, i) => {
+    const c = i * 45; let sum = 0, peak = -99;
+    for (let k = -22; k <= 22; k++) { const v = alt[((c + k) % 360 + 360) % 360]; sum += v; peak = Math.max(peak, v); }
+    return { d, mean: sum / 45, peak };
+  });
+  const hi = [...sectors].sort((a, b) => b.mean - a.mean);
+  const words = s.note.replace(/\b(north|south|east|west|northeast|northwest|southeast|southwest|ridge|valley|open|360|facing|horizon|wide|enclosed|treeline|trees|tower)\b/gi, m => m.toUpperCase());
+  console.log(`\n== ${s.name} (${s.elev} ft${s.view ? ', view point set' : ''})`);
+  console.log('   ' + sectors.map(x => `${x.d}:${x.mean.toFixed(1)}/${x.peak.toFixed(1)}`).join('  '));
+  console.log(`   highest ${hi[0].d} (${hi[0].mean.toFixed(1)}), lowest ${hi[7].d} (${hi[7].mean.toFixed(1)}), overall peak ${Math.max(...alt).toFixed(1)}`);
+  console.log('   tags: ' + s.tags.join(', '));
+  console.log('   ' + words);
+}
