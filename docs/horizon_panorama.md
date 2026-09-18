@@ -113,9 +113,9 @@ redoing finished work.
   raw profiles, so a change to any input recomputes that site and a 2025
   re-run is `--force`. About 8 kB a site.
 - `tools/.canopy-cache/suggest/`: one review row per closed-in site, reused
-  while its coordinate and the seven standing-spot tunables (`CLOSED_DEG`,
-  `SEARCH_R`, `LEVEL_M`, `CAND_STEP`, `SKY_R`, `OPEN_DEG`, `CLEAR_H`) still
-  match. `--suggest-views
+  while its coordinate and the nine standing-spot tunables (`CLOSED_DEG`,
+  `SEARCH_R`, `LEVEL_M`, `CAND_STEP`, `SKY_R`, `OPEN_DEG`, `CLEAR_H`,
+  `CONFIRM_DEG`, `CONFIRM_MAX`) still match. `--suggest-views
   --force`, or deleting the directory, recomputes every row. The table itself
   is `tools/.canopy-cache/view-review.md`. See Standing spots below.
 
@@ -366,14 +366,21 @@ point within `SEARCH_R` of the pin, the pin included, whose cell has ground
 within `LEVEL_M` of the pin's is a candidate. From an eye `EYE` over that
 cell's ground, the tree skyline is raycast over every vegetated cell's top,
 with the same `skyline()` and `MIN_R` as the pin's own profile, and each
-cell fills every whole degree its 1 m width spans. The spot is the nearest
-candidate whose median tree altitude is at or under `CLOSED_DEG`. A
-candidate whose own cell has vegetation `CLEAR_H` or more over its ground is
-under a crown, which sits inside `MIN_R` and would otherwise be invisible:
-its sky is the crown, so it reads the capped 80 degrees and 0 % open and is
-never picked. `then` and `open then` are raycast again from the spot through
-the raw points (the same `profiles_for` the pin uses), so the numbers the
-table shows are not the grid's.
+cell fills every whole degree its 1 m width spans. A candidate whose own
+cell has vegetation `CLEAR_H` or more over its ground is under a crown,
+which sits inside `MIN_R` and would otherwise be invisible: its sky is the
+crown, so it reads the capped 80 degrees and 0 % open.
+
+The grid screens and the raw points decide. Every candidate whose grid
+median is at or under `CLOSED_DEG + CONFIRM_DEG`, nearest first and at most
+`CONFIRM_MAX` of them, is raycast again through the raw vegetation returns
+within `SKY_R` of it, with the plain point `skyline()`. The first whose raw
+median is at or under `CLOSED_DEG` is the spot. An under-crown candidate
+reads 80 on the grid, so it never reaches the raw check. With no spot, the
+row's best is the lowest raw median among those checked, or the lowest grid
+median when none was checked, and the table marks that one "(grid)". `then`
+and `open then` are raycast again from the spot through the whole box's raw
+points (the same `profiles_for` the pin uses).
 
 Grid against raw points, measured 2026-09-18 on Wayah Bald (20 sampled
 candidates not under a crown, raw raycast over trees within 110 m). One
@@ -382,20 +389,27 @@ m, so it read 7.0 degrees of median low on average, and a solid synthetic
 ring of trees read 122 of 360 degrees open. Filling each cell's full width
 at its top reads 10.7 high on average (absolute median 10.4, worst 31.5):
 the top is the highest return in a 1 m cell of leaf-off crown, and the rest
-of the cell's width is lower or see-through. The finder therefore errs
-towards trees. It can miss a spot whose raw median is a little under 30 (at
-Wayah the pick reads 24.3 on the grid and 2.7 through the raw points). The
-error is an average, not a bound, which is why `then` is always the raw
-raycast from the spot. At Wayah 1,227 of 2,091 candidates were under a
-crown.
+of the cell's width is lower or see-through. Picking on the grid alone
+therefore erred towards trees, which is why the raw points now decide and
+`CONFIRM_DEG` gives the screen 15 degrees of room over that 10.7. At Wayah
+1,227 of 2,091 candidates were under a crown.
+
+The raw check, measured 2026-09-18 over the filled store. Wayah Bald: 742
+candidates passed the screen, and the second raw check confirmed (0.3 s
+each). Jackrabbit: 177 passed. The 40 nearest were checked (6.1 s, 0.15 s
+each, reaching 17 m) and none confirmed. Checking all 177 (27 s) confirms
+none either: the lowest raw median is 34.0 at 22.6 m, 3 m down (grid 37.7),
+against the probe's 35.8 at 23 m. The cap hid no spot there, but it does
+make the row's best the lowest among the 40 nearest (39 at 17 m), not the
+lowest there is.
 
 ```sh
 # for every site whose median tree altitude is over CLOSED_DEG, find the
 # nearest candidate that opens the sky and write a review table. raycasts
 # from the pin's own box, so over a filled store it uses no network: the
 # final line's net figure shows it. never touches index.html. 5 to 17 s a
-# site over the filled store (2026-09-18: Wayah Bald 17, Jackrabbit 12,
-# Devil's Courthouse 10, Chestoa 5, wall clock with the H: read), so about
+# site over the filled store (2026-09-18: Wayah Bald 17, Jackrabbit 16,
+# Devil's Courthouse 9, Chestoa 5, wall clock with the H: read), so about
 # 10 minutes for the 40 closed-in sites.
 python tools/build_canopy.py --suggest-views
 ```
@@ -403,10 +417,10 @@ python tools/build_canopy.py --suggest-views
 Sanity sites, 2026-09-18, the lines the run printed:
 
 ```
-[11:35:48] [1/1] Wayah Bald ... moved 7 m (+0.0 m), 43 to 3 degrees
-[11:36:00] [1/1] Jackrabbit Mountain ... none under 30 within 60 m; best 37 at 38 m, 1 m down
-[11:36:10] [1/1] Devil's Courthouse ... moved 32 m (+6.1 m), 72 to 11 degrees
-[11:36:15] [1/1] Chestoa View Overlook ... none under 30 within 60 m; best 72 at 29 m, 8 m up
+[11:40:20] [1/1] Wayah Bald ... moved 5 m (+0.0 m), 43 to 27 degrees
+[11:40:36] [1/1] Jackrabbit Mountain ... none under 30 within 60 m; best 39 at 17 m, 2 m down
+[11:40:46] [1/1] Devil's Courthouse ... moved 30 m (+5.9 m), 72 to 18 degrees
+[11:40:51] [1/1] Chestoa View Overlook ... none under 30 within 60 m; best 72 at 29 m, 8 m up (grid)
 ```
 
 writes `tools/.canopy-cache/view-review.md`, one row per closed-in site,
@@ -414,7 +428,8 @@ most closed first: `site`, `key` (the site's key, since decisions are filed
 by key: overlooks are `ov:<osm id>`), `now` (median tree altitude at the
 pin), `open now` (open sky at the pin), `proposed` (the spot; with none, "none
 under CLOSED_DEG within SEARCH_R m" and the best candidate's median, distance
-and metres up or down, as in "best 37 at 38 m, 1 m down"), `moved` (metres
+and metres up or down, as in "best 39 at 17 m, 2 m down", with "(grid)"
+when no raw check ran), `moved` (metres
 from the pin), `bearing`, `up/down` (the spot's ground against the pin's,
 signed, metres), `then` (median tree altitude from the spot), `open then`
 (open sky from the spot), `walk under trees` (metres of the straight line
@@ -422,7 +437,7 @@ from the pin to the spot that pass under a crown), and satellite links for
 both `pin` and `spot`. Open sky is the percent of the 360 azimuths whose tree
 line is under `OPEN_DEG`, the number the page can show later as "open sky
 %". Each row is also cached on its own in `tools/.canopy-cache/suggest/`,
-reused while the site's coordinate and the seven tunables below still
+reused while the site's coordinate and the nine tunables below still
 match; `--suggest-views --force`, or deleting the directory, recomputes
 every row. A run with `--only` rewrites `view-review.md` with only the sites
 it matched.
@@ -436,6 +451,8 @@ it matched.
 | `SKY_R` | 100 m | Trees further than this past `SEARCH_R` are not gridded. `SEARCH_R + SKY_R` has to stay inside `RADIUS` (200 m), the box that was fetched. Placeholder |
 | `OPEN_DEG` | 20 degrees | An azimuth whose tree line is under this counts as open sky, the cut the 2026-09-18 probe counted. Placeholder |
 | `CLEAR_H` | 3 m | Vegetation this far over the ground is in the way: over the walk from the pin, and over a candidate's own cell (it is under a crown). Shrubs under this are not. Placeholder, from two probed sites |
+| `CONFIRM_DEG` | 15 degrees | A candidate's grid median may read this far over `CLOSED_DEG` and still be raycast through the raw points. The grid read 10.7 degrees high on average at Wayah Bald (20 candidates, 2026-09-18), so this leaves margin. Placeholder |
+| `CONFIRM_MAX` | 40 | Candidates raycast through the raw points at most, nearest first, so a closed site costs a bounded time (Jackrabbit: 40 checks 6.1 s, all 177 27 s, 2026-09-18). Placeholder |
 
 A decision is recorded, never applied by itself. For a curated spot, set
 `view:` on its `SPOTS` record to the approved coordinate. For an overlook,

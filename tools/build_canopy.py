@@ -76,6 +76,8 @@ SEARCH_R = 60.0      # metres. how far from the pin a standing spot may be propo
 LEVEL_M = 10.0       # metres. the spot's ground within this of the pin's; 3 shut out devil's courthouse's spot 6 m up, and 10 still keeps a cliff lip from being swapped for its 20 m foot (2026-09-18). placeholder
 CAND_STEP = 2.0      # metres between candidate spots, the spacing the 2026-09-18 probe used. placeholder
 SKY_R = 100.0        # metres past SEARCH_R that trees are gridded; SEARCH_R + SKY_R stays inside RADIUS, the box that was fetched. placeholder
+CONFIRM_DEG = 15.0   # degrees over CLOSED_DEG a candidate's grid median may read and still be raycast through the raw points; the grid read 10.7 high on average at wayah bald (20 candidates, 2026-09-18), so this leaves margin. placeholder
+CONFIRM_MAX = 40     # candidates raycast through the raw points at most, so a closed site costs a bounded time. placeholder
 OPEN_DEG = 20.0      # degrees. an azimuth whose tree line is under this counts as open sky, the cut the 2026-09-18 probe counted. placeholder
 CLEAR_H = 3.0        # metres of vegetation over the ground before it is in the way, over the walk and over a candidate spot's own cell; shrubs under this are not. placeholder
 WORKERS = 32         # concurrent node downloads. each connection runs at 0.2 to 0.3 MB/s from us-west-2, so throughput scales with connections: 8 gave 1.6 MB/s, 64 about 10 (2026-09-17)
@@ -350,6 +352,29 @@ def pick_spot(cx, cy, median):
     return int(np.argmin(np.where(ok, np.hypot(cx, cy), np.inf)))
 
 
+def confirm_spot(dx, dy, z, cls, ground, cx, cy, dz, med):
+    """the grid screens, the raw points decide. the grid's cell tops read
+    about 10 degrees high on leaf-off crowns, so every candidate within
+    CONFIRM_DEG of CLOSED_DEG on the grid, nearest first and at most
+    CONFIRM_MAX of them, is raycast again through the raw vegetation returns
+    within SKY_R of it, stopping at the first at or under CLOSED_DEG.
+    returns that candidate's index (or None) and the raw medians, inf where
+    none was run. a candidate under its own crown reads the cap on the grid,
+    so it never reaches this check."""
+    raw = np.full(len(med), np.inf)
+    tm = np.isin(cls, TREES)
+    tx, ty, tz = dx[tm], dy[tm], z[tm]
+    cap = bh.ALT_MIN + bh.ALT_RANGE
+    order = [k for k in np.argsort(np.hypot(cx, cy), kind='stable') if med[k] <= CLOSED_DEG + CONFIRM_DEG]
+    for k in order[:CONFIRM_MAX]:
+        near = (np.abs(tx - cx[k]) < SKY_R) & (np.abs(ty - cy[k]) < SKY_R)
+        t = skyline(tx[near] - cx[k], ty[near] - cy[k], tz[near], ground + dz[k] + bh.EYE, MIN_R)
+        raw[k] = float(np.median(np.minimum(t, cap)))
+        if raw[k] <= CLOSED_DEG:
+            break
+    return pick_spot(cx, cy, raw), raw
+
+
 def from_local(dx, dy, lat, lon):
     """local_xy the other way: the point dx, dy metres east and north of
     lat, lon, back to degrees through the same mercator"""
@@ -387,7 +412,7 @@ def suggest(site, rec):
     row = {'name': site['name'], 'key': site['key'], 'lat': lat, 'lon': lon,
            'before': float(np.median(np.minimum(rec['t'], top))), 'open_before': open_pct(rec['t']), 'spot': None}
     cx, cy, dz, med, _ = sky_candidates(dx, dy, z, c, ground) if ground is not None else [np.zeros(0)] * 5
-    k = pick_spot(cx, cy, med)
+    k, raw = confirm_spot(dx, dy, z, c, ground, cx, cy, dz, med)
     if k is not None:
         spot = (float(cx[k]), float(cy[k]))
         slat, slon = from_local(spot[0], spot[1], lat, lon)
@@ -399,9 +424,12 @@ def suggest(site, rec):
                    under_trees_m=walk_under_trees(dx, dy, z, c, ground, spot))
     elif len(med):
         # the lowest candidate, nearest first on a tie (every one under a
-        # crown reads the cap), so the table can say how far off it is
-        b = int(np.lexsort((np.hypot(cx, cy), med))[0])
-        row.update(best_m=math.hypot(cx[b], cy[b]), best_median=float(med[b]), best_dz_m=float(dz[b]))
+        # crown reads the cap), so the table can say how far off it is. the
+        # raw figure when any raw check ran, the grid's when none did
+        by = 'raw' if np.isfinite(raw).any() else 'grid'
+        m = raw if by == 'raw' else med
+        b = int(np.lexsort((np.hypot(cx, cy), m))[0])
+        row.update(best_m=math.hypot(cx[b], cy[b]), best_median=float(m[b]), best_dz_m=float(dz[b]), best_by=by)
     row['params'] = suggest_params()
     return row
 
@@ -409,7 +437,7 @@ def suggest(site, rec):
 def suggest_params():
     """the tunables a saved row was computed with; a retuned constant is a
     reason to recompute, the same as a moved pin"""
-    return [CLOSED_DEG, SEARCH_R, LEVEL_M, CAND_STEP, SKY_R, OPEN_DEG, CLEAR_H]
+    return [CLOSED_DEG, SEARCH_R, LEVEL_M, CAND_STEP, SKY_R, OPEN_DEG, CLEAR_H, CONFIRM_DEG, CONFIRM_MAX]
 
 
 def suggest_path(site):
@@ -441,8 +469,9 @@ def no_spot(r):
     best candidate came, when there was one"""
     out = 'none under %g within %g m' % (CLOSED_DEG, SEARCH_R)
     if r.get('best_m') is not None:
-        out += '; best %.0f at %.0f m, %.0f m %s' % (r['best_median'], r['best_m'], abs(r['best_dz_m']),
-                                                    'up' if r['best_dz_m'] >= 0 else 'down')
+        out += '; best %.0f at %.0f m, %.0f m %s%s' % (r['best_median'], r['best_m'], abs(r['best_dz_m']),
+                                                      'up' if r['best_dz_m'] >= 0 else 'down',
+                                                      ' (grid)' if r.get('best_by') == 'grid' else '')
     return out
 
 

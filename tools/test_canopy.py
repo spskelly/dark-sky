@@ -657,6 +657,21 @@ class TestStandingSpot(unittest.TestCase):
         k = math.cos(math.radians(LAT))
         return lambda lat, lon: (x0 + dx / k, y0 + dy / k, z, c, [], 0, 0)
 
+    def test_raw_points_confirm_a_spot_the_grid_reads_closed(self):
+        """sparse 7 m crowns 6 to 9 m around the pin, one return per cell: the
+        grid spreads each return over its whole cell and reads about 40, the
+        returns themselves leave most of the sky open"""
+        rows = lattice(lambda a, b: 0.0) + [(a + .5, b + .5, 7.0, 5) for a in range(-10, 10) for b in range(-10, 10)
+                                           if 6 <= math.hypot(a + .5, b + .5) <= 9]
+        dx, dy, z, c = arrays(rows)
+        with mock.patch.multiple(bc, SEARCH_R=2.0, SKY_R=15.0):
+            cx, cy, dz, med, op = bc.sky_candidates(dx, dy, z, c, 0.0)
+            k, raw = bc.confirm_spot(dx, dy, z, c, 0.0, cx, cy, dz, med)
+        pin = int(np.argmin(np.hypot(cx, cy)))
+        self.assertTrue(bc.CLOSED_DEG < med[pin] <= bc.CLOSED_DEG + bc.CONFIRM_DEG, med[pin])
+        self.assertEqual(k, pin)
+        self.assertLessEqual(raw[pin], bc.CLOSED_DEG)
+
     def test_suggest_rows_carry_open_sky_and_the_best_candidate(self):
         site = {'name': 'S', 'key': 'S', 'view_lat': LAT, 'view_lon': LON}
         rec = {'t': [10.0] * 90 + [40.0] * 270}
@@ -667,6 +682,17 @@ class TestStandingSpot(unittest.TestCase):
         self.assertGreater(row['best_median'], bc.CLOSED_DEG)
         self.assertLessEqual(row['best_m'], 15.0)
         self.assertEqual(row['best_dz_m'], 0.0)
+        self.assertEqual(row['best_by'], 'grid')   # every candidate under a crown, so none was raycast raw
+        # a dense 7 m stand 6 to 9 m out: the grid lets the candidates through
+        # to the raw check, which reads about 40 and confirms none
+        stand = lattice(lambda a, b: 0.0) + [(a * .25, b * .25, 7.0, 5) for a in range(-40, 41) for b in range(-40, 41)
+                                            if 6 <= math.hypot(a * .25, b * .25) <= 9]
+        with mock.patch.multiple(bc, SEARCH_R=2.0, SKY_R=15.0), \
+             mock.patch.object(bc, 'fetch_site', side_effect=self.fetch_of(stand)):
+            row = bc.suggest(site, rec)
+        self.assertIsNone(row['spot'])
+        self.assertEqual(row['best_by'], 'raw')
+        self.assertTrue(bc.CLOSED_DEG < row['best_median'] < bc.CLOSED_DEG + bc.CONFIRM_DEG, row['best_median'])
         with self.small(25.0), mock.patch.object(bc, 'fetch_site', side_effect=self.fetch_of(RING)):
             row = bc.suggest(site, rec)
         self.assertGreaterEqual(row['moved_m'], 12.0)
@@ -693,11 +719,13 @@ class TestStandingSpot(unittest.TestCase):
                  'moved_m': 12.3, 'bearing': 45.0, 'after': 20.0, 'under_trees_m': 4,
                  'open_before': 5.0, 'dz_m': -2.46, 'open_after': 61.4},
                 {'name': 'B', 'key': 'B', 'lat': 35.2, 'lon': -83.2, 'before': 50.0, 'spot': None,
-                 'open_before': 0.0, 'best_m': 23.2, 'best_median': 35.8, 'best_dz_m': -3.1},
-                {'name': 'C', 'key': 'C', 'lat': 35.3, 'lon': -83.3, 'before': 40.0, 'spot': None, 'open_before': 0.0}]
+                 'open_before': 0.0, 'best_m': 23.2, 'best_median': 35.8, 'best_dz_m': -3.1, 'best_by': 'raw'},
+                {'name': 'C', 'key': 'C', 'lat': 35.3, 'lon': -83.3, 'before': 40.0, 'spot': None, 'open_before': 0.0},
+                {'name': 'D', 'key': 'D', 'lat': 35.4, 'lon': -83.4, 'before': 35.0, 'spot': None,
+                 'open_before': 0.0, 'best_m': 4.0, 'best_median': 80.0, 'best_dz_m': 0.0, 'best_by': 'grid'}]
         md = bc.review_md(rows)
-        lines = [l for l in md.splitlines() if l[:4] in ('| A ', '| B ', '| C ')]
-        self.assertEqual(len(lines), 3)
+        lines = [l for l in md.splitlines() if l[:4] in ('| A ', '| B ', '| C ', '| D ')]
+        self.assertEqual(len(lines), 4)
         self.assertIn('| open now |', md)
         self.assertIn('| up/down |', md)
         self.assertIn('| open then |', md)
@@ -710,6 +738,8 @@ class TestStandingSpot(unittest.TestCase):
         self.assertIn('https://www.google.com/maps/@35.100010,-83.100020,40m/data=!3m1!1e3', lines[0])
         self.assertIn('none under 30 within 60 m; best 36 at 23 m, 3 m down', lines[1])
         self.assertIn('none under 30 within 60 m |', lines[2])   # no candidate at all, so no best
+        self.assertIn('best 80 at 4 m, 0 m up (grid)', lines[3])   # no raw check ran, so the figure is the grid's
+        self.assertNotIn('(grid)', lines[1])
 
     def test_bearing_wraps_to_000_not_360(self):
         rows = [{'name': 'A', 'key': 'A', 'lat': 35.1, 'lon': -83.1, 'before': 70.0,
