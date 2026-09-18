@@ -34,7 +34,7 @@ const ctx = { Math, HORIZON_ALT_MIN: -10, HORIZON_ALT_RANGE: 90 };
 vm.createContext(ctx);
 vm.runInContext(astro, ctx);
 vm.runInContext(src, ctx);
-const { azToX, panProject, easternInstant, easternParts, decodeHorizon, decodeCanopy, panMaxProfile, panBlocking, panLayerAt, horizonSummary } = ctx;
+const { azToX, panProject, easternInstant, easternParts, decodeHorizon, decodeCanopy, panMaxProfile, panBlocking, panBlock, clearsRidge, panLayerAt, horizonSummary } = ctx;
 
 test('azToX is a plain affine map: the window edges land on 0 and w', () => {
   // centre 180, a 120 degree window: the edges are 120 and 240
@@ -169,6 +169,7 @@ test('easternInstant/easternParts do not depend on the process\'s own timezone: 
 
 // the canopy layers: decoded beside the terrain, combined only where a
 // consumer needs the highest thing in the way
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 const flat = v => new Float64Array(360).fill(v);
 const enc = v => { const q = Math.round((v + 10) * 4095 / 90); const B = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'; return (B[Math.floor(q / 64)] + B[q % 64]).repeat(360); };
 
@@ -202,6 +203,46 @@ test('panLayerAt names the highest layer and gives ties to the ridge', () => {
   assert.equal(panLayerAt(ridge, { t: flat(6), s: null }, 90), 'trees');
   assert.equal(panLayerAt(ridge, { t: flat(6), s: flat(7) }, 90), 'structure');
   assert.equal(panLayerAt(ridge, { t: flat(6), s: flat(6) }, 90), 'trees');
+});
+
+// the window: f and b, decoded as lo/hi beside t, and what a body sees
+// through the gap under the crowns.
+const withWindow = () => ({ t: flat(60), s: null, lo: flat(-5), hi: flat(40) });
+
+test('decodeCanopy: f and b decode to lo and hi, and are null when absent', () => {
+  const enc2 = v => { const q = Math.round((v + 10) / 90 * 4095); return B64[q >> 6] + B64[q & 63]; };
+  const str = v => enc2(v).repeat(360);
+  const c = decodeCanopy({ t: str(60), f: str(-5), b: str(40) });
+  assert.ok(Math.abs(c.lo[0] + 5) < 0.05 && Math.abs(c.hi[0] - 40) < 0.05);
+  const d = decodeCanopy({ t: str(60) });
+  assert.equal(d.lo, null); assert.equal(d.hi, null);
+});
+
+test('panBlock: no window is exactly panBlocking; a window gives floor, hi and top', () => {
+  const ridge2 = flat(3);
+  assert.equal(panBlock(ridge2, null), ridge2);
+  const plain = panBlock(ridge2, { t: flat(12), s: null, lo: null, hi: null });
+  assert.deepEqual(Array.from(plain), Array.from(panBlocking(ridge2, { t: flat(12), s: null })));
+  const w = panBlock(ridge2, withWindow());
+  assert.equal(w.floor[0], 3); assert.equal(w.hi[0], 40); assert.equal(w.top[0], 60);
+});
+
+test('clearsRidge: inside the window is seen, in the crowns is not, above the tree line is', () => {
+  const w = panBlock(flat(3), withWindow());
+  assert.equal(clearsRidge(w, { alt: 20, az: 90 }), true);
+  assert.equal(clearsRidge(w, { alt: 50, az: 90 }), false);
+  assert.equal(clearsRidge(w, { alt: 65, az: 90 }), true);
+  assert.equal(clearsRidge(w, { alt: 2, az: 90 }), false);
+});
+
+test('a window under the ridge is no window', () => {
+  const w = panBlock(flat(45), withWindow());
+  assert.equal(clearsRidge(w, { alt: 42, az: 90 }), false);
+});
+
+test('panLayerAt names the trees when a body meets the crowns from below', () => {
+  assert.equal(panLayerAt(flat(3), withWindow(), 90, 40), 'trees');
+  assert.equal(panLayerAt(flat(3), withWindow(), 90, 3), 'ridge');
 });
 
 // the sentence. a september evening at doubletop, the site the feature was

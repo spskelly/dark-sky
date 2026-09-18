@@ -42,13 +42,16 @@ function horizonAt(horizon, azDeg) {
   return horizon[i] * (1 - f) + horizon[(i + 1) % 360] * f;
 }
 
-// the canopy block's entry for a place, decoded: { t, s } with a Float64Array
-// per layer that is there and null for one that is not, or null for no
-// entry at all. the two stay separate from the ridge: what is drawn and what
-// is named both need to know which layer a degree belongs to.
+// the canopy block's entry for a place, decoded: { t, s, lo, hi } with a
+// Float64Array per layer that is there and null for one that is not, or null
+// for no entry at all. lo/hi are the window under the tree line, f and b in
+// the encoded entry: the floor a body has to clear and the top of the open
+// sky before the crowns start. the layers stay separate from the ridge: what
+// is drawn and what is named both need to know which layer a degree belongs to.
 function decodeCanopy(e) {
   if (!e) return null;
-  return { t: e.t ? decodeHorizon(e.t) : null, s: e.s ? decodeHorizon(e.s) : null };
+  return { t: e.t ? decodeHorizon(e.t) : null, s: e.s ? decodeHorizon(e.s) : null,
+           lo: e.f ? decodeHorizon(e.f) : null, hi: e.b ? decodeHorizon(e.b) : null };
 }
 
 // per-azimuth maximum of two profiles; a null second returns the first as is
@@ -67,11 +70,33 @@ function panBlocking(horizon, canopy) {
   return panMaxProfile(panMaxProfile(horizon, canopy.t), canopy.s);
 }
 
+// what a body has to clear, window and all. with no window this is exactly
+// panBlocking, the same profile the page has always used. with one it is the
+// floor under the window (ridge, trees below it, structures), the window's
+// top where the crowns start, and the top of everything. where the window
+// is shut or under the ridge, hi is pulled down to the floor.
+function panBlock(horizon, canopy) {
+  if (!canopy || !canopy.lo || !canopy.hi) return panBlocking(horizon, canopy);
+  const floor = panMaxProfile(panMaxProfile(horizon, canopy.lo), canopy.s);
+  const hi = new Float64Array(360);
+  for (let i = 0; i < 360; i++) hi[i] = Math.max(canopy.hi[i], floor[i]);
+  return { floor, hi, top: panBlocking(horizon, canopy) };
+}
+
 // which layer sits highest at an azimuth. ties go to the ridge, so a tree
-// line flush with the crest is still "the ridge".
-function panLayerAt(horizon, canopy, az) {
-  let word = 'ridge', best = horizonAt(horizon, az);
-  if (canopy && canopy.t && horizonAt(canopy.t, az) > best) { word = 'trees'; best = horizonAt(canopy.t, az); }
+// line flush with the crest is still "the ridge". with an altitude given and
+// a window open there, a body at or just under the window's top is named the
+// trees too: it is meeting the crowns from below, not sitting at the ridge.
+function panLayerAt(horizon, canopy, az, alt) {
+  const ridgeAlt = horizonAt(horizon, az);
+  if (canopy && canopy.lo && alt !== undefined) {
+    const floor = Math.max(ridgeAlt, horizonAt(canopy.lo, az));
+    const top = horizonAt(canopy.hi, az);
+    if (top > floor + 0.5 && alt >= top - 0.5) return 'trees';
+  }
+  let word = 'ridge', best = ridgeAlt;
+  const treeFloor = canopy && (canopy.lo || canopy.t);
+  if (treeFloor && horizonAt(treeFloor, az) > best) { word = 'trees'; best = horizonAt(treeFloor, az); }
   if (canopy && canopy.s && horizonAt(canopy.s, az) > best) word = 'structure';
   return word;
 }
@@ -274,9 +299,21 @@ const PAN_LAYERS = {
   trees: { fill: 'rgba(8,28,16,0.7)', crest: 'rgba(118,168,118,0.6)', dash: [], rim: 'rgba(130,190,130,0.10)' },
 };
 
+// the crowns over a window: a band from the canopy base to the tree line.
+// where there is no window hi equals t and the band has no height.
+function panBandStrip(ctx, lo, hi, w, h, style) {
+  ctx.beginPath();
+  for (let i = 0; i <= 360; i++) ctx.lineTo(panXLin(i, w), panY(hi[i % 360], h));
+  for (let i = 360; i >= 0; i--) ctx.lineTo(panXLin(i, w), panY(lo[i % 360], h));
+  ctx.closePath();
+  ctx.fillStyle = style.fill;
+  ctx.fill();
+}
+
 function drawRidge(ctx, horizon, w, h, canopy) {
-  if (canopy && canopy.s) panRidgeStrip(ctx, panBlocking(horizon, canopy), w, h, PAN_LAYERS.structures);
-  if (canopy && canopy.t) panRidgeStrip(ctx, panMaxProfile(horizon, canopy.t), w, h, PAN_LAYERS.trees);
+  if (canopy && canopy.s) panRidgeStrip(ctx, panMaxProfile(panMaxProfile(horizon, canopy.lo || canopy.t), canopy.s), w, h, PAN_LAYERS.structures);
+  if (canopy && canopy.t) panRidgeStrip(ctx, panMaxProfile(horizon, canopy.lo || canopy.t), w, h, PAN_LAYERS.trees);
+  if (canopy && canopy.lo) panBandStrip(ctx, canopy.hi, canopy.t, w, h, PAN_LAYERS.trees);
   const g = ctx.createLinearGradient(0, panY(PAN_TOP * 0.3, h), 0, h);
   g.addColorStop(0, '#121c38');
   g.addColorStop(1, '#070c1a');
@@ -601,10 +638,23 @@ function panRingView(ctx, prof, view, w, h, style) {
   }
 }
 
+// the same band in the dialog's projection
+// ponytail: straight chords per degree, like panRingView; a band passing
+// behind the viewer can draw a stray chord, only reachable looking down
+function panBandView(ctx, lo, hi, view, style) {
+  ctx.beginPath();
+  for (let az = 0; az <= 360; az++) { const p = panProjectAll(horizonAt(hi, az), az, view); if (az === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); }
+  for (let az = 360; az >= 0; az--) { const p = panProjectAll(horizonAt(lo, az), az, view); ctx.lineTo(p.x, p.y); }
+  ctx.closePath();
+  ctx.fillStyle = style.fill;
+  ctx.fill();
+}
+
 function drawRidgeView(ctx, horizon, view, w, h, canopy) {
   const terrain = horizon || new Float64Array(360);   // a picked point: flat at 0
-  if (canopy && canopy.s) panRingView(ctx, panBlocking(terrain, canopy), view, w, h, PAN_LAYERS.structures);
-  if (canopy && canopy.t) panRingView(ctx, panMaxProfile(terrain, canopy.t), view, w, h, PAN_LAYERS.trees);
+  if (canopy && canopy.s) panRingView(ctx, panMaxProfile(panMaxProfile(terrain, canopy.lo || canopy.t), canopy.s), view, w, h, PAN_LAYERS.structures);
+  if (canopy && canopy.t) panRingView(ctx, panMaxProfile(terrain, canopy.lo || canopy.t), view, w, h, PAN_LAYERS.trees);
+  if (canopy && canopy.lo) panBandView(ctx, canopy.hi, canopy.t, view, PAN_LAYERS.trees);
   const g = ctx.createLinearGradient(0, 0, 0, h);
   g.addColorStop(0, '#0b1226');
   g.addColorStop(1, '#03060f');
@@ -722,10 +772,14 @@ function nightWindow(opts) {
   return { dusk: dusk, dawn: dawn };
 }
 
-// the whole point of the feature: clear of the ridge at this azimuth, not
-// clear of zero.
-function clearsRidge(horizon, p) {
-  return p.alt > horizonAt(horizon, p.az);
+// the whole point of the feature: clear of what stands at this azimuth, not
+// clear of zero. a window lets a body through between its floor and the
+// crowns above it. block is either a plain profile (a Float64Array, no
+// window there) or { floor, hi, top } from panBlock.
+function clearsRidge(block, p) {
+  if (!block.top) return p.alt > horizonAt(block, p.az);
+  return p.alt > horizonAt(block.top, p.az)
+    || (p.alt > horizonAt(block.floor, p.az) && p.alt < horizonAt(block.hi, p.az));
 }
 
 // bisect the ten-minute bracket down to about a minute, so the sentence can
@@ -754,15 +808,16 @@ function trackBody(opts, at, profile) {
   out.upAtDusk = prevUp;
   out.everUp = prevUp;
   out.duskAz = prevP.az;
+  out.duskAlt = prevP.alt;
   for (let t = night.dusk.getTime() + 600000; t <= night.dawn.getTime(); t += 600000) {
     const now = new Date(t);
     const p = at(now);
     const up = clearsRidge(prof, p);
     if (up && !prevUp && !out.rise) {
-      out.rise = { at: crossingTime(at, prof, prevT, now), az: p.az };
+      out.rise = { at: crossingTime(at, prof, prevT, now), az: p.az, alt: p.alt };
       out.everUp = true;
     } else if (!up && prevUp && !out.set && out.everUp) {
-      out.set = { at: crossingTime(at, prof, prevT, now), az: prevP.az };
+      out.set = { at: crossingTime(at, prof, prevT, now), az: prevP.az, alt: prevP.alt };
     }
     prevT = now; prevP = p; prevUp = up;
   }
@@ -785,7 +840,7 @@ function panLayerPhrase(dir, layer, withRidge) {
 // no-canopy sentence stays exactly what it was. r is the ridge-only track,
 // null when there is no canopy to disagree with.
 function panCrossing(ridge, canopy, ev, r, kind) {
-  const layer = panLayerAt(ridge, canopy, ev.az);
+  const layer = panLayerAt(ridge, canopy, ev.az, ev.alt);
   if (!r || layer === 'ridge') return { layer, note: '' };
   let own;   // the ridge's own version of this event
   if (kind === 'set') own = r.set ? { at: r.set.at } : { text: 'clear of the ridge until first light' };
@@ -803,7 +858,7 @@ function panNever(body, r, ridge, canopy) {
   if (!r || !r.everUp) return plain;
   const from = r.upAtDusk ? 'dusk' : panTime(r.rise.at);
   const to = r.set ? panTime(r.set.at) : 'first light';
-  const layer = panLayerAt(ridge, canopy, r.upAtDusk ? r.duskAz : r.rise.az);
+  const layer = panLayerAt(ridge, canopy, r.upAtDusk ? r.duskAz : r.rise.az, r.upAtDusk ? r.duskAlt : r.rise.alt);
   return body + ' never clears the ' + (layer === 'structure' ? 'structure' : 'trees')
     + ' tonight (above the ridge ' + from + ' to ' + to + ')';
 }
@@ -850,7 +905,7 @@ function horizonSummary(opts) {
   if (!opts.horizon || typeof Sky === 'undefined') return '';
   const ridge = opts.horizon;
   const canopy = opts.canopy || null;
-  const all = panBlocking(ridge, canopy);
+  const all = panBlock(ridge, canopy);
   const ctxAt = t => skyContext({ date: t, lat: opts.lat, lon: opts.lon, elevM: opts.elevM });
   const moonAt = t => moonAltAz(ctxAt(t));
   const coreAt = t => { const p = galAltAz(0, 0, ctxAt(t)); return { alt: Sky.refract(p.alt), az: p.az }; };
