@@ -237,6 +237,80 @@ That is a projection change, not a 3D engine, and the data for it already
 exists in the 360-value horizon. A real 3D view of terrain and canopy is a
 bigger thing and a separate argument.
 
+## Doubletop Mountain Overlook, measured 2026-09-17
+
+A third site, chosen because a Street View panorama from the lot shows a tree
+line standing well above the far ridges and the page draws the place as open.
+
+The overlook sits on the Haywood/Jackson line and the parkway is the line. The
+Haywood acquisition leaves a nodata hole exactly under the pin, so the run needs
+both county EPTs and the rays sample whichever clip has data. That is a general
+fact about parkway overlooks, not a quirk of this one.
+
+Clip: 1.0 by 1.0 km, 4 depth-10 tiles per county, 61 s and 5 tiles for Haywood,
+comparable for Jackson. **The data validates at the pin**: 2025 NCEM 1635.60 m,
+3DEP 1635.58 m, 2017 DSM 1635.50 m, canopy -0.10 m, so the coordinate is on open
+pavement and all three surveys agree within 0.1 m.
+
+| | mean | open sky | N | E | S | W |
+|---|---:|---:|---:|---:|---:|---:|
+| what the page ships (3DEP, from 150 m) | 3.1° | 94% | 1.6° | 8.0° | 1.8° | 0.8° |
+| 1 m bare earth, from 2 m | 3.7° | 93% | 3.3° | 8.8° | 1.8° | 0.8° |
+| **plus 2017 canopy** | **12.5°** | **78%** | 11.7° | 20.7° | 12.2° | 5.3° |
+
+Open sky here is the solid-angle fraction of the dome above the profile, the
+measure forest canopy work uses and the one quoted for Cove Field above.
+
+Canopy adds 8.8 degrees to the mean and costs 16 points of open sky. The 20 to
+50 m ring sets the horizon on 201 of 360 azimuths and the 50 to 150 m ring on
+another 145; the whole 150 to 500 m band moves the mean by 0.1 degrees. Third
+site, same answer about radius.
+
+### The south, which is the claim the page makes about this place
+
+The card's standing advice is that a south-facing overlook beats a 360-degree
+summit. On bare earth Doubletop looks like the ideal case, a south quarter at
+1.8 degrees. With canopy:
+
+| | page | canopy | delta |
+|---|---:|---:|---:|
+| SSE | 3.4° | 12.8° | +9.4° |
+| S | 1.3° | 14.2° | +12.9° |
+| SSW | -0.2° | 12.1° | +12.3° |
+| SW | -0.4° | 11.3° | +11.6° |
+| NE | 2.6° | 21.7° | +19.0° |
+| ENE | 5.2° | 23.6° | +18.3° |
+
+The south is not open. It is a 12 to 14 degree wall of trees that the model
+cannot see because the rays start at 150 m and the trees are at 30.
+
+### What that costs a person who drives there
+
+Both profiles run through the page's own `sky-astro.js`, so only the horizon
+changes underneath the same moon and the same core.
+
+| night of 2026-09-17 | page says | with canopy | lost |
+|---|---|---|---:|
+| core drops behind | 12:02am, az 234 | **10:21pm, az 218** | 1h41 |
+| core visible | 4h32 | **2h51** | 37% |
+| moon sets behind | 11:22pm, az 236 | **9:39pm, az 219** | 1h43 |
+
+The page's own readout for that night says the core "drops behind the southwest
+12:05am". The honest figure is an hour and forty minutes earlier, and at the
+moment the page calls setting the core is already 14.3 degrees up, well inside
+the trees.
+
+### Limits specific to this site
+
+- **The canopy is 2017 leaf-off, the photograph is July 2021.** Nine growing
+  seasons now separate the model from tonight, and the July photograph shows
+  full leaf against a model built from bare branches. Every number above is a
+  floor, and at this site probably a low one.
+- **Two acquisitions, one profile.** Haywood and Jackson are separate flights
+  seven months apart in the same phase. Their DTMs agree at the pin, but no
+  seam check was run along the county line, where a ray crosses from one to the
+  other.
+
 ### Still not measured
 
 - How much eight leaf-off growing seasons understate this year. Every canopy
