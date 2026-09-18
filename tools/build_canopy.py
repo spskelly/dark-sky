@@ -529,13 +529,15 @@ def _osm_query(boxes):
     return '[out:json][timeout:90];(%s);out geom;' % clauses
 
 
-def overpass_ask(q):
+def overpass_ask(q, once=False):
     """the elements overpass returns for q, or None when no mirror would
     answer. a busy mirror (429, 504) is left OVERPASS_WAITS seconds, or as long
     as its Retry-After says, and asked again, three times at most; anything
-    else moves straight on to the next mirror, as tools/overpass.mjs does"""
-    for url in OVERPASS:
-        for attempt in range(len(OVERPASS_WAITS) + 1):
+    else moves straight on to the next mirror, as tools/overpass.mjs does.
+    once sends one request to the first mirror and takes no for an answer"""
+    tries = 1 if once else len(OVERPASS_WAITS) + 1
+    for url in OVERPASS[:1] if once else OVERPASS:
+        for attempt in range(tries):
             try:
                 req = urllib.request.Request(url, data=urllib.parse.urlencode({'data': q}).encode(), headers=UA)
                 # well past the query's own [timeout:90], so overpass gives up first and says why
@@ -552,8 +554,11 @@ def overpass_ask(q):
                     why = ' '.join(re.sub(r'<[^>]*>', ' ', err.read().decode('utf-8', 'replace')).split())[:120]
                 except (OSError, http.client.HTTPException):
                     why = ''
-                busy = err.code in (429, 504) and attempt < len(OVERPASS_WAITS)
+                busy = err.code in (429, 504) and attempt < tries - 1
                 wait = OVERPASS_WAITS[attempt] if busy else 0
+                # retry-after in seconds is honoured; its http-date form is
+                # left to the schedule above, since overpass sends seconds when
+                # it sends one at all
                 ra = (err.headers or {}).get('Retry-After')
                 if busy and ra and ra.strip().isdigit():
                     wait = min(int(ra), OVERPASS_WAIT_MAX)
@@ -591,20 +596,30 @@ def _crosses(geom, s, w, n, e):
     return False
 
 
+# cache files of the sites a failed batch was asking for. osm_access answers
+# None for these without asking, so a run overpass has already turned away does
+# not follow up with a request a site; their reach reads unknown, is not kept,
+# and the next run asks again
+_osm_turned_away = set()
+
+
 def osm_prefetch(sites):
     """ask overpass once for every site here with no good cached answer,
     rather than once a site, then file each way under every site whose box it
     passes through, in the cache file osm_access reads. a failed batch writes
-    nothing, and osm_access asks for each of its sites on its own as before"""
-    want = [s for s in sites if _osm_cached(s) is None]
+    nothing and ends the asking: no later batch is sent, and osm_access asks
+    nothing for any site still wanted, for the rest of the run"""
+    want = [_osm_box(s) for s in sites if _osm_cached(s) is None]
     for i in range(0, len(want), OSM_BATCH):
         if i:
             time.sleep(OSM_BATCH_PAUSE)
-        part = [_osm_box(s) for s in want[i:i + OSM_BATCH]]
+        part = want[i:i + OSM_BATCH]
         ways = overpass_ask(_osm_query([bb for _, _, bb in part]))
         if ways is None:
-            print('  osm: the batch of %d sites went unanswered; asking site by site' % len(part), flush=True)
-            continue
+            _osm_turned_away.update(path for path, _, _ in want[i:])
+            print('  osm: the batched request failed; reach will be unknown for %d sites this run, try again later'
+                  % (len(want) - i), flush=True)
+            return
         for path, at, bb in part:
             mine = [w for w in ways if _crosses(w.get('geometry'), *bb)]
             _write(path, json.dumps({'at': at, 'elements': mine}).encode('utf-8'))
@@ -617,12 +632,15 @@ def osm_access(site):
     answer per site is kept under CACHE/osm, written .tmp then renamed and
     taken only for the same pin and box; a failure is not kept, so the next
     run asks again. --suggest-views has usually filled it already, in one
-    batch through osm_prefetch"""
+    batch through osm_prefetch; asked outside that batch, a
+    site gets one request, to the first mirror, and no retry"""
     cached = _osm_cached(site)
     if cached is not None:
         return cached
     path, at, bb = _osm_box(site)
-    ways = overpass_ask(_osm_query([bb]))
+    if path in _osm_turned_away:
+        return None
+    ways = overpass_ask(_osm_query([bb]), once=True)
     if ways is not None:
         _write(path, json.dumps({'at': at, 'elements': ways}).encode('utf-8'))
     return ways

@@ -434,10 +434,16 @@ is 2017 and leaf-off, so every spot's sky is a floor on what is there now.
 # CLOSED_DEG (24 sites, not the 40 the old median-tree-altitude rule found),
 # find the nearest candidate that opens the sky and write a review table.
 # raycasts from the pin's own box, so over a filled store the terrain and
-# lidar side costs no network: the final line's net figure shows it. the
-# first run against a site still asks Overpass once for its roads, paths
-# and parking (ACCESS_M), then caches that answer under
-# tools/.canopy-cache/osm/. never touches index.html. confirming a candidate
+# lidar side costs no network: the final line's net figure shows it. before
+# the per-site loop, every site still to compute with no cached OSM answer
+# is asked for in one batched Overpass request (roads, paths and parking
+# within SEARCH_R + ACCESS_M of each pin), split back per site and cached
+# under tools/.canopy-cache/osm/; it prints "osm: one request covered N
+# sites, M ways came back". if the batch fails it prints "reach will be
+# unknown for N sites this run, try again later" and asks nothing more:
+# a spot row there reads reach unknown and is recomputed, and asked for
+# again, on the next run. --dry-run prints how many sites are cached and how many would
+# go in how many batched requests. never touches index.html. confirming a candidate
 # against the raw points costs about 1.2 s each (measured 2026-09-18, North
 # Cove), so a closed site runs roughly 20 to 70 s at up to CONFIRM_MAX
 # candidates. a saved row recomputes whenever suggest_params() changes,
@@ -489,6 +495,8 @@ it matched.
 | `CONFIRM_DEG` | 15 degrees | A candidate's grid median may read this far over `CLOSED_DEG` and still be raycast through the raw points. The grid read 10.7 degrees high on average at Wayah Bald (20 candidates, 2026-09-18), so this leaves margin. Placeholder |
 | `CONFIRM_MAX` | 40 | Candidates raycast through the raw points at most, nearest first, split between reachable and off-path candidates, so a closed site costs a bounded time (Jackrabbit: 40 checks 6.1 s, all 177 27 s, 2026-09-18). Placeholder |
 | `ACCESS_M` | 8 m | A candidate spot this close to an OSM road, path or parking area is one people can walk to; the finder spends half its `CONFIRM_MAX` checks on these first. Placeholder |
+| `OSM_BATCH`, `OSM_BATCH_PAUSE` | 25 sites, 5 s | Sites per batched Overpass request, and the pause between two requests when there are more. 25 covers every closed-in site in one request (24 on 2026-09-18). Set 2026-09-18 after the one-request-a-site run drew 504s, read timeouts and a 429 from overpass-api.de and was stopped after 12 of 24 sites. Placeholder: no batch has been sent yet, so how large a union Overpass answers comfortably is unmeasured |
+| `OVERPASS_WAITS`, `OVERPASS_WAIT_MAX` | 10 s, 30 s; 120 s | A 429 or 504 is waited out 10 s, then 30 s, then the next mirror: three tries on each of three mirrors (overpass-api.de, overpass.kumi.systems, overpass.private.coffee), the schedule `tools/overpass.mjs` uses. A `Retry-After` in seconds replaces the wait, capped at 120 s; one in HTTP-date form is ignored and the schedule applies. A request outside the batch (a site whose cache went missing) gets one try on the first mirror and no retry |
 
 `CONFIRM_DEG`'s margin was measured against the 360-degree tree-line median
 (Wayah Bald, above); it has not been re-measured against the best-arc sight

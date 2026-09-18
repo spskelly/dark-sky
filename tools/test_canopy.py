@@ -909,21 +909,26 @@ class TestAccess(unittest.TestCase):
         body = json.dumps({'elements': [{'type': 'way', 'tags': {'highway': 'service'}, 'geometry': []}]}).encode()
         with tempfile.TemporaryDirectory() as d, mock.patch.object(bc, 'CACHE', d), \
              mock.patch.object(bc, 'OVERPASS', ['http://one.invalid/', 'http://two.invalid/']):
-            with mock.patch.object(bc.urllib.request, 'urlopen', side_effect=urllib.error.URLError('down')) as down, \
-                 contextlib.redirect_stdout(io.StringIO()):   # keep the suite output clean
-                self.assertIsNone(bc.osm_access(site))
-            self.assertEqual(down.call_count, 2)   # both endpoints tried
-            self.assertFalse(os.path.exists(os.path.join(d, 'osm', 'gorges.json')))   # so a later run asks again
-            # a reply cut off mid-read, then a query overpass gave up on (a 200
+            # one request a site on its own: a mirror that is down, or busy, is
+            # not followed by the next one, the site just reads reach unknown
+            for down in (urllib.error.URLError('down'), _http_error(429)):
+                with mock.patch.object(bc.urllib.request, 'urlopen', side_effect=down) as asked, \
+                     mock.patch.object(bc.time, 'sleep') as sleep, \
+                     contextlib.redirect_stdout(io.StringIO()):   # keep the suite output clean
+                    self.assertIsNone(bc.osm_access(site))
+                self.assertEqual((asked.call_count, sleep.call_count), (1, 0))
+                self.assertFalse(os.path.exists(os.path.join(d, 'osm', 'gorges.json')))   # so a later run asks again
+            # a reply cut off mid-read, and a query overpass gave up on (a 200
             # with a remark): neither is an answer, neither is kept
             cut = mock.MagicMock()
             cut.__enter__.return_value.read.side_effect = http.client.IncompleteRead(b'{"elem')
             gave_up = _fake_response(json.dumps({'elements': [], 'remark': 'runtime error: Query timed out'}).encode())
-            with mock.patch.object(bc.urllib.request, 'urlopen', side_effect=[cut, gave_up]) as tried, \
-                 contextlib.redirect_stdout(io.StringIO()):
-                self.assertIsNone(bc.osm_access(site))
-            self.assertEqual(tried.call_count, 2)
-            self.assertFalse(os.path.exists(os.path.join(d, 'osm', 'gorges.json')))
+            for bad in (cut, gave_up):
+                with mock.patch.object(bc.urllib.request, 'urlopen', return_value=bad) as asked, \
+                     contextlib.redirect_stdout(io.StringIO()):
+                    self.assertIsNone(bc.osm_access(site))
+                self.assertEqual(asked.call_count, 1)
+                self.assertFalse(os.path.exists(os.path.join(d, 'osm', 'gorges.json')))
             with mock.patch.object(bc.urllib.request, 'urlopen', return_value=_fake_response(body)):
                 self.assertEqual(len(bc.osm_access(site)), 1)
             with mock.patch.object(bc.urllib.request, 'urlopen', side_effect=AssertionError('cached')):
@@ -1176,6 +1181,39 @@ class TestOsmPrefetch(unittest.TestCase):
         with mock.patch.object(bc, 'overpass_ask', return_value=None), \
              contextlib.redirect_stdout(io.StringIO()):
             bc.osm_prefetch([self.a, self.b])
+        self.assertEqual(os.listdir(self.osm) if os.path.isdir(self.osm) else [], [])
+        # and the rest of the run does not follow up site by site
+        with mock.patch.object(bc, 'OVERPASS', ['http://one.invalid/']), \
+             mock.patch.object(bc.urllib.request, 'urlopen', side_effect=AssertionError('asked again')):
+            self.assertIsNone(bc.osm_access(self.a))
+
+    def test_a_failed_batch_is_the_last_request_of_the_run(self):
+        html = ('const SPOTS = [\n'
+                "  { name: 'Site A', lat: 35.10, lon: -83.10, elev: 4000, kind: 'view' },\n"
+                "  { name: 'Site B', lat: 35.90, lon: -82.20, elev: 4000, kind: 'view' },\n"
+                '];\nconst OVERLOOKS = [\n];\n')
+        reach = []
+
+        def fake_suggest(s, r):
+            reach.append(bc.osm_access(s))
+            return {'name': s['name'], 'key': s['key'], 'lat': s['view_lat'], 'lon': s['view_lon'],
+                    'before': 60.0, 'open_before': 0.0, 'spot': None, 'params': bc.suggest_params()}
+
+        def busy(*a, **k):
+            raise _http_error(429)
+        out = io.StringIO()
+        with mock.patch.object(bh, 'read_html', return_value=html), \
+             mock.patch.object(bc, 'load_cached', side_effect=lambda s: {'t': [60.0] * 360}), \
+             mock.patch.object(bc, 'suggest', side_effect=fake_suggest), \
+             mock.patch.object(bc, 'OVERPASS', ['http://one.invalid/', 'http://two.invalid/']), \
+             mock.patch.object(bc.urllib.request, 'urlopen', side_effect=busy) as asked, \
+             mock.patch.object(bc.time, 'sleep'), \
+             mock.patch.object(sys, 'argv', ['build_canopy.py', '--suggest-views']), \
+             contextlib.redirect_stdout(out):
+            bc.main()
+        self.assertEqual(asked.call_count, 6)   # the batch's three tries on each mirror, and nothing after
+        self.assertEqual(reach, [None, None])
+        self.assertIn('reach will be unknown for 2 sites', out.getvalue())
         self.assertEqual(os.listdir(self.osm) if os.path.isdir(self.osm) else [], [])
 
     def test_nothing_to_ask_asks_nothing(self):
