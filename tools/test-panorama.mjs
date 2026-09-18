@@ -244,10 +244,8 @@ test('sentence: a tree line within five minutes of the ridge names the trees but
   assert.doesNotMatch(s, /\(the ridge/, s);
 });
 
-test('sentence: with a canopy the ridge alone is not tracked twice for nothing', () => {
-  // the two tracks agree on the crossing azimuth family; the strings only
-  // differ where the layers do, which the tests above pin down. this one
-  // guards the shape: two bodies, comma separated, no trailing punctuation.
+test('sentence: with a canopy the sentence keeps its shape, comma separated parts and no trailing full stop', () => {
+  // shape only; the tests above pin down the content.
   const s = say(ridge, { t: swTrees, s: null });
   assert.ok(s.split(', ').length >= 3 && !s.endsWith('.'), s);
 });
