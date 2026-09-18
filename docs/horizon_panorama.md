@@ -399,8 +399,8 @@ is read instead of fetched, so a probe, a moved pin, or the 2025 comparison
 never downloads the same node twice.
 
 One writer thread, not one per download worker: `H:` is a USB spinning disk,
-and TALON measured 8 interleaved writers running it at 26 MB/s against 88
-MB/s sequential (2026-09-15; TALON `docs/lidar_chm_pipeline.md`). Every
+and 8 interleaved writers were measured running it at 26 MB/s against 88
+MB/s sequential (2026-09-15). Every
 write lands as `<path>.tmp`, then `os.replace`s onto the real name, so a
 `.tmp` left by a killed run is refetched rather than trusted. A write that
 fails is only found at `flush_store()`, which raises the first one. `main()`

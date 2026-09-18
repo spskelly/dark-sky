@@ -975,7 +975,7 @@ def http_get(url, tries=4):
 # downloads the same node twice (shawn, 2026-09-18: the first full run held
 # 12.6 GB in memory and kept none of it). one writer thread: H: is a usb
 # spinning disk, and interleaved small writes ran it at a third of its
-# sequential speed (TALON, 2026-09-15). CANOPY_STORE= (empty) turns it off.
+# sequential speed (measured 2026-09-15). CANOPY_STORE= (empty) turns it off.
 STORE = os.environ.get('CANOPY_STORE', 'H:/dark-sky/ept')
 _writer = ThreadPoolExecutor(1)
 _pending = []
