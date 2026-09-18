@@ -21,6 +21,9 @@ import numpy as np
 import build_canopy as bc
 import build_horizons as bh
 
+# no test reads or writes the real lidar store: a stored ept.json would answer
+# a test that stubs the network with a 404, and a test would leave files on H:
+bc.STORE = ''
 
 LAT, LON = 35.3907, -83.0372     # doubletop, the site that started this
 
@@ -467,6 +470,57 @@ class TestLive(unittest.TestCase):
         p = bc.profiles_for(x, y, z, c, lat, lon)
         self.assertGreater(max(p['s']), 45)       # the spike read 78.7 degrees at 19 m
         self.assertTrue(bc.needs_s(p['s'], p['t'], None))
+
+
+class TestStore(unittest.TestCase):
+    """the raw ept files kept on disk, one writer, only renamed files count"""
+
+    def setUp(self):
+        import tempfile
+        self.dir = tempfile.TemporaryDirectory()
+        self.saved = bc.STORE
+        bc.STORE = self.dir.name
+
+    def tearDown(self):
+        bc.flush_store()
+        bc.STORE = self.saved
+        self.dir.cleanup()
+
+    def test_first_read_fetches_and_writes_then_reads_from_disk(self):
+        calls = []
+        fetch = lambda: (calls.append(1), b'laz bytes')[1]
+        self.assertEqual(bc.stored('DS/ept-data/0-0-0-0.laz', fetch), b'laz bytes')
+        bc.flush_store()
+        with open(os.path.join(self.dir.name, 'DS', 'ept-data', '0-0-0-0.laz'), 'rb') as f:
+            self.assertEqual(f.read(), b'laz bytes')
+        self.assertEqual(bc.stored('DS/ept-data/0-0-0-0.laz', fetch), b'laz bytes')
+        self.assertEqual(len(calls), 1)
+
+    def test_a_leftover_temp_file_is_fetched_again(self):
+        path = os.path.join(self.dir.name, 'DS', 'ept-data', '1-0-0-0.laz')
+        os.makedirs(os.path.dirname(path))
+        with open(path + '.tmp', 'wb') as f:
+            f.write(b'half')
+        self.assertEqual(bc.stored('DS/ept-data/1-0-0-0.laz', lambda: b'whole'), b'whole')
+        bc.flush_store()
+        with open(path, 'rb') as f:
+            self.assertEqual(f.read(), b'whole')
+
+    def test_writes_go_through_one_writer(self):
+        self.assertEqual(bc._writer._max_workers, 1)
+
+    def test_an_empty_store_setting_writes_nothing(self):
+        bc.STORE = ''
+        self.assertEqual(bc.stored('DS/x.laz', lambda: b'x'), b'x')
+        bc.flush_store()
+        self.assertEqual(os.listdir(self.dir.name), [])
+
+    def test_a_failed_write_surfaces_at_flush(self):
+        with open(os.path.join(self.dir.name, 'DS'), 'w') as f:
+            f.write('a file where the dataset directory should be')
+        bc.stored('DS/ept-data/2-0-0-0.laz', lambda: b'x')
+        with self.assertRaises(OSError):
+            bc.flush_store()
 
 
 if __name__ == '__main__':

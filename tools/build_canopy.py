@@ -380,11 +380,54 @@ def http_get(url, tries=4):
     raise err
 
 
+# the raw ept files, kept. every file a site box touches is written here once
+# and read from here after, so a probe, a moved pin or the 2025 comparison never
+# downloads the same node twice (shawn, 2026-09-18: the first full run held
+# 12.6 GB in memory and kept none of it). one writer thread: H: is a usb
+# spinning disk, and interleaved small writes ran it at a third of its
+# sequential speed (TALON, 2026-09-15). CANOPY_STORE= (empty) turns it off.
+STORE = os.environ.get('CANOPY_STORE', 'H:/dark-sky/ept')
+_writer = ThreadPoolExecutor(1)
+_pending = []
+
+
+def _write(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + '.tmp'
+    with open(tmp, 'wb') as f:
+        f.write(data)
+    os.replace(tmp, path)
+
+
+def stored(rel, fetch):
+    """the bytes at STORE/rel, or fetch() and queue them for the writer. only a
+    renamed file counts: a .tmp left by a killed run is fetched again."""
+    if not STORE:
+        return fetch()
+    path = os.path.join(STORE, rel)
+    if os.path.exists(path):
+        with open(path, 'rb') as f:
+            return f.read()
+    data = fetch()
+    _pending.append(_writer.submit(_write, path, data))
+    return data
+
+
+def flush_store():
+    """wait for the writer and raise the first write that failed, so a run that
+    says it finished has every file it fetched on disk"""
+    done = list(_pending)
+    _pending.clear()
+    for f in done:
+        f.result()
+
+
 @lru_cache(maxsize=None)
 def ept_root(dataset):
     """ept.json's bounds, or None when the bucket has no such dataset"""
+    rel = dataset + '/ept.json'
     try:
-        return json.loads(http_get(EPT + dataset + '/ept.json'))['bounds']
+        return json.loads(stored(rel, lambda: http_get(EPT + rel)))['bounds']
     except urllib.error.HTTPError as e:
         if e.code == 404:
             return None
@@ -393,15 +436,17 @@ def ept_root(dataset):
 
 @lru_cache(maxsize=None)
 def hierarchy_page(dataset, key):
-    return json.loads(http_get(EPT + dataset + '/ept-hierarchy/' + key + '.json'))
+    rel = dataset + '/ept-hierarchy/' + key + '.json'
+    return json.loads(stored(rel, lambda: http_get(EPT + rel)))
 
 
 # the raw laz bytes, not the decoded arrays: 512 nodes is about 300 MB of
 # bytes and would be several GB of float64. decoding again costs tens of
-# milliseconds, the download it saves costs seconds.
+# milliseconds, the disk read it saves costs a few.
 @lru_cache(maxsize=512)
 def node_bytes(dataset, key):
-    return http_get(EPT + dataset + '/ept-data/' + key + '.laz')
+    rel = dataset + '/ept-data/' + key + '.laz'
+    return stored(rel, lambda: http_get(EPT + rel))
 
 
 def read_points(blob):
@@ -448,6 +493,12 @@ def main():
     ap.add_argument('--only', help='run one site, by case-insensitive name substring')
     args = ap.parse_args()
 
+    global STORE
+    drive = os.path.splitdrive(os.path.abspath(STORE))[0] if STORE else ''
+    if STORE and drive and not os.path.exists(drive + os.sep):
+        print('no %s drive here, so no raw ept files are kept this run' % drive)
+        STORE = ''
+
     os.makedirs(CACHE, exist_ok=True)
     html = bh.read_html()
     sites = site_list(html)
@@ -475,6 +526,7 @@ def main():
                 print('  MISSING the canopy:%s marker; the real run would refuse to write' % label)
         print('  writes: %s' % ('nothing, --only never rewrites index.html' if args.only
                                 else 'tools/.canopy-cache/, then the canopy block in index.html'))
+        print('  raw ept files kept in: %s' % (STORE or 'nowhere (CANOPY_STORE is empty)'))
         return
 
     results = {}
@@ -520,6 +572,8 @@ def main():
         print('[%s] [%d/%d] %s ... %d datasets, %d nodes, %.0f MB, %.1fs, net %.0f MB at %.1f MB/s'
               % (time.strftime('%H:%M:%S'), i, len(todo), s['name'], len(used), nodes, nbytes / 1e6,
                  time.time() - t, net / 1e6, mbps), flush=True)
+
+    flush_store()
 
     have = [s for s in todo if results.get(s['key'], {}).get('t') is not None]
     print('\n%d of %d sites have canopy, %.0f s' % (len(have), len(todo), time.time() - t0))
