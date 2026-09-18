@@ -1075,8 +1075,128 @@ class TestSuggestDryRun(unittest.TestCase):
                 self.assertFalse(os.path.exists(os.path.join(d, 'osm')))
                 self.assertFalse(os.path.exists(os.path.join(d, 'view-review.md')))
                 self.assertIn('closed-in', out.getvalue())
+                self.assertIn('osm: 0 cached, 1 in 1 batched request', out.getvalue())
             finally:
                 bc.CACHE = saved
+
+
+def _http_error(code, headers=None):
+    return urllib.error.HTTPError('http://x.invalid/', code, 'busy', headers or {}, io.BytesIO(b'<p>rate_limited</p>'))
+
+
+class TestOverpassAsk(unittest.TestCase):
+    """overpass is a shared, free service: a busy answer (429, 504) is waited
+    out 10 s then 30 s, or as long as it says, before the next mirror is asked.
+    urlopen and time.sleep are stubbed, so nothing here reaches it."""
+
+    OK = json.dumps({'elements': [{'type': 'way', 'id': 1}]}).encode()
+
+    def ask(self, answers, urls=('http://one.invalid/',)):
+        with mock.patch.object(bc, 'OVERPASS', list(urls)), \
+             mock.patch.object(bc.urllib.request, 'urlopen', side_effect=answers) as asked, \
+             mock.patch.object(bc.time, 'sleep') as sleep, \
+             contextlib.redirect_stdout(io.StringIO()):   # keep the suite output clean
+            got = bc.overpass_ask('[out:json];way(1);out;')
+        return got, asked.call_count, [c.args[0] for c in sleep.call_args_list]
+
+    def test_a_429_is_waited_out_then_asked_again(self):
+        got, n, waits = self.ask([_http_error(429), _http_error(429), _fake_response(self.OK)])
+        self.assertEqual(got, [{'type': 'way', 'id': 1}])
+        self.assertEqual((n, waits), (3, [10, 30]))
+
+    def test_retry_after_is_honoured_and_capped(self):
+        got, n, waits = self.ask([_http_error(429, {'Retry-After': '45'}),
+                                  _http_error(429, {'Retry-After': '3600'}), _fake_response(self.OK)])
+        self.assertEqual(waits, [45, 120])
+
+    def test_busy_everywhere_is_none_after_three_tries_per_mirror(self):
+        urls = ('http://one.invalid/', 'http://two.invalid/', 'http://three.invalid/')
+        got, n, waits = self.ask([_http_error(504) for _ in range(9)], urls)
+        self.assertIsNone(got)
+        self.assertEqual((n, waits), (9, [10, 30] * 3))   # no wait after a mirror's last try
+
+    def test_a_broken_mirror_is_not_retried(self):
+        got, n, waits = self.ask([_http_error(400), _fake_response(self.OK)], ('http://one.invalid/', 'http://two.invalid/'))
+        self.assertEqual((len(got), n, waits), (1, 2, []))
+
+
+class TestOsmPrefetch(unittest.TestCase):
+    """--suggest-views asks overpass once for every site it still needs, then
+    files each way under every site whose box it passes through, in the same
+    cache file osm_access reads."""
+
+    def setUp(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        self.osm = os.path.join(d.name, 'osm')
+        p = mock.patch.object(bc, 'CACHE', d.name)
+        p.start()
+        self.addCleanup(p.stop)
+        # b's pin is 100 m east of a's, so their 68 m boxes overlap from 32 to 68 m east of a
+        blat, blon = bc.from_local(100.0, 0.0, LAT, LON)
+        clat, clon = bc.from_local(0.0, 5000.0, LAT, LON)
+        self.a = {'name': 'Site A', 'ov_id': None, 'view_lat': LAT, 'view_lon': LON}
+        self.b = {'name': 'Site B', 'ov_id': None, 'view_lat': blat, 'view_lon': blon}
+        self.c = {'name': 'Site C', 'ov_id': None, 'view_lat': clat, 'view_lon': clon}
+
+    def way(self, i, *pts):
+        return {'type': 'way', 'id': i, 'tags': {'highway': 'path'},
+                'geometry': [dict(zip(('lat', 'lon'), bc.from_local(x, y, LAT, LON))) for x, y in pts]}
+
+    def ids(self, site):
+        with open(os.path.join(self.osm, bh.cache_name(site)), encoding='utf-8') as f:
+            got = json.load(f)
+        self.assertEqual(got['at'], [site['view_lat'], site['view_lon'], bc.SEARCH_R + bc.ACCESS_M])   # the key osm_access checks
+        return sorted(w['id'] for w in got['elements'])
+
+    def test_one_answer_is_split_into_each_sites_cache(self):
+        bc._write(os.path.join(self.osm, bh.cache_name(self.c)),
+                  json.dumps({'at': [self.c['view_lat'], self.c['view_lon'], bc.SEARCH_R + bc.ACCESS_M],
+                              'elements': []}).encode())
+        ways = [self.way(1, (50, -10), (50, 10)),        # in the overlap: both sites
+                self.way(2, (-50, -10), (-50, 10)),      # a only
+                self.way(3, (150, -200), (150, 200)),    # no node inside b, but it crosses b
+                self.way(4, (500, 0), (510, 0))]         # neither
+        with mock.patch.object(bc, 'overpass_ask', return_value=ways) as ask, \
+             contextlib.redirect_stdout(io.StringIO()) as out:
+            bc.osm_prefetch([self.a, self.b, self.c])
+        self.assertEqual(ask.call_count, 1)
+        q = ask.call_args.args[0]
+        self.assertTrue(q.startswith('[out:json][timeout:90];'))
+        self.assertEqual(q.count('way["highway"]'), 2)   # c's cache is still good, so c is not asked
+        self.assertEqual(self.ids(self.a), [1, 2])
+        self.assertEqual(self.ids(self.b), [1, 3])
+        self.assertEqual(self.ids(self.c), [])
+        self.assertIn('2 sites', out.getvalue())
+        self.assertIn('4 ways', out.getvalue())
+        with mock.patch.object(bc.urllib.request, 'urlopen', side_effect=AssertionError('cached')):
+            self.assertEqual(len(bc.osm_access(self.b)), 2)   # osm_access takes it without asking
+
+    def test_a_failed_batch_leaves_no_cache_files(self):
+        with mock.patch.object(bc, 'overpass_ask', return_value=None), \
+             contextlib.redirect_stdout(io.StringIO()):
+            bc.osm_prefetch([self.a, self.b])
+        self.assertEqual(os.listdir(self.osm) if os.path.isdir(self.osm) else [], [])
+
+    def test_nothing_to_ask_asks_nothing(self):
+        with mock.patch.object(bc, 'overpass_ask', side_effect=AssertionError('asked')):
+            bc.osm_prefetch([])
+
+    def test_suggest_views_prefetches_the_sites_it_will_compute(self):
+        html = ('const SPOTS = [\n'
+                "  { name: 'Site A', lat: 35.10, lon: -83.10, elev: 4000, kind: 'view' },\n"
+                '];\nconst OVERLOOKS = [\n];\n')
+        order = []
+        row = {'name': 'Site A', 'key': 'Site A', 'lat': 35.10, 'lon': -83.10, 'before': 60.0,
+               'open_before': 0.0, 'spot': None, 'params': bc.suggest_params()}
+        with mock.patch.object(bh, 'read_html', return_value=html), \
+             mock.patch.object(bc, 'load_cached', side_effect=lambda s: {'t': [60.0] * 360}), \
+             mock.patch.object(bc, 'osm_prefetch', side_effect=lambda ss: order.append([s['name'] for s in ss])), \
+             mock.patch.object(bc, 'suggest', side_effect=lambda s, r: (order.append('suggest'), dict(row))[1]), \
+             mock.patch.object(sys, 'argv', ['build_canopy.py', '--suggest-views']), \
+             contextlib.redirect_stdout(io.StringIO()):
+            bc.main()
+        self.assertEqual(order, [['Site A'], 'suggest'])
 
 
 def crown(x0, y0, z_lo, z_hi, step=0.5):

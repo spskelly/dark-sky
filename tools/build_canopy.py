@@ -29,6 +29,7 @@ import io
 import json
 import math
 import os
+import re
 import sys
 import threading
 import time
@@ -98,9 +99,16 @@ NOISE = (7, 18)
 # the osm highway values that are a way in on foot or by car; the review crops draw the same two sets
 ROADS = {'motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'unclassified', 'residential', 'service', 'road'}
 PATHS = {'footway', 'path', 'steps', 'track', 'bridleway', 'cycleway', 'pedestrian'}
-# tools/overpass.mjs's first two mirrors and its user agent: overpass-api.de refuses a default one
-OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter']
+# tools/overpass.mjs's mirrors and its user agent: overpass-api.de refuses a default one
+OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter',
+            'https://overpass.private.coffee/api/interpreter']
 UA = {'User-Agent': 'dark-sky-calendar tools (+https://github.com/spskelly/dark-sky)'}
+# how long to leave a mirror that said it was busy (429, 504) before asking it
+# again, as overpass.mjs does; a Retry-After it sends wins, up to OVERPASS_WAIT_MAX
+OVERPASS_WAITS = (10, 30)       # seconds, after the first and second busy answer; the third moves on
+OVERPASS_WAIT_MAX = 120         # seconds. a Retry-After past this is not waited out on one mirror
+OSM_BATCH = 25                  # sites per union query: every closed-in site at once (24 on 2026-09-18). placeholder
+OSM_BATCH_PAUSE = 5             # seconds between two batches, when there is more than one
 
 R_MERC = 6378137.0
 
@@ -498,14 +506,109 @@ def _osm_cached(site):
     from disk only, or None when there isn't one or it no longer matches. a
     dry run uses this too, to count what a real run would still need to ask
     overpass for, without asking it."""
-    lat, lon = site['view_lat'], site['view_lon']
-    r = SEARCH_R + ACCESS_M
-    path = os.path.join(CACHE, 'osm', bh.cache_name({'name': site['name'], 'ov_id': site.get('ov_id')}))
+    path, at, _ = _osm_box(site)
     if not os.path.exists(path):
         return None
     with open(path, encoding='utf-8') as f:
         got = json.load(f)
-    return got['elements'] if got.get('at') == [lat, lon, r] else None
+    return got['elements'] if got.get('at') == at else None
+
+
+def _osm_box(site):
+    """this site's osm cache file, the 'at' key that says which pin and radius
+    it answers, and the box around the pin as overpass's s, w, n, e"""
+    lat, lon = site['view_lat'], site['view_lon']
+    r = SEARCH_R + ACCESS_M
+    path = os.path.join(CACHE, 'osm', bh.cache_name({'name': site['name'], 'ov_id': site.get('ov_id')}))
+    return path, [lat, lon, r], from_local(-r, -r, lat, lon) + from_local(r, r, lat, lon)
+
+
+def _osm_query(boxes):
+    clauses = ''.join('way["highway"](%.6f,%.6f,%.6f,%.6f);way["amenity"="parking"](%.6f,%.6f,%.6f,%.6f);'
+                      % (b + b) for b in boxes)
+    return '[out:json][timeout:90];(%s);out geom;' % clauses
+
+
+def overpass_ask(q):
+    """the elements overpass returns for q, or None when no mirror would
+    answer. a busy mirror (429, 504) is left OVERPASS_WAITS seconds, or as long
+    as its Retry-After says, and asked again, three times at most; anything
+    else moves straight on to the next mirror, as tools/overpass.mjs does"""
+    for url in OVERPASS:
+        for attempt in range(len(OVERPASS_WAITS) + 1):
+            try:
+                req = urllib.request.Request(url, data=urllib.parse.urlencode({'data': q}).encode(), headers=UA)
+                # well past the query's own [timeout:90], so overpass gives up first and says why
+                with urllib.request.urlopen(req, timeout=150) as resp:
+                    got = json.loads(resp.read())
+                # a query overpass gave up on (timeout, out of memory) still comes
+                # back a 200, with what it had and a remark saying why
+                if 'remark' in got:
+                    raise ValueError(got['remark'])
+                return got['elements']
+            except urllib.error.HTTPError as err:
+                # overpass says why it said no in the body, and that is usually the useful half
+                try:
+                    why = ' '.join(re.sub(r'<[^>]*>', ' ', err.read().decode('utf-8', 'replace')).split())[:120]
+                except (OSError, http.client.HTTPException):
+                    why = ''
+                busy = err.code in (429, 504) and attempt < len(OVERPASS_WAITS)
+                wait = OVERPASS_WAITS[attempt] if busy else 0
+                ra = (err.headers or {}).get('Retry-After')
+                if busy and ra and ra.strip().isdigit():
+                    wait = min(int(ra), OVERPASS_WAIT_MAX)
+                print('  overpass %s: %s %s%s%s' % (url, err.code, err.reason, ': ' + why if why else '',
+                      ', waiting %d s' % wait if busy else ''), flush=True)
+                if not busy:
+                    break
+                time.sleep(wait)
+            # urllib's other errors and timeouts are OSErrors; a reply cut off
+            # mid-read is an http.client one
+            except (OSError, http.client.HTTPException, ValueError, KeyError) as err:
+                print('  overpass %s: %s' % (url, err), flush=True)
+                break
+    return None
+
+
+def _crosses(geom, s, w, n, e):
+    """whether a way's geometry passes through the box, the test overpass's own
+    (bbox) filter makes: a segment can cross a 136 m box with both its nodes
+    outside it. each segment is clipped to the box, liang-barsky, in degrees"""
+    pts = [(g['lon'], g['lat']) for g in geom or [] if g]
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:] or pts):
+        t0, t1 = 0.0, 1.0
+        for p, q in ((x0 - x1, x0 - w), (x1 - x0, e - x0), (y0 - y1, y0 - s), (y1 - y0, n - y0)):
+            if p == 0:
+                if q < 0:
+                    break
+            elif p < 0:
+                t0 = max(t0, q / p)
+            else:
+                t1 = min(t1, q / p)
+        else:
+            if t0 <= t1:
+                return True
+    return False
+
+
+def osm_prefetch(sites):
+    """ask overpass once for every site here with no good cached answer,
+    rather than once a site, then file each way under every site whose box it
+    passes through, in the cache file osm_access reads. a failed batch writes
+    nothing, and osm_access asks for each of its sites on its own as before"""
+    want = [s for s in sites if _osm_cached(s) is None]
+    for i in range(0, len(want), OSM_BATCH):
+        if i:
+            time.sleep(OSM_BATCH_PAUSE)
+        part = [_osm_box(s) for s in want[i:i + OSM_BATCH]]
+        ways = overpass_ask(_osm_query([bb for _, _, bb in part]))
+        if ways is None:
+            print('  osm: the batch of %d sites went unanswered; asking site by site' % len(part), flush=True)
+            continue
+        for path, at, bb in part:
+            mine = [w for w in ways if _crosses(w.get('geometry'), *bb)]
+            _write(path, json.dumps({'at': at, 'elements': mine}).encode('utf-8'))
+        print('  osm: one request covered %d sites, %d ways came back' % (len(part), len(ways)), flush=True)
 
 
 def osm_access(site):
@@ -513,35 +616,16 @@ def osm_access(site):
     as overpass ways with their geometry, or None when no mirror answered. one
     answer per site is kept under CACHE/osm, written .tmp then renamed and
     taken only for the same pin and box; a failure is not kept, so the next
-    run asks again"""
-    lat, lon = site['view_lat'], site['view_lon']
-    r = SEARCH_R + ACCESS_M
+    run asks again. --suggest-views has usually filled it already, in one
+    batch through osm_prefetch"""
     cached = _osm_cached(site)
     if cached is not None:
         return cached
-    path = os.path.join(CACHE, 'osm', bh.cache_name({'name': site['name'], 'ov_id': site.get('ov_id')}))
-    s, w = from_local(-r, -r, lat, lon)
-    n, e = from_local(r, r, lat, lon)
-    bb = '%.6f,%.6f,%.6f,%.6f' % (s, w, n, e)
-    q = '[out:json][timeout:60];(way["highway"](%s);way["amenity"="parking"](%s););out geom;' % (bb, bb)
-    for url in OVERPASS:
-        try:
-            req = urllib.request.Request(url, data=urllib.parse.urlencode({'data': q}).encode(), headers=UA)
-            with urllib.request.urlopen(req, timeout=90) as resp:
-                got = json.loads(resp.read())
-            # a query overpass gave up on (timeout, out of memory) still comes
-            # back a 200, with what it had and a remark saying why
-            if 'remark' in got:
-                raise ValueError(got['remark'])
-            ways = got['elements']
-        # urllib's errors and timeouts are OSErrors; a reply cut off mid-read
-        # is an http.client one
-        except (OSError, http.client.HTTPException, ValueError, KeyError) as err:
-            print('  overpass %s: %s' % (url, err))
-            continue
-        _write(path, json.dumps({'at': [lat, lon, r], 'elements': ways}).encode('utf-8'))
-        return ways
-    return None
+    path, at, bb = _osm_box(site)
+    ways = overpass_ask(_osm_query([bb]))
+    if ways is not None:
+        _write(path, json.dumps({'at': at, 'elements': ways}).encode('utf-8'))
+    return ways
 
 
 def confirm_spot(dx, dy, z, cls, ground, cx, cy, dz, med, ridge=None, ok_access=None):
@@ -998,21 +1082,26 @@ def main():
     if args.suggest_views:
         closed = [(s, load_cached(s)) for s in todo]
         closed = [(s, r) for s, r in closed if r and closed_in(r, terrain_for(s).get('alt'))]
+        # --force means no saved row is reused, in the dry run as in the real one
+        need = closed if args.force else [(s, r) for s, r in closed if not load_suggested(s)]
         if args.dry_run:
             # everything above and below this is a local cache read: no H:,
-            # no overpass, no write. --force means no saved row is reused,
-            # the same as the real run.
-            need = closed if args.force else [(s, r) for s, r in closed if not load_suggested(s)]
+            # no overpass, no write.
             osm_ok = sum(1 for s, r in need if _osm_cached(s) is not None)
             print('%d closed-in sites (of %d selected)' % (len(closed), len(todo)))
             print('  %d already have a reusable suggest row, %d would be computed' % (len(closed) - len(need), len(need)))
-            print('  osm: %d cached, %d would ask overpass' % (osm_ok, len(need) - osm_ok))
+            batches = -(-(len(need) - osm_ok) // OSM_BATCH)
+            print('  osm: %d cached, %d in %d batched request%s' % (osm_ok, len(need) - osm_ok, batches,
+                  '' if batches == 1 else 's'))
             print('  estimated up to %.1f min (upper bound: %d confirm raycasts a site at most, ~1.2 s each)'
                   % (len(need) * CONFIRM_MAX * 1.2 / 60, CONFIRM_MAX))
             print('  writes: %s, %s, %s' % (os.path.join(CACHE, 'suggest'), os.path.join(CACHE, 'osm'),
                   os.path.join(CACHE, 'view-review.md')))
             return
         os.makedirs(os.path.join(CACHE, 'suggest'), exist_ok=True)
+        # one overpass request for every site still to compute, not one a
+        # site: 24 in a row drew 504s and a 429 from overpass-api.de (2026-09-18)
+        osm_prefetch([s for s, r in need])
         rows = []
         failed = []
         net0 = net_bytes()
