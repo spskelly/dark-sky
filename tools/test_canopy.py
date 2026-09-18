@@ -187,6 +187,28 @@ class TestRouting(unittest.TestCase):
         x, y, z, c = pts(*ring(2), *[(60.0 + d, 0.0, 15.0, 1) for d in (0.0, 0.3, 0.6)])
         self.assertEqual(bc.profiles_for(x, y, z, c, LAT, LON)['s'][90], bh.ALT_MIN)
 
+    def test_vegetation_over_50m_above_ground_becomes_a_structure(self):
+        """a column of class-5 returns from 5 m to 70 m: the part below
+        TREE_MAX_M stays a tree, the part at or above it is the tower."""
+        column = [(20.0, 0.0, h, 5) for h in range(5, 71, 5)]
+        x, y, z, c = pts(*ring(2), (20.0, 0.0, 0.0, 2), *column)
+        p = bc.profiles_for(x, y, z, c, LAT, LON)
+        self.assertGreater(p['s'][90], 60)             # the 70 m top, read as a structure
+        self.assertLess(p['t'][90], p['s'][90])         # trees only reach the part under 50 m
+        self.assertTrue(bc.needs_s(p['s'], p['t'], None))
+
+    def test_a_35m_tree_with_ground_under_it_stays_entirely_a_tree(self):
+        x, y, z, c = pts(*ring(2), (0.0, -20.0, 0.0, 2), (0.0, -20.0, 35.0, 5))
+        p = bc.profiles_for(x, y, z, c, LAT, LON)
+        self.assertEqual(p['s'][180], bh.ALT_MIN)
+        self.assertGreater(p['t'][180], 0)
+
+    def test_tall_vegetation_with_no_ground_in_its_cell_stays_a_tree(self):
+        x, y, z, c = pts(*ring(2), (60.0, 0.0, 70.0, 5))
+        p = bc.profiles_for(x, y, z, c, LAT, LON)
+        self.assertEqual(p['s'][90], bh.ALT_MIN)
+        self.assertGreater(p['t'][90], 0)
+
 
 class TestDeck(unittest.TestCase):
 

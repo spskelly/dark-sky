@@ -66,6 +66,7 @@ MAX_DEPTH = 10       # octree depth. about 24 points per square metre on haywood
 PIN_R = 3.0          # metres. ground returns this close to the pin set the eye height
 PIN_R_WIDE = 10.0    # metres. the fallback when the pin sits on a car or a cut
 TALL_M = 2.0         # metres above local ground before an unclassified return can be built
+TREE_MAX_M = 50.0   # metres above local ground. no tree near these sites is this tall; the 2017 classifier put the pisgah broadcast tower in the vegetation classes (2026-09-17 live check), and this is what moves it
 GROUND_CELL = 5.0    # metres. the ground grid unclassified returns are measured against
 CLUSTER_CELL = 2.0   # metres. an unclassified return needs company in its cell
 CLUSTER_MIN = 3      # returns. fewer than this in a cell is a bird or a stray, not a tower
@@ -190,34 +191,44 @@ def cell_index(dx, dy, size):
 
 
 def structure_mask(dx, dy, z, cls):
-    """what counts as built: class 6, plus unclassified returns that stand
-    TALL_M or more above the ground returns in their GROUND_CELL and have at
-    least CLUSTER_MIN neighbours in their CLUSTER_CELL. the 2017 classifier
-    left the pisgah tower partly in class 1; a bird is in class 1 too, and the
-    difference between them is company."""
+    """what counts as built: class 6, plus two returns the classifier missed.
+    an unclassified return that stands TALL_M or more above the ground
+    returns in its GROUND_CELL and has at least CLUSTER_MIN neighbours in its
+    CLUSTER_CELL is built; company is what tells that return apart from a
+    bird, since both are class 1. a vegetation-classed (TREES) return that
+    stands TREE_MAX_M or more above that same ground mean is built too, with
+    no company requirement, since a 50 m return is never a bird: the 2017
+    classifier put the whole pisgah broadcast tower in classes 3/4/5, not
+    class 1 as once assumed (2026-09-17 live check), so height alone has to
+    carry that rule."""
     built = cls == BUILDING
-    cand = cls == UNCLASS
+    unclass = cls == UNCLASS
+    tree = np.isin(cls, TREES)
     grd = cls == GROUND
-    if not cand.any() or not grd.any():
+    if not grd.any() or not (unclass.any() or tree.any()):
         return built
     cell = cell_index(dx, dy, GROUND_CELL)
     n = np.bincount(cell[grd], minlength=cell.max() + 1)
     s = np.bincount(cell[grd], weights=z[grd], minlength=cell.max() + 1)
     with np.errstate(invalid='ignore', divide='ignore'):
-        ground = s / n                       # nan where the cell has no ground
-        tall = cand & ((z - ground[cell]) >= TALL_M)   # nan compares false
-    if not tall.any():
-        return built
-    cc = cell_index(dx, dy, CLUSTER_CELL)
-    k = np.bincount(cc[tall], minlength=cc.max() + 1)
-    return built | (tall & (k[cc] >= CLUSTER_MIN))
+        ground = s / n                        # nan where the cell has no ground
+        above = z - ground[cell]              # nan where the cell has no ground
+        tall = unclass & (above >= TALL_M)    # nan compares false
+        very_tall = tree & (above >= TREE_MAX_M)   # same rule, no company needed
+    if tall.any():
+        cc = cell_index(dx, dy, CLUSTER_CELL)
+        k = np.bincount(cc[tall], minlength=cc.max() + 1)
+        built = built | (tall & (k[cc] >= CLUSTER_MIN))
+    return built | very_tall
 
 
 def profiles_for(x, y, z, cls, lat, lon, deck_m=None):
     """both layers from one site's points, and the deck pair when deck_m is
     set. None when no ground return sits near enough to the pin to put an eye
     on. classes are counted before anything is dropped, so the cache says what
-    the survey held, not what this tool kept."""
+    the survey held, not what this tool kept. a TREES return that structure_mask
+    has routed to built is a structure, not also a tree, so every return ends
+    up in exactly one of the two layers."""
     x0, y0 = mercator(lat, lon)
     dx, dy = local_xy(x, y, x0, y0, lat)
     ground = ground_at_pin(dx, dy, z, cls)
@@ -226,8 +237,8 @@ def profiles_for(x, y, z, cls, lat, lon, deck_m=None):
     counts = {int(k): int(v) for k, v in zip(*np.unique(cls, return_counts=True))}
     keep = ~np.isin(cls, NOISE)
     dx, dy, z, cls = dx[keep], dy[keep], z[keep], cls[keep]
-    trees = np.isin(cls, TREES)
     built = structure_mask(dx, dy, z, cls)
+    trees = np.isin(cls, TREES) & ~built
 
     def pair(eye_z, min_r):
         return {'t': [round(float(a), 4) for a in skyline(dx[trees], dy[trees], z[trees], eye_z, min_r)],
