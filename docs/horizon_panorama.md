@@ -139,7 +139,7 @@ again: it needs `playwright`, which the elevation work does not.
 | `SKY` or `OVERLOOK_SKY` might be stale | `node tools/build-skyglow.mjs --check` | Neither block records what it was generated from, so nothing else notices. Exit 1 names the entries that differ. Run it after any spot move and after every overlook rebuild |
 | An overlook's OSM id changes | nothing required | Orphans the old `tools/.horizon-cache/ov-<old-id>.json`, harmlessly; the new id gets its own cache file on the next `build_horizons.py` run |
 | A spot's `lat, lon` or its `view:` | `build_canopy.py` as well as `build_horizons.py` | The canopy cache records the coordinate; a moved site recomputes |
-| A spot's `deck:` | `build_horizons.py`, then `build_canopy.py` | Both cache the deck height. `build_horizons.py` recomputes that spot (about 2 s); `build_canopy.py` refetches its box (about 25 s from the network at 32 workers, (pending: measure with `--only doubletop --force` after the store fill run)). Run the terrain first: the block's structures rule compares against the deck terrain line |
+| A spot's `deck:` | `build_horizons.py`, then `build_canopy.py` | Both cache the deck height. `build_horizons.py` recomputes that spot (about 2 s); `build_canopy.py` refetches its box (about 25 s from the network at 32 workers; from the `H:` store 10 to 14 s with nothing over the network, measured on the 2026-09-18 16:00 run as Jackrabbit Mountain 10.0 s and Gorges State Park 13.6 s, band pass included; Doubletop itself not timed). Run the terrain first: the block's structures rule compares against the deck terrain line |
 | `RADIUS`, `MAX_DEPTH`, `TREE_MAX_M`, the class routing or `COUNTIES` in `build_canopy.py` | `build_canopy.py` | `RADIUS` and `COUNTIES` are recorded per site and recompute by themselves; a routing or depth change, `TREE_MAX_M` included, needs `--force`, since the cache does not record which routing rule computed it. `TREE_MAX_M` shipped 2026-09-18 after the live check found the Pisgah tower routed to vegetation, not partly unclassified as first assumed; that day's full run was `--force` for this reason |
 | The 2025 point clouds arrive | change `VINTAGE` and the dataset source in `build_canopy.py`, then `--force` | The vintage is one page constant, so every site is rebuilt together |
 | `tools/overlook-views.json` changes | `node tools/build-overlooks.mjs --replay`, then `build_horizons.py`, `build-skyglow.mjs --fix`, `build_canopy.py` | A reviewed spot replaces the OSM point for that overlook, so the coordinate every downstream block raycasts from changes; the three builds are the same chain a moved curated spot needs, run in the same order |
@@ -317,6 +317,66 @@ the sentence is exactly what it was. Tower spots with `deck:` get a
 two-button toggle, from the ground and from the deck, that swaps all three
 profiles; it resets on every new place and is not remembered.
 
+### Canopy windows
+
+Why (2026-09-18). North Cove Valley Overlook read closed: a median tree
+altitude of 79.4 degrees, the tree line near the top of the scale on most of
+the compass. Shawn's photo from the rail shows the valley open to the south
+under the crowns. The tree line is the highest vegetation return on each
+azimuth, so a crown overhead hides the gap under it that somebody standing
+there looks straight through.
+
+How it works. `canopy_bands` grids the vegetation within `RADIUS` into
+`BAND_CELL` cells. Each cell's returns are one slab from its lowest to its
+highest (a leaf-off crown is sparse, and summer fills it), split in two
+wherever `VGAP_M` or more of height separates them, so understory under a
+crown leaves the gap between them open. Past `THROUGH_M` a cell is one solid
+slab from its lowest return up, since trunks add up with distance. Every slab
+blocks its altitude span over the azimuths its cell covers, in `BAND_STEP`
+bins, and on each azimuth the widest unblocked run under the tree line is the
+window: `f` its floor, `b` its top. The sight floor (`sight_floor`) is then,
+per azimuth, the lowest altitude a star is seen at: the window's floor where
+the window leaves `WINDOW_MIN_DEG` of sky above the ridge, the tree line
+where it does not, never under the ridge and never over the tree line. The
+closed-in test and the standing-spot finder both judge a place by the sight
+floor, not the tree line.
+
+What ships. A canopy entry carries `f` and `b` beside `t` only where
+`has_window` finds a window opening `WINDOW_MIN_DEG` above the ridge on some
+azimuth; elsewhere the entry is the tree line alone, as before. The page draws
+the trees as the crown above the window with the sky open under it down to the
+floor, and the rise and set sentence names the trees or the ridge by what is
+actually in the way at the crossing. The constants are in the table above.
+
+Measured, 2026-09-18:
+
+- North Cove Valley Overlook, live (Task 18): 167 azimuths with a window of 10
+  degrees or more, windows opening from 10.1 to 65.2 degrees, median 25.5. On
+  the valley side (azimuths 144 to 234) the floor sits at or under the
+  horizon. After the full rebuild its sight floor is 0.5 to 4.3 degrees over
+  azimuths 135 to 225, 80 over 225 to 360, and 121 of 360 azimuths are at or
+  under 20. Median sight floor 33.2 over all 360 degrees, 14.9 over its best
+  `BEST_ARC`: open.
+- Cost: about 12 s a site from the store, of which `canopy_bands` is about
+  5.7 s. The full `--force` rebuild ran 13:29 to 13:55 (26 minutes, 150 sites,
+  nothing over the network).
+- Closed-in sites: 40 of 150 by the median tree altitude; 35 by the median
+  sight floor over 360 degrees (opened: Hewat Overlook, Kuwohi, Table Rock
+  Overlook, View Waynesville, Yadkin Valley Overlook); 24 by the median sight
+  floor over the best `BEST_ARC` degrees, the rule that shipped.
+- Canopy block: 112.7 kB before windows, 216.4 kB after the full rebuild (73
+  of 150 entries ship `f`/`b`), 202.8 kB after the reviewed standing spots
+  were applied (Task 24, 16:00).
+
+Limits. One window per azimuth, the widest: where a mid-crown gap is wider
+than the gap at the ground, the page shows the mid-crown one. Some windows sit
+high in the crowns (North Cove azimuth 0: 38.5 to 48 degrees), likely leaf-off
+gaps that summer foliage closes. Filling each cell's slab solid from lowest to
+highest return is the summer assumption for a crown, not a measurement of one.
+Trunks inside `THROUGH_M` are not modelled, so a close stand of bare trunks
+reads as open under its crowns. The deck keeps a single tree line: a tower
+spot's view from the deck has no window.
+
 ### Raw lidar store
 
 Every EPT file a site's box touches is kept at
@@ -337,8 +397,10 @@ turns the store off for the run when its drive doesn't exist on this
 machine, and `--dry-run` prints where the store is (`raw ept files kept in:
 ...`, or `nowhere (CANOPY_STORE is empty)`) without writing to it.
 
-Size on disk: (pending: measured size after the store fill run, `du -sh
-H:/dark-sky/ept`).
+Size on disk: 12 GB after the store fill run (`du -sh H:/dark-sky/ept`,
+2026-09-18 10:45, 150 sites), and still 12 GB in 26,932 files after the
+16:00 run added the moved spots' nodes (2026-09-18 16:17). The `du` itself
+took 9.5 minutes over the USB disk, so don't put it in a check.
 
 Reversed 2026-09-18: the spec said nothing is written per node; Shawn: "we
 can afford 12gb", and every probe after the first run had to download its
@@ -521,9 +583,55 @@ sources call it overgrown with no vista), and View Chesnut Cove (the lidar
 reads 74 degrees at the pin and 56 degrees at the pull-off, closed on the
 better half).
 
-Review outcome (Task 15): (pending: review outcome, Task 15 -- approved,
-rejected and corrected counts). Over-30 count: 40 before the review,
-(pending: over-30 count after the review).
+Reachable first. `osm_access` reads the OSM roads, paths and parking within
+`SEARCH_R + ACCESS_M` of the pin (one batched Overpass request, cached under
+`tools/.canopy-cache/osm/`), and a candidate within `ACCESS_M` of one is
+reachable. The finder spends half its `CONFIRM_MAX` raw checks on reachable
+candidates and half on the rest, unused checks rolling over to the other
+group, so a nearer clearing off any path is still found. Gorges State Park is
+the example: its spot is 49 m out on bearing 008, 7.0 m up, on a path at the
+north lawn and parking, and its median sight floor drops from 79 to 8. On the
+2026-09-18 run 13 of the 15 spots were on a path and 2 off one.
+
+The review page. Two scripts under `tools/canopy_review/` turn the saved
+suggest rows into a page to decide from, with no network beyond small GETs:
+
+```sh
+# one aerial crop per row: USGS NAIP around the pin (public domain), OSM roads,
+# paths and parking on top (ODbL), the SEARCH_R ring, the pin and the spot.
+# writes tools/.canopy-cache/review/crops/<slug>.jpg, each via .tmp and skipped
+# when present, and the Overpass answer once as crops/osm.json. about a minute
+PROJ_LIB= "$PY" tools/canopy_review/make_crops.py
+# the page itself, from the current-params suggest rows and those crops. an
+# optional tools/.canopy-cache/review/notes.json (row key -> one line) shows a
+# reviewer's note on each card. writes tools/.canopy-cache/review/review.html
+PROJ_LIB= "$PY" tools/canopy_review/make_review_page.py
+```
+
+Delete a crop to redraw it; the rows themselves come from `--suggest-views`.
+
+Review outcome, 2026-09-18. The `--suggest-views` run gave 24 rows: 14 with a
+spot, 1 marginal (Soco Gap, 1 m, 30 to 30), 9 with none. Shawn accepted all
+15 proposed spots and rejected none. Of the 9 with no spot:
+
+- 3 moved to a real viewing place from research, checked against the lidar
+  before the move: Cataloochee Valley to the road edge (best half 11.7; watch
+  from the shoulder, and the elk fields close May to June and September to
+  October), Panthertown Valley to Salt Rock Overlook (1.8), Tsali Recreation
+  Area to the boat ramp (14.4).
+- 3 overlooks left off the page (`null`, above): Balsam Gap, Camp Creek,
+  View Chesnut Cove.
+- 2 campgrounds dropped from `SPOTS`: Standing Indian and Black Mountain,
+  valley bases with no sky to stand in (the terrain alone reads 8.2 on the
+  best half at Standing Indian; the trees are what close it).
+- 1 left as it is: Chestoa View, until the parkway reopens between MP 317.5
+  and 324.7 (target end of 2026).
+
+Closed-in count after the review, re-measured over the rebuilt page (38 spots,
+116 overlooks): 2 of 154, against 24 before. Chestoa View (67.5, left as it
+is) and Table Rock picnic area at 31.6: its accepted spot confirmed under 30
+on the raw check but re-measures just over it from the full box, the case
+described under `then` above.
 
 ## Behaviours worth keeping
 
