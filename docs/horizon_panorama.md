@@ -244,7 +244,7 @@ owns `D2R` and `R2D`; the renderer prefixes its own globals `PAN_`. Before
 inlining anything new, sweep for collisions across every top-level declaration
 in the page and in whatever is being added.
 
-**Unchecked pull-offs.** The 40 curated spots have been stood at or researched.
+**Unchecked pull-offs.** The 38 curated spots have been stood at or researched.
 Nobody has checked the 119 parkway overlooks, and Cove Field Ridge showed what
 an unchecked one looks like: the model starts 150 m out, so a grown-in
 overlook draws far more open than it really is. Hence the caveat line in every

@@ -47,7 +47,7 @@ will be clear, and where to drive.
   tonight, sunset to sunrise, from [Open-Meteo](https://open-meteo.com/)
   (no API key). Each night in the calendar also carries its mean 9pm–3am
   cloud cover.
-- **40 dark-sky spots.** Overlooks, balds and campgrounds across western
+- **38 dark-sky spots.** Overlooks, balds and campgrounds across western
   North Carolina, from the Cherohala Skyway to Doughton Park, on a topo map.
   Everything reorders around home, ranked by estimated drive time or
   straight-line distance. Each spot links to its Clear Outside forecast,
@@ -96,7 +96,7 @@ falls back to the default instead of being trusted.
 
 `darksky.home`, `darksky.lightpollution` and `darksky.tab` predate this table
 and kept their existing names and on-disk formats. `darksky.panoWhen` can
-reach 159 keys (40 spots plus 119 overlooks), about 3 kB total; it is bounded
+reach 157 keys (38 spots plus 119 overlooks), about 3 kB total; it is bounded
 but never pruned. The sky viewer's chosen date is deliberately not
 remembered: returning next week to last week's sky would be a bug.
 
@@ -335,7 +335,7 @@ revise a coordinate without rebuilding and the page draws last week's horizon
 from this week's pin, looking perfectly plausible.
 
 ```sh
-python tools/check_alignment.py            # 40 spots in under a second, exit 1 if broken
+python tools/check_alignment.py            # 38 spots in under a second, exit 1 if broken
 python tools/check_alignment.py --quiet    # failures only, for a hook or CI
 python tools/check_alignment.py --html other.html
 ```
