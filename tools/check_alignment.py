@@ -218,6 +218,15 @@ def main():
             fail.append('%s: canopy deck %s but the page says %s - rerun tools/build_canopy.py' % (key, d.get('deck_m'), deck))
         if ('deck' in e) != bool(deck):
             fail.append('%s: the page %s a deck profile but the spot %s deck:' % (key, 'has' if 'deck' in e else 'lacks', 'has' if deck else 'lacks'))
+        # a window on one side only is a partial rebuild: the page shipped an
+        # f or b the cache no longer has, or the cache has one the page never
+        # picked up. the value comparison below would just skip a one-sided
+        # pair, so the mismatch needs its own check to be reported at all.
+        for k in ('f', 'b'):
+            if (e.get(k) is not None) != (d.get(k) is not None):
+                fail.append('%s: the page %s a %s window string but the cache %s'
+                            % (key, 'has' if e.get(k) is not None else 'lacks', k,
+                               'has one' if d.get(k) is not None else 'lacks one'))
         pairs = [(e.get('t'), d.get('t')), (e.get('s'), d.get('s'))]
         if 'deck' in e and d.get('deck'):
             pairs += [(e['deck'].get('t'), d['deck']['t']), (e['deck'].get('s'), d['deck']['s'])]
