@@ -137,3 +137,102 @@ def nodes_in_box(root, box, page_of, max_depth=MAX_DEPTH):
         if int(key.split('-', 1)[0]) < max_depth:
             queue.extend(children(key))
     return out
+
+
+# ---------- the raycast, straight from the points ----------
+
+def local_xy(x, y, x0, y0, lat):
+    """metres east and north of the pin. the mercator offset shrinks by
+    cos(lat) to reach the ground; over 200 m the change in that factor is
+    nothing."""
+    k = math.cos(math.radians(lat))
+    return (x - x0) * k, (y - y0) * k
+
+
+def ground_at_pin(dx, dy, z, cls):
+    """the median ground return within PIN_R of the pin, widening to
+    PIN_R_WIDE when the pin sits on something that hid the ground. the median
+    rather than the mean or the minimum, so one return down a drain does not
+    lower the eye."""
+    r = np.hypot(dx, dy)
+    for pr in (PIN_R, PIN_R_WIDE):
+        g = z[(cls == GROUND) & (r <= pr)]
+        if g.size:
+            return float(np.median(g))
+    return None
+
+
+def skyline(dx, dy, z, eye_z, min_r):
+    """the highest apparent altitude per whole degree of azimuth, ALT_MIN where
+    nothing was returned. every point is a candidate for its own degree, and
+    the maximum is the skyline, which is the same upper-envelope rule the
+    terrain raycast follows with max pooling."""
+    r = np.hypot(dx, dy)
+    keep = r >= min_r
+    dx, dy, z, r = dx[keep], dy[keep], z[keep], r[keep]
+    out = np.full(360, bh.ALT_MIN)
+    if not r.size:
+        return out
+    az = np.floor(np.degrees(np.arctan2(dx, dy))).astype(np.int64) % 360
+    alt = np.degrees(np.arctan2(z - eye_z - r ** 2 / (2.0 * bh.R_EFF), r))
+    np.maximum.at(out, az, alt)
+    return out
+
+
+def cell_index(dx, dy, size):
+    """one integer per point naming its size x size cell, dense from zero"""
+    i = np.floor(dx / size).astype(np.int64)
+    j = np.floor(dy / size).astype(np.int64)
+    i -= i.min()
+    j -= j.min()
+    return i * (j.max() + 1) + j
+
+
+def structure_mask(dx, dy, z, cls):
+    """what counts as built: class 6, plus unclassified returns that stand
+    TALL_M or more above the ground returns in their GROUND_CELL and have at
+    least CLUSTER_MIN neighbours in their CLUSTER_CELL. the 2017 classifier
+    left the pisgah tower partly in class 1; a bird is in class 1 too, and the
+    difference between them is company."""
+    built = cls == BUILDING
+    cand = cls == UNCLASS
+    grd = cls == GROUND
+    if not cand.any() or not grd.any():
+        return built
+    cell = cell_index(dx, dy, GROUND_CELL)
+    n = np.bincount(cell[grd], minlength=cell.max() + 1)
+    s = np.bincount(cell[grd], weights=z[grd], minlength=cell.max() + 1)
+    with np.errstate(invalid='ignore', divide='ignore'):
+        ground = s / n                       # nan where the cell has no ground
+        tall = cand & ((z - ground[cell]) >= TALL_M)   # nan compares false
+    if not tall.any():
+        return built
+    cc = cell_index(dx, dy, CLUSTER_CELL)
+    k = np.bincount(cc[tall], minlength=cc.max() + 1)
+    return built | (tall & (k[cc] >= CLUSTER_MIN))
+
+
+def profiles_for(x, y, z, cls, lat, lon, deck_m=None):
+    """both layers from one site's points, and the deck pair when deck_m is
+    set. None when no ground return sits near enough to the pin to put an eye
+    on. classes are counted before anything is dropped, so the cache says what
+    the survey held, not what this tool kept."""
+    x0, y0 = mercator(lat, lon)
+    dx, dy = local_xy(x, y, x0, y0, lat)
+    ground = ground_at_pin(dx, dy, z, cls)
+    if ground is None:
+        return None
+    counts = {int(k): int(v) for k, v in zip(*np.unique(cls, return_counts=True))}
+    keep = ~np.isin(cls, NOISE)
+    dx, dy, z, cls = dx[keep], dy[keep], z[keep], cls[keep]
+    trees = np.isin(cls, TREES)
+    built = structure_mask(dx, dy, z, cls)
+
+    def pair(eye_z, min_r):
+        return {'t': [round(float(a), 4) for a in skyline(dx[trees], dy[trees], z[trees], eye_z, min_r)],
+                's': [round(float(a), 4) for a in skyline(dx[built], dy[built], z[built], eye_z, min_r)]}
+
+    out = {'ground_m': ground, 'eye_m': ground + bh.EYE, 'classes': counts}
+    out.update(pair(ground + bh.EYE, MIN_R))
+    out['deck'] = pair(ground + deck_m + bh.EYE, DECK_MIN_R) if deck_m else None
+    return out
