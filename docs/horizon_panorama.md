@@ -113,9 +113,10 @@ redoing finished work.
   raw profiles, so a change to any input recomputes that site and a 2025
   re-run is `--force`. About 8 kB a site.
 - `tools/.canopy-cache/suggest/`: one review row per closed-in site, reused
-  while its coordinate and the nine standing-spot tunables (`CLOSED_DEG`,
-  `SEARCH_R`, `LEVEL_M`, `CAND_STEP`, `SKY_R`, `OPEN_DEG`, `CLEAR_H`,
-  `CONFIRM_DEG`, `CONFIRM_MAX`) still match. `--suggest-views
+  while its coordinate and the fourteen standing-spot tunables (`CLOSED_DEG`,
+  `BEST_ARC`, `SEARCH_R`, `LEVEL_M`, `CAND_STEP`, `SKY_R`, `OPEN_DEG`,
+  `CLEAR_H`, `CONFIRM_DEG`, `CONFIRM_MAX`, `VGAP_M`, `THROUGH_M`,
+  `WINDOW_MIN_DEG`, `ACCESS_M`) still match. `--suggest-views
   --force`, or deleting the directory, recomputes every row. The table itself
   is `tools/.canopy-cache/view-review.md`. See Standing spots below.
 
@@ -143,6 +144,8 @@ again: it needs `playwright`, which the elevation work does not.
 | The 2025 point clouds arrive | change `VINTAGE` and the dataset source in `build_canopy.py`, then `--force` | The vintage is one page constant, so every site is rebuilt together |
 | `tools/overlook-views.json` changes | `node tools/build-overlooks.mjs --replay`, then `build_horizons.py`, `build-skyglow.mjs --fix`, `build_canopy.py` | A reviewed spot replaces the OSM point for that overlook, so the coordinate every downstream block raycasts from changes; the three builds are the same chain a moved curated spot needs, run in the same order |
 | A spot's `view:` moves | `build_horizons.py`, `build_canopy.py` | `view:` is the coordinate the panorama and canopy are actually drawn from when it is set, invalidating both the same way moving `lat, lon` does. `build-skyglow.mjs` is not listed here: it reads a spot's `lat, lon` only (`SPOT_RE`, line 61), never `view:`. The `tools/overlook-views.json` row above keeps `build-skyglow.mjs --fix`, since overlooks are read by their lat/lon, which the override moves |
+| `VGAP_M`, `THROUGH_M`, `BAND_CELL`, `BAND_STEP` or `WINDOW_MIN_DEG` in `build_canopy.py` | `build_canopy.py --force` | These set how a cell's returns become slabs and how a window under them is measured; the cache does not record which rule built a site's bands, so every site needs rebuilding, not just the changed ones. All sites, from the `H:` store, no network: about 26 minutes measured 2026-09-18, 13:29 to 13:55, 150 sites |
+| `ACCESS_M`, `BEST_ARC`, or OSM roads, paths and parking near a site | `build_canopy.py --suggest-views --force` | The finder that proposes standing spots and the closed-in test both read these |
 
 Nothing downstream of `index.html` needs regenerating. `build-og.mjs` and
 `build-moon-preview.mjs` do not read any of this.
@@ -265,8 +268,14 @@ profiles per site in the same encoding as the ridge. Design record:
 
 | Constant | Value | Evidence |
 |---|---|---|
+| `MODEL` | 2 | Cache format stamp. Version 2 added the band window fields (`f`, `b`) beside the tree line `t`; a cache record written by an older model is recomputed the same as a moved coordinate |
 | `RADIUS` | 200 m | Canopy past 150 m added 0.7 degrees at Cove Field, 0.1 at Doubletop, none at the two Buncombe sites (spike, 2026-09-17). Recorded per cache file |
 | `MIN_R` | 2 m | Closer than this is the observer and the car. A return at 1 m subtends whatever the pin happens to sit under |
+| `BAND_CELL` | 1 m | Vegetation is gridded at this size before each cell's vertical extent is taken, to build the window bands (`f`, `b`) beside the tree line. Placeholder |
+| `VGAP_M` | 2 m | A vertical gap this big inside one `BAND_CELL` cell splits it into two slabs, so understory sitting under a crown leaves the window between them open. Placeholder |
+| `THROUGH_M` | 30 m from the eye | Past this a cell is solid from its lowest return up, whatever gaps it has: trunks add up, and nobody sees 150 m through a wood under its crowns. Placeholder |
+| `BAND_STEP` | 0.5 degrees | Width of the altitude bin `canopy_bands` sweeps to find the widest open run under the tree line. Not tuned against data. Placeholder |
+| `WINDOW_MIN_DEG` | 3 degrees | An open run under the tree line shorter than this is not counted as a window; the sight floor falls back to the tree line there. Placeholder |
 | `DECK_MIN_R` | 6 m | From the deck, the tower's own cab and roof read as a wall without it. Placeholder: the Fryingpan cab is about 4 m across; retune against the lidar tower footprint |
 | `MAX_DEPTH` | 10 | About 24 points per square metre on Haywood; the depth every spike used. Deeper costs bytes and adds nothing a degree-wide profile can see |
 | Trees | classes 3, 4, 5 | The acquisition's low, medium and high vegetation. Doubletop: 4, 8 and 69 per cent of returns |
@@ -337,10 +346,14 @@ box again.
 
 ### Standing spots
 
-40 of 150 sites read a median tree altitude over 30 degrees from the pin:
-the pin is in or against the canopy. The coordinates were good to about 10
-m, which was enough for a terrain raycast from 150 m out and is not enough
-for trees 2 m from where somebody would actually stand.
+24 of 150 sites read a median sight floor over their best 180 contiguous
+degrees (`BEST_ARC`) over 30 degrees from the pin: the pin is in or against
+the canopy on its open side too, not just somewhere around it. Was 40 of
+150 by the median tree altitude over the full 360 degrees, the rule this
+section describes below before the 2026-09-18 change to `CLOSED_DEG`; see
+the constants table for why. The coordinates were good to about 10 m, which
+was enough for a terrain raycast from 150 m out and is not enough for trees
+2 m from where somebody would actually stand.
 
 Why spots are chosen by the sky they open (2026-09-18). The first finder
 took the nearest ground with no vegetation standing 3 m over it within 3 m.
@@ -417,13 +430,18 @@ stand's edge, beside the last trees rather than clear of them. The canopy
 is 2017 and leaf-off, so every spot's sky is a floor on what is there now.
 
 ```sh
-# for every site whose median tree altitude is over CLOSED_DEG, find the
-# nearest candidate that opens the sky and write a review table. raycasts
-# from the pin's own box, so over a filled store it uses no network: the
-# final line's net figure shows it. never touches index.html. 5 to 17 s a
-# site over the filled store (2026-09-18: Wayah Bald 17, Jackrabbit 16,
-# Devil's Courthouse 9, Chestoa 5, wall clock with the H: read), so about
-# 10 minutes for the 40 closed-in sites.
+# for every site whose sight floor over its best BEST_ARC degrees is over
+# CLOSED_DEG (24 sites, not the 40 the old median-tree-altitude rule found),
+# find the nearest candidate that opens the sky and write a review table.
+# raycasts from the pin's own box, so over a filled store the terrain and
+# lidar side costs no network: the final line's net figure shows it. the
+# first run against a site still asks Overpass once for its roads, paths
+# and parking (ACCESS_M), then caches that answer under
+# tools/.canopy-cache/osm/. never touches index.html. confirming a candidate
+# against the raw points costs about 1.2 s each (measured 2026-09-18, North
+# Cove), so a closed site runs roughly 20 to 70 s at up to CONFIRM_MAX
+# candidates. a saved row recomputes whenever suggest_params() changes,
+# which is every tunable in the table below.
 python tools/build_canopy.py --suggest-views
 ```
 
@@ -457,7 +475,8 @@ it matched.
 
 | Constant | Value | Evidence |
 |---|---|---|
-| `CLOSED_DEG` | 30 degrees | A median tree altitude over this puts the pin in or against the canopy (2026-09-18: 40 of 150 sites), and a candidate at or under it is a spot. Placeholder, from two probed sites |
+| `CLOSED_DEG` | 30 degrees | A median sight floor over this, over the pin's best `BEST_ARC` degrees, puts the pin in or against the canopy on its open side (2026-09-18: 24 of 150 sites), and a candidate at or under it is a spot. Was: the median tree altitude over the full 360 degrees, 40 of 150 sites. Changed 2026-09-18, Shawn's call, because the 360-degree median judges a place by its worst side: North Cove Valley Overlook reads 33.2 degrees on the 360-degree median but 14.9 on its best half, and its valley side (azimuths 135 to 225) sees down to 0.5 to 4.3 degrees, matching his photo from there. 24 sites close on the best-half rule against 35 on the 360-degree median and 40 by the old tree-line rule. Placeholder, from two probed sites |
+| `BEST_ARC` | 180 degrees | The width of the contiguous arc `CLOSED_DEG` and the finder are judged over: a place is read by the median sight floor over its best half of the sky, not the whole compass, so a spot backed by woods but open to a valley reads open. Shawn's call, 2026-09-18; evidence under `CLOSED_DEG` above |
 | `SEARCH_R` | 60 m | How far from the pin a spot may be proposed. 30 m found nothing at three of the four probed sites, and Devil's Courthouse's best sat on the 30 m edge; at 60 m its spot is 30 m out, 5.9 m up (2026-09-18, with the raw check). Placeholder |
 | `LEVEL_M` | 10 m | The spot's ground within this of the pin's. 3 m shut out Devil's Courthouse's spot 6 m up; 10 still keeps a cliff lip from being swapped for its foot (a 20 m drop). Placeholder |
 | `CAND_STEP` | 2 m | Spacing of the candidate lattice, the spacing the 2026-09-18 probe used. Placeholder |
@@ -465,7 +484,13 @@ it matched.
 | `OPEN_DEG` | 20 degrees | An azimuth whose tree line is under this counts as open sky, the cut the 2026-09-18 probe counted. Placeholder |
 | `CLEAR_H` | 3 m | Vegetation this far over the ground is in the way: over the walk from the pin, and over a candidate's own cell (it is under a crown). Shrubs under this are not. Placeholder, from two probed sites |
 | `CONFIRM_DEG` | 15 degrees | A candidate's grid median may read this far over `CLOSED_DEG` and still be raycast through the raw points. The grid read 10.7 degrees high on average at Wayah Bald (20 candidates, 2026-09-18), so this leaves margin. Placeholder |
-| `CONFIRM_MAX` | 40 | Candidates raycast through the raw points at most, nearest first, so a closed site costs a bounded time (Jackrabbit: 40 checks 6.1 s, all 177 27 s, 2026-09-18). Placeholder |
+| `CONFIRM_MAX` | 40 | Candidates raycast through the raw points at most, nearest first, split between reachable and off-path candidates, so a closed site costs a bounded time (Jackrabbit: 40 checks 6.1 s, all 177 27 s, 2026-09-18). Placeholder |
+| `ACCESS_M` | 8 m | A candidate spot this close to an OSM road, path or parking area is one people can walk to; the finder spends half its `CONFIRM_MAX` checks on these first. Placeholder |
+
+`CONFIRM_DEG`'s margin was measured against the 360-degree tree-line median
+(Wayah Bald, above); it has not been re-measured against the best-arc sight
+floor `CLOSED_DEG` screens on now, so whether 15 degrees is still enough
+room is unproven. The next `--suggest-views` run is where to check it.
 
 A decision is recorded, never applied by itself. For a curated spot, set
 `view:` on its `SPOTS` record to the approved coordinate. For an overlook,
