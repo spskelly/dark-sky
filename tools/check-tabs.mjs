@@ -1,4 +1,4 @@
-// checks the three tab panels: one open at a time, the hash still selects one,
+// checks the tab panels: one open at a time, the hash still selects one,
 // and the two things that cannot be measured in a hidden panel (the leaflet map
 // and the skyline canvases) come out the right size once their tab is opened.
 //
@@ -21,6 +21,7 @@ const SHOTS = process.argv.includes('--shots');
 const SHOT_DIR = join(ROOT, 'tools', '.shots');
 const DESKTOP = { width: 1280, height: 900 };
 const PHONE = { width: 390, height: 844 };
+const N_PANELS = 3;
 
 let failed = 0;
 function ok(cond, what) {
@@ -52,7 +53,7 @@ async function open(browser, viewport, hash = '') {
   const page = await browser.newPage({ viewport });
   await quiet(page);
   await page.goto(URL_ + hash);
-  await page.waitForFunction(() => document.querySelectorAll('[role="tabpanel"]').length === 3);
+  await page.waitForFunction(n => document.querySelectorAll('[role="tabpanel"]').length === n, N_PANELS);
   return page;
 }
 
@@ -73,7 +74,7 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   ok((await visible(page)).join() === 'panel-when', 'opens on the calendar panel');
   ok((await selected(page)).join() === 'tab-when', 'its tab is the selected one');
 
-  for (const [tab, panel] of [['tab-tonight', 'panel-tonight'], ['tab-where', 'panel-where'], ['tab-when', 'panel-when']]) {
+  for (const [tab, panel] of [['tab-where', 'panel-where'], ['tab-notes', 'panel-notes'], ['tab-when', 'panel-when']]) {
     await page.click(`#${tab}`);
     ok((await visible(page)).join() === panel, `${tab} shows only ${panel}`);
     ok((await selected(page)).join() === tab, `${tab} is marked selected`);
@@ -83,7 +84,7 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   // arrow keys, since the tab bar is the page's only navigation on a phone
   await page.focus('#tab-when');
   await page.keyboard.press('ArrowLeft');
-  ok((await selected(page)).join() === 'tab-where', 'arrow-left from the first tab wraps to the last');
+  ok((await selected(page)).join() === 'tab-notes', 'arrow-left from the first tab wraps to the last');
 
   // the complaint that started this check: as three identical cards the tabs
   // read as decoration. the selected one has to differ in more than a border
@@ -100,8 +101,15 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   ok(look.accent !== 'none', 'the selected tab carries an accent, not just a border');
   ok(parseFloat(look.rail) > 0, 'the tab bar sits on a rail');
 
-  // the notes list and the credits sit outside every panel: they are never hidden
-  ok(await page.isVisible('#notes') && await page.isVisible('#credits'), 'notes and credits stay outside the tabs');
+  // reading the mountains, the footnote and the credits are the field notes
+  // tab: reference reading, shown when asked for and under nothing else
+  await page.click('#tab-when');
+  ok(!(await page.isVisible('#notes')) && !(await page.isVisible('#credits')), 'notes and credits are not under the calendar');
+  await page.click('#tab-notes');
+  ok(await page.isVisible('#notes') && await page.isVisible('p.foot') && await page.isVisible('#credits'), 'the field notes tab holds notes, footnote and credits');
+  // there is no tonight tab: the hour-by-hour row lives in the home strip
+  ok(await page.$('#tab-tonight') === null, 'there is no "will it be clear" tab');
+  ok(await page.$('.home-strip details #tonight') !== null, 'the hourly forecast is a fold in the home strip');
   await page.close();
 }
 
@@ -338,18 +346,18 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   await quiet(ctx);
   const first = await ctx.newPage();
   await first.goto(URL_);
-  await first.click('#tab-tonight');
+  await first.click('#tab-notes');
   await first.close();
 
   const back = await ctx.newPage();
   await back.goto(URL_);
-  await back.waitForFunction(() => document.querySelectorAll('[role="tabpanel"]').length === 3);
-  ok((await visible(back)).join() === 'panel-tonight', 'a return visit opens the tab you left on');
-  ok(await back.evaluate(() => location.hash) === '#tonight', 'and puts that tab in the URL');
+  await back.waitForFunction(n => document.querySelectorAll('[role="tabpanel"]').length === n, N_PANELS);
+  ok((await visible(back)).join() === 'panel-notes', 'a return visit opens the tab you left on');
+  ok(await back.evaluate(() => location.hash) === '#notes', 'and puts that tab in the URL');
 
   const linked = await ctx.newPage();
   await linked.goto(URL_ + '#where');
-  await linked.waitForFunction(() => document.querySelectorAll('[role="tabpanel"]').length === 3);
+  await linked.waitForFunction(n => document.querySelectorAll('[role="tabpanel"]').length === n, N_PANELS);
   ok((await visible(linked)).join() === 'panel-where', 'a hash outranks the remembered tab');
   await ctx.close();
 }
@@ -383,7 +391,7 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
 
 // --- an in-page link that points into another panel ---
 {
-  const page = await open(browser, DESKTOP);
+  const page = await open(browser, DESKTOP, '#notes');
   // the footnote links to the disclaimer, which lives in the spots panel
   await page.click('p.foot a[href="#check-before-you-go"]');
   ok((await visible(page)).join() === 'panel-where', 'a footnote link into the spots panel opens it');
@@ -496,6 +504,15 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   const above = await page.evaluate(() => document.querySelector('.home-strip').getBoundingClientRect().bottom
     <= document.querySelector('[role="tablist"]').getBoundingClientRect().top);
   ok(above, 'and it sits above the tabs');
+  // the hour-by-hour row is a fold under the headline, closed until asked for,
+  // and drawn from the same forecast whichever tab is open
+  const fold = await page.evaluate(() => {
+    const d = document.querySelector('.home-strip details.home-hours');
+    return { open: d.open, hours: d.querySelectorAll('#tonight .hr').length, label: d.querySelector('summary').textContent.trim() };
+  });
+  ok(!fold.open, 'the hourly fold starts closed');
+  ok(fold.hours > 0, `and already holds the hourly row (${fold.hours} hours)`);
+  ok(fold.label === 'hour by hour', `under the label "hour by hour" (${fold.label})`);
   // picking needs the map, and the map has no size inside a hidden panel
   await page.click('#home-pick');
   ok((await selected(page)).join() === 'tab-where', 'pick on map opens the where tab first');
@@ -842,7 +859,7 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
 
 if (SHOTS) {
   for (const [name, viewport] of [['desktop', DESKTOP], ['phone', PHONE]]) {
-    for (const tab of ['when', 'tonight', 'where']) {
+    for (const tab of ['when', 'where', 'notes']) {
       const page = await open(browser, viewport, '#' + tab);
       await page.waitForTimeout(1200); // let the forecast placeholders and canvases settle
       await page.screenshot({ path: join(SHOT_DIR, `${name}-${tab}.png`), fullPage: true });

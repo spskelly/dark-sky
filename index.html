@@ -272,8 +272,14 @@
   .home-sky { margin: 0; font-size: 14px; line-height: 1.5; color: var(--ink-dim); }
   .home-sky:empty { display: none; }
   .home-sky b { color: var(--ink); font-weight: 500; }
-  .home-sky a { color: var(--moon-dim); }
-  .home-sky a:hover { color: var(--moon); }
+  .home-hours { margin-top: 4px; }
+  .home-hours > summary { cursor: pointer; width: max-content; font-size: 13px; color: var(--moon-dim); list-style: none; }
+  .home-hours > summary::-webkit-details-marker { display: none; }
+  .home-hours > summary::before { content: "\25B8\00a0"; }
+  .home-hours[open] > summary::before { content: "\25BE\00a0"; }
+  .home-hours > summary:hover { color: var(--moon); }
+  .home-hours > summary:focus-visible { outline: 2px solid var(--today); outline-offset: 2px; border-radius: 4px; }
+  .home-hours .tonight { margin-top: 10px; }
   #map.picking .leaflet-grab { cursor: crosshair; }
   .spot-layout { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 14px; }
   #map { height: 560px; border-radius: 12px; background: var(--night-2); overflow: hidden; }
@@ -416,13 +422,8 @@
   .disclaimer a { color: var(--moon-dim); }
   .disclaimer a:hover { color: var(--moon); }
 
-  .season { max-width: 1100px; margin: 44px auto 0; }
-  .season > summary { list-style: none; cursor: pointer; display: block; }
-  .season > summary::-webkit-details-marker { display: none; }
-  .season h3 { display: inline; font-family: var(--serif); font-weight: 400; font-size: 24px; line-height: 1.21; margin: 0; }
-  .season > summary::after { content: " \2014\00a0show"; font-size: 14px; color: var(--ink-dim); }
-  .season[open] > summary::after { content: " \2014\00a0hide"; }
-  .season > summary:focus-visible { outline: 2px solid var(--today); outline-offset: 4px; border-radius: 4px; }
+  .season { max-width: 1100px; margin: 0 auto; }
+  .season h3 { font-family: var(--serif); font-weight: 400; font-size: 24px; line-height: 1.21; margin: 0; }
   .season ul { margin: 12px 0 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px 24px; }
   .season li { color: var(--ink-dim); font-size: 14px; line-height: 1.5; }
   .season li b { color: var(--ink); font-weight: 500; }
@@ -459,7 +460,7 @@
   @media (pointer: coarse) {
     button, .spot-controls select, .spot-controls input { min-height: 44px; }
     .options .group button, .spot-controls .group button { padding: 6px 14px; }
-    .spot-controls details summary, .season > summary { padding: 9px 0; }
+    .spot-controls details summary, .home-hours > summary { padding: 9px 0; }
     /* three text links in a row, each a thumb's width apart */
     .spot .links { display: flex; gap: 18px; }
     .spot .links a { display: inline-flex; align-items: center; min-height: 40px; margin-right: 0; }
@@ -545,7 +546,6 @@
        itself fit on one screen. the filters were a screen above the map, which
        is the same as not having them. */
     #map { height: 320px; }
-    .season { margin-top: 32px; }
     .disclaimer { padding: 12px 14px; }
     .foot { margin-top: 28px; }
   }
@@ -607,6 +607,10 @@
   </div>
   <p class="spot-msg" id="spot-msg" role="status"></p>
   <p class="home-sky" id="home-sky" aria-live="polite"></p>
+  <details class="home-hours">
+    <summary>hour by hour</summary>
+    <div class="tonight" id="tonight" aria-live="polite"></div>
+  </details>
 </section>
 
 <!-- the three questions used to be jump links down an eight-screen page. they
@@ -614,9 +618,9 @@
      always one tap away instead of a blind scroll. -->
 <nav class="guide">
   <div class="tablist" role="tablist" aria-label="what this page answers">
-    <button role="tab" id="tab-when" aria-controls="panel-when" aria-selected="true"><b>when is it dark?</b><span class="what">every new-moon window for the next twelve months, with the weekend nights called out</span><span class="short">dark nights</span></button>
-    <button role="tab" id="tab-tonight" aria-controls="panel-tonight" aria-selected="false" tabindex="-1"><b>will it be clear?</b><span class="what">tonight's cloud cover, temperature and dew point hour by hour, sunset to sunrise</span><span class="short">tonight's sky</span></button>
+    <button role="tab" id="tab-when" aria-controls="panel-when" aria-selected="true"><b>when is it dark?</b><span class="what">every new-moon window for the next twelve months, with the weekend nights called out, and how clear the next week looks</span><span class="short">dark nights</span></button>
     <button role="tab" id="tab-where" aria-controls="panel-where" aria-selected="false" tabindex="-1"><b>where do i go?</b><span class="what">forty dark-sky spots on a map, ranked by drive time from wherever home is</span><span class="short">where to go</span></button>
+    <button role="tab" id="tab-notes" aria-controls="panel-notes" aria-selected="false" tabindex="-1"><b>field notes</b><span class="what">reading the mountains, how the numbers are made, and who the data comes from</span><span class="short">notes</span></button>
   </div>
 </nav>
 
@@ -655,10 +659,6 @@
 </section>
 
 </div><!-- /panel-when -->
-
-<div class="panel" role="tabpanel" id="panel-tonight" aria-labelledby="tab-tonight" tabindex="0" hidden>
-  <div class="tonight" id="tonight" aria-live="polite"></div>
-</div>
 
 <div class="panel" role="tabpanel" id="panel-where" aria-labelledby="tab-where" tabindex="0" hidden>
 
@@ -748,11 +748,11 @@
   </div>
 </dialog>
 
-<!-- reference reading, not a task: nine hundred pixels of it sat between the
-     spot list and the footer on a phone. open on a wide screen, folded on a
-     narrow one by the script just below, so no-script still gets all of it. -->
-<details class="season" id="notes" open>
-  <summary><h3>reading the mountains</h3></summary>
+<div class="panel" role="tabpanel" id="panel-notes" aria-labelledby="tab-notes" tabindex="0" hidden>
+<!-- reference reading, not a task: it has a tab of its own now, so it is
+     always open and never in the way. -->
+<section class="season" id="notes">
+  <h3>reading the mountains</h3>
   <ul>
     <li><b>parkway gates.</b> the high sections between Mount Pisgah and Waterrock Knob close for ice and snow, often for weeks at a time from November into April. check the NPS road status page before driving up; a closed gate at 9pm is a long detour.</li>
     <li><b>milky way core.</b> at this latitude the galactic center sits in the southern sky. it clears the ridge before dawn from late February, is up most of the night by June, and is an evening object August through October. each entry under upcoming dark-sky windows says which.</li>
@@ -762,12 +762,7 @@
     <li><b>leaf season.</b> October new moons are the best of the year for sky, and the worst for finding a parking spot at Graveyard Fields. arrive before sunset or go somewhere less famous.</li>
     <li><b>forecasting.</b> every spot links to its clear outside forecast: cloud cover by hour, plus transparency and seeing, which matter more than the daytime forecast suggests.</li>
   </ul>
-</details>
-<script>
-  // runs the moment the element is parsed, so a phone never paints the open
-  // state and then snaps it shut
-  if (window.matchMedia('(max-width: 720px)').matches) document.getElementById('notes').open = false;
-</script>
+</section>
 
 <p class="foot">
   phase times come from the meeus true-phase algorithm and are converted to your local time zone, so dates should match published almanacs to the day. the window is a planning heuristic: the moon also rises and sets, so a waxing crescent a few days past new is gone by late evening, and a waning crescent doesn't rise until the small hours. those edge days are often darker than they look. cloud cover comes from open-meteo and is a model, not a promise; the spot notes are hand-written and are <a href="#check-before-you-go">not a substitute for checking with the land manager</a>. the sky line beneath each one is not hand-written: it is sampled from the light pollution atlas at the spot and at eight bearings 10, 25 and 50 km out, so &ldquo;brightest to the northwest at 50 km&rdquo; means a town sits there, not that somebody remembers it that way.
@@ -785,6 +780,8 @@
     <li><b>type &amp; software.</b> <a href="https://github.com/undercasetype/Fraunces">Fraunces</a> by the Fraunces Project Authors and <a href="https://github.com/IBM/plex">IBM Plex Sans</a> by IBM, SIL Open Font License 1.1; <a href="https://leafletjs.com/">Leaflet</a> 1.9.4, BSD 2-Clause. <a href="assets/licenses/fraunces-OFL.txt">Fraunces license</a> &middot; <a href="assets/licenses/ibm-plex-sans-OFL.txt">Plex license</a> &middot; <a href="assets/licenses/leaflet-BSD.txt">Leaflet license</a>.</li>
   </ul>
 </details>
+
+</div><!-- /panel-notes -->
 
 <script>
 // ---------- lunar phase math (meeus, astronomical algorithms ch. 49) ----------
@@ -5721,9 +5718,8 @@ function renderPanel(panel) {
   if (hrs.length) select(0);
 }
 
-// the strip above the tabs is not the place for an hour-by-hour breakdown,
-// only enough to know whether to look up. the full picture is one click away
-// on "will it be clear?", linked from the same line.
+// the strip above the tabs leads with enough to know whether to look up; the
+// hour-by-hour row is the fold right under this line.
 function renderHomeHeadline(panel) {
   const el = document.getElementById('home-sky');
   if (!panel.target) { el.innerHTML = ''; return; }
@@ -5737,7 +5733,7 @@ function renderHomeHeadline(panel) {
   const mean = Math.round(idx.reduce((s, i) => s + h.cloud_cover[i], 0) / idx.length);
   const verdict = cloudClass(mean);
   const low = Math.round(Math.min(...idx.map(i => h.temperature_2m[i])));
-  el.innerHTML = `${preDawn ? 'rest of the night' : 'tonight'} at home: <b>${verdict}</b>, ${mean}% cloud, low ${low}°F &middot; <a href="#tonight">hour by hour</a>`;
+  el.innerHTML = `${preDawn ? 'rest of the night' : 'tonight'} at home: <b>${verdict}</b>, ${mean}% cloud, low ${low}°F`;
 }
 
 async function loadPanel(panel, target) {
