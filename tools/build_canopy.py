@@ -330,3 +330,169 @@ def canopy_js(sites, results, terrain):
         lines.append('  %s: %s,' % (json.dumps(page_key(s)), json.dumps(e, separators=(',', ':'))))
     return (START + "\nconst CANOPY_VINTAGE = '%s';\nconst CANOPY = {\n" % VINTAGE
             + '\n'.join(lines) + '\n};\n' + END)
+
+
+# ---------- fetching ----------
+
+def http_get(url, tries=4):
+    """stdlib, with backoff. a 404 is an answer, not a failure to retry."""
+    err = None
+    for i in range(tries):
+        try:
+            with urllib.request.urlopen(url, timeout=60) as r:
+                return r.read()
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                raise
+            err = e
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            err = e
+        time.sleep(2 ** i)
+    raise err
+
+
+@lru_cache(maxsize=None)
+def ept_root(dataset):
+    """ept.json's bounds, or None when the bucket has no such dataset"""
+    try:
+        return json.loads(http_get(EPT + dataset + '/ept.json'))['bounds']
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise
+
+
+@lru_cache(maxsize=None)
+def hierarchy_page(dataset, key):
+    return json.loads(http_get(EPT + dataset + '/ept-hierarchy/' + key + '.json'))
+
+
+# the raw laz bytes, not the decoded arrays: 512 nodes is about 300 MB of
+# bytes and would be several GB of float64. decoding again costs tens of
+# milliseconds, the download it saves costs seconds.
+@lru_cache(maxsize=512)
+def node_bytes(dataset, key):
+    return http_get(EPT + dataset + '/ept-data/' + key + '.laz')
+
+
+def read_points(blob):
+    import laspy
+    las = laspy.read(io.BytesIO(blob))
+    return (np.asarray(las.x, float), np.asarray(las.y, float), np.asarray(las.z, float),
+            np.asarray(las.classification, np.int64))
+
+
+def fetch_site(lat, lon, radius_m=RADIUS):
+    """every point inside the box, from every dataset that has any. returns
+    x, y, z, cls, the datasets that contributed points, the node count and
+    the bytes fetched (cache hits included, since they were fetched once)."""
+    box = site_box(lat, lon, radius_m)
+    jobs = []
+    for ds in DATASETS:
+        root = ept_root(ds)
+        if root is None or not overlaps((root[0], root[1], root[3], root[4]), box):
+            continue
+        keys = nodes_in_box(root, box, lambda k, ds=ds: hierarchy_page(ds, k))
+        jobs += [(ds, k) for k in keys]
+    with ThreadPoolExecutor(WORKERS) as pool:
+        blobs = list(pool.map(lambda j: node_bytes(*j), jobs))
+    parts, per_ds = [], {}
+    for (ds, _), blob in zip(jobs, blobs):
+        x, y, z, c = read_points(blob)
+        m = (x >= box[0]) & (x <= box[2]) & (y >= box[1]) & (y <= box[3])
+        if m.any():
+            parts.append((x[m], y[m], z[m], c[m]))
+            per_ds[ds] = per_ds.get(ds, 0) + int(m.sum())
+    if not parts:
+        e = np.zeros(0)
+        return e, e, e, e.astype(np.int64), [], len(jobs), sum(len(b) for b in blobs)
+    cols = [np.concatenate([p[i] for p in parts]) for i in range(4)]
+    return cols[0], cols[1], cols[2], cols[3].astype(np.int64), sorted(per_ds), len(jobs), sum(len(b) for b in blobs)
+
+
+# ---------- the run ----------
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--dry-run', action='store_true', help='say what the real run would do, fetch nothing')
+    ap.add_argument('--force', action='store_true', help='discard the cache and recompute')
+    ap.add_argument('--only', help='run one site, by case-insensitive name substring')
+    args = ap.parse_args()
+
+    os.makedirs(CACHE, exist_ok=True)
+    html = bh.read_html()
+    sites = site_list(html)
+    if not sites:
+        sys.exit('no spots found in index.html; the SPOTS block may have been reformatted')
+    todo = [s for s in sites if not args.only or args.only.lower() in s['name'].lower()]
+    if not todo:
+        sys.exit('--only %r matched nothing' % args.only)
+
+    cached = [] if args.force else [s for s in todo if load_cached(s)]
+    fresh = [s for s in todo if s not in cached]
+
+    # a dry run says what the real run would do and stops. it fetches nothing,
+    # not even hierarchy pages: the estimate below is from the two measured
+    # sites (about 63 MB a dataset, 1.7 datasets a site, 8 s a site) and the
+    # real run prints the real numbers as it goes.
+    if args.dry_run:
+        print('%d sites in index.html, %d selected' % (len(sites), len(todo)))
+        print('  %d already cached, %d to fetch' % (len(cached), len(fresh)))
+        print('  estimated %.1f GB over the network, about %d min' % (len(fresh) * 1.7 * 63 / 1000, len(fresh) * 8 // 60 + 1))
+        print('  datasets tried: %d (%s ... %s)' % (len(DATASETS), DATASETS[0], DATASETS[-1]))
+        for m, label in ((START, 'start'), (END, 'end')):
+            if m not in html:
+                print('  MISSING the canopy:%s marker; the real run would refuse to write' % label)
+        print('  writes: %s' % ('nothing, --only never rewrites index.html' if args.only
+                                else 'tools/.canopy-cache/, then the canopy block in index.html'))
+        return
+
+    results = {}
+    t0 = time.time()
+    for i, s in enumerate(todo, 1):
+        rec = None if args.force else load_cached(s)
+        if rec:
+            results[s['key']] = rec
+            print('[%d/%d] %s ... cached' % (i, len(todo), s['name']), flush=True)
+            continue
+        t = time.time()
+        x, y, z, c, used, nodes, nbytes = fetch_site(s['view_lat'], s['view_lon'])
+        rec = {'name': s['name'], 'ov_id': s['ov_id'], 'lat': s['view_lat'], 'lon': s['view_lon'],
+               'radius_m': RADIUS, 'deck_m': s['deck'], 'candidates': DATASETS, 'datasets': used,
+               'nodes': nodes, 'bytes': nbytes, 'vintage': VINTAGE, 't': None, 's': None, 'deck': None}
+        prof = profiles_for(x, y, z, c, s['view_lat'], s['view_lon'], s['deck']) if used else None
+        if prof is None:
+            rec['reason'] = 'no lidar in any dataset' if not used else 'no ground return within %g m of the pin' % PIN_R_WIDE
+            print('[%s] %s ... %s, left out' % (time.strftime('%H:%M:%S'), s['name'], rec['reason']), flush=True)
+        else:
+            rec.update(prof)
+            terrain = terrain_for(s)
+            if terrain and abs(terrain['dem_m'] - prof['ground_m']) > 5:
+                print('  elev check: %s lidar ground %.1f m, 3dep %.1f m' % (s['name'], prof['ground_m'], terrain['dem_m']))
+        bh.save_atomic(cache_path(s), bh.write_json(rec))
+        results[s['key']] = rec
+        print('[%s] [%d/%d] %s ... %d datasets, %d nodes, %.0f MB, %.1fs'
+              % (time.strftime('%H:%M:%S'), i, len(todo), s['name'], len(used), nodes, nbytes / 1e6, time.time() - t), flush=True)
+
+    have = [s for s in todo if results.get(s['key'], {}).get('t') is not None]
+    print('\n%d of %d sites have canopy, %.0f s' % (len(have), len(todo), time.time() - t0))
+    for s in todo:
+        r = results.get(s['key'], {})
+        if r.get('t') is None:
+            print('  no canopy: %s (%s)' % (s['name'], r.get('reason', 'not computed')))
+
+    block = canopy_js(sites, results, {s['key']: terrain_for(s) for s in have})
+    print('%.1f kB of index.html' % (len(block.encode()) / 1024))
+    if args.only:
+        print('--only run, index.html left alone so a partial set cannot replace the full one')
+        return
+    nxt = bh.replace_block(html, START, END, block)
+    if nxt == html:
+        print('unchanged')
+        return
+    bh.write_html(nxt)
+    print('index.html updated')
+
+
+if __name__ == '__main__':
+    main()

@@ -307,5 +307,32 @@ class TestSites(unittest.TestCase):
         self.assertEqual(names.index('Max Patch'), 2)
 
 
+@unittest.skipUnless(os.environ.get('CANOPY_LIVE'), 'set CANOPY_LIVE=1 to fetch doubletop and pisgah from S3 (about 130 MB)')
+class TestLive(unittest.TestCase):
+    """the real tool against the two sites the spike measured. the spike
+    sampled a 1 m raster and this samples points, so a degree of tolerance is
+    deliberate; a miss by more than that is a finding to report, not a
+    tolerance to widen."""
+
+    def test_doubletop_within_a_degree_of_the_spike(self):
+        x, y, z, c, used, n, nbytes = bc.fetch_site(LAT, LON)
+        self.assertEqual(used, ['NC_Phase5_Haywood_2017', 'NC_Phase5_Jackson_2017'])
+        p = bc.profiles_for(x, y, z, c, LAT, LON)
+        self.assertAlmostEqual(p['ground_m'], 1635.6, delta=1.0)
+        with open(os.path.join(bh.CACHE, 'ov-n979739837.json'), encoding='utf-8') as f:
+            ridge = json.load(f)['alt']
+        both = np.maximum(np.maximum(p['t'], p['s']), ridge)
+        self.assertAlmostEqual(float(both.mean()), 12.5, delta=1.0)
+        self.assertAlmostEqual(float(both[135:225].mean()), 12.2, delta=1.0)
+        self.assertLess(nbytes / 1e6, 200)
+
+    def test_pisgah_summit_shows_its_tower_as_a_structure(self):
+        lat, lon = 35.4259, -82.7568
+        x, y, z, c, used, n, nbytes = bc.fetch_site(lat, lon)
+        p = bc.profiles_for(x, y, z, c, lat, lon)
+        self.assertGreater(max(p['s']), 45)       # the spike read 78.7 degrees at 19 m
+        self.assertTrue(bc.needs_s(p['s'], p['t'], None))
+
+
 if __name__ == '__main__':
     unittest.main()
