@@ -225,6 +225,10 @@ class TestDeck(unittest.TestCase):
         # the view coordinate still comes through beside it
         self.assertEqual((spots[0]['view_lat'], spots[0]['view_lon']), (35.3933, -82.7749))
 
+    def test_deck_spacing_after_a_comma_does_not_matter(self):
+        html = self.HTML.replace('deck: [35.393351, -82.774637, 18.5]', 'deck: [35.393351,-82.774637,  18.5]')
+        self.assertEqual(bh.parse_spots(html)[0]['deck'], [35.393351, -82.774637, 18.5])
+
     def test_deck_block_lists_only_spots_with_a_deck_profile(self):
         spots = [{'name': 'Fryingpan Mountain tower'}, {'name': 'Max Patch'}]
         results = {'Fryingpan Mountain tower': {'alt': [0.0] * 360, 'deck_m': 18.5, 'deck_alt': [1.0] * 360},

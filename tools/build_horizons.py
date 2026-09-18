@@ -281,7 +281,7 @@ VIEW_RE = re.compile(r"""\{ name: (['"])(.*?)\1,.*?view: \[(-?[\d.]+), *(-?[\d.]
 # 27 m off at both towers, 2026-09-18), so the terrain line is raycast a second
 # time from the tower into DECK_HORIZONS, and build_canopy.py reads the same
 # field for its own deck profiles.
-DECK_RE = re.compile(r"""\{ name: (['"])(.*?)\1,.*?deck: \[(-?[\d.]+), (-?[\d.]+), (-?[\d.]+)\]""")
+DECK_RE = re.compile(r"""\{ name: (['"])(.*?)\1,.*?deck: \[(-?[\d.]+),\s*(-?[\d.]+),\s*(-?[\d.]+)\]""")
 
 
 def parse_spots(html):

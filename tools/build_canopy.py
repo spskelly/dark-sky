@@ -232,8 +232,8 @@ def canopy_bands(dx, dy, z, eye_z, min_r):
     """the widest window under the tree line on each azimuth, as (f, b): the
     floor and the top of an open run of altitude, NaN where there is none.
     each BAND_CELL cell's returns are one slab from lowest to highest (a
-    leaf-off crown is sparse, and summer fills it), split where VGAP_M or
-    more separates them, except past THROUGH_M where the cell is one solid
+    leaf-off crown is sparse, and summer fills it), split where more than
+    VGAP_M separates them, except past THROUGH_M where the cell is one solid
     slab. every slab blocks its altitude span across the azimuths its cell
     covers; the window is the widest unblocked run below the top."""
     r = np.hypot(dx, dy)

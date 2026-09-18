@@ -20,6 +20,9 @@ what it checks, in the order that matters:
   5. every CANOPY entry belongs to a live spot or overlook, was computed from
      the page's current coordinate and deck, decodes to its cache file, and
      its pin ground agrees with 3DEP within 5 m.
+  6. a tower spot's deck ridge was raycast from the deck: [lat, lon, m] the
+     page has now, and the DECK_HORIZONS string is that raycast. the canopy
+     side of the deck is under 5.
 
 road placement is not here. tools/check-spots.mjs already measures every pin
 against the parkway centreline and against OpenStreetMap, and can snap the
@@ -76,7 +79,7 @@ def spots(html):
     out = {}
     for q, name, lat, lon, elev, rest in SPOT_RE.findall(block):
         view = re.search(r'view: \[(-?[\d.]+), (-?[\d.]+)\]', rest)
-        deck = re.search(r'deck: \[(-?[\d.]+), (-?[\d.]+), (-?[\d.]+)\]', rest)
+        deck = re.search(r'deck: \[(-?[\d.]+),\s*(-?[\d.]+),\s*(-?[\d.]+)\]', rest)
         out[name] = dict(lat=float(lat), lon=float(lon), elev_ft=float(elev),
                          view=(float(view.group(1)), float(view.group(2))) if view else None,
                          deck=[float(g) for g in deck.groups()] if deck else None)
@@ -84,10 +87,10 @@ def spots(html):
 
 
 
-def page_horizons(html):
-    if 'const HORIZONS = {' not in html:
+def page_horizons(html, const='HORIZONS'):
+    if 'const %s = {' % const not in html:
         return {}
-    block = html.split('const HORIZONS = {', 1)[1].split('\n};', 1)[0]
+    block = html.split('const %s = {' % const, 1)[1].split('\n};', 1)[0]
     return dict(re.findall(r'"([^"]+)": "([A-Za-z0-9+/]+)"', block))
 
 
@@ -131,7 +134,7 @@ def main():
     a = ap.parse_args()
 
     html = open(a.html, encoding='utf-8', newline='').read()
-    sp, drawn = spots(html), page_horizons(html)
+    sp, drawn, deck_drawn = spots(html), page_horizons(html), page_horizons(html, 'DECK_HORIZONS')
     cache, ov_cache = {}, {}
     for path in glob.glob(os.path.join(CACHE, '*.json')):
         d = json.load(open(path, encoding='utf-8'))
@@ -164,6 +167,17 @@ def main():
                 fail.append('%s: the string in the page is not this cached raycast' % name)
         else:
             fail.append('%s: no horizon in the page' % name)
+        # the deck ridge: raycast from the tower the page names now, and the
+        # DECK_HORIZONS string is that raycast
+        if d.get('deck_at') != s['deck']:
+            fail.append('%s: horizon deck %s but the page says %s - rerun tools/build_horizons.py'
+                        % (name, d.get('deck_at'), s['deck']))
+        enc = deck_drawn.get(name)
+        if bool(enc) != bool(s['deck']):
+            fail.append('%s: the page %s a deck ridge but the spot %s deck:'
+                        % (name, 'has' if enc else 'lacks', 'has' if s['deck'] else 'lacks'))
+        elif enc and (not d.get('deck_alt') or max(abs(x - y) for x, y in zip(decode(enc), d['deck_alt'])) > ALT_RANGE / 4095 * 1.5):
+            fail.append('%s: the deck string in the page is not this cached deck raycast' % name)
 
     say('\nelevation, model against listing')
     for name, s in sorted(sp.items()):
