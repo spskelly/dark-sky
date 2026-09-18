@@ -77,7 +77,7 @@ GROUND_CELL = 5.0    # metres. the ground grid unclassified returns are measured
 CLUSTER_CELL = 2.0   # metres. an unclassified return needs company in its cell
 CLUSTER_MIN = 3      # returns. fewer than this in a cell is a bird or a stray, not a tower
 S_MIN_DEG = 0.5      # degrees. structures get a layer only where they stand this far above ridge and trees
-CLOSED_DEG = 30.0    # degrees. a median tree altitude over this puts the pin in or against the canopy (2026-09-18: 40 of 150 sites). placeholder, from two probed sites
+CLOSED_DEG = 30.0    # degrees. a median sight floor over this puts the pin in or against the canopy (2026-09-18: 40 of 150 sites, counted on the median tree line before the sight floor). placeholder, from two probed sites
 SEARCH_R = 60.0      # metres. how far from the pin a standing spot may be proposed; 30 found nothing at three of four probed sites and devil's courthouse's best sat on its edge (2026-09-18). placeholder
 LEVEL_M = 10.0       # metres. the spot's ground within this of the pin's; 3 shut out devil's courthouse's spot 6 m up, and 10 still keeps a cliff lip from being swapped for its 20 m foot (2026-09-18). placeholder
 CAND_STEP = 2.0      # metres between candidate spots, the spacing the 2026-09-18 probe used. placeholder
@@ -349,17 +349,29 @@ def profiles_for(x, y, z, cls, lat, lon, deck_m=None):
 
 # ---------- where a person would stand ----------
 
-def closed_in(rec):
-    """the pin is in or against the canopy: its median tree altitude, read the
-    way the page reads it (capped at the top of the encoding), is over
+def sight_floor(t, f=None, b=None, ridge=None):
+    """per azimuth, the lowest altitude a star is seen at from here: the
+    window's floor where the trees leave WINDOW_MIN_DEG of sky above the
+    ridge, the tree line where they do not, and never under the ridge"""
+    top = bh.ALT_MIN + bh.ALT_RANGE
+    t = np.minimum(np.asarray(t, float), top)
+    r = np.asarray(ridge, float) if ridge is not None else np.full(360, bh.ALT_MIN)
+    if f is None or b is None:
+        return np.maximum(r, t)
+    lo = np.maximum(r, np.asarray(f, float))
+    return np.where(np.asarray(b, float) - lo >= WINDOW_MIN_DEG, lo, np.maximum(r, t))
+
+
+def closed_in(rec, ridge=None):
+    """the pin is in or against the canopy: the median sight floor is over
     CLOSED_DEG"""
     if rec.get('t') is None:
         return False
-    return float(np.median(np.minimum(rec['t'], bh.ALT_MIN + bh.ALT_RANGE))) > CLOSED_DEG
+    return float(np.median(sight_floor(rec['t'], rec.get('f'), rec.get('b'), ridge))) > CLOSED_DEG
 
 
 def open_pct(t):
-    """percent of the 360 azimuths whose tree line is under OPEN_DEG"""
+    """percent of the 360 azimuths whose line (tree line or sight floor) is under OPEN_DEG"""
     return float(np.mean(np.asarray(t, float) < OPEN_DEG) * 100.0)
 
 
@@ -392,7 +404,8 @@ def sky_candidates(dx, dy, z, cls, ground):
     cell refused every slope (a shrub on ground uphill reads as a tree) and
     took small gaps whose sky was still the trees a few metres off.
     cx, cy (cell centre, metres from the pin), dz (its ground minus the
-    pin's), median tree altitude capped as closed_in caps it, and open_pct."""
+    pin's), median tree altitude capped at the top of the encoding (a screen:
+    confirm_spot reads the sight floor), and open_pct."""
     g, top, c = sky_grid(dx, dy, z, cls)
     veg = np.isfinite(top)
     X, Y = np.meshgrid(c, c, indexing='ij')
@@ -427,24 +440,25 @@ def pick_spot(cx, cy, median):
     return int(np.argmin(np.where(ok, np.hypot(cx, cy), np.inf)))
 
 
-def confirm_spot(dx, dy, z, cls, ground, cx, cy, dz, med):
+def confirm_spot(dx, dy, z, cls, ground, cx, cy, dz, med, ridge=None):
     """the grid screens, the raw points decide. the grid's cell tops read
     about 10 degrees high on leaf-off crowns, so every candidate within
     CONFIRM_DEG of CLOSED_DEG on the grid, nearest first and at most
-    CONFIRM_MAX of them, is raycast again through the raw vegetation returns
-    within SKY_R of it, stopping at the first at or under CLOSED_DEG.
-    returns that candidate's index (or None) and the raw medians, inf where
-    none was run. a candidate under its own crown reads the cap on the grid,
-    so it never reaches this check."""
+    CONFIRM_MAX of them, is read again from the raw vegetation returns within
+    SKY_R of it, as the median sight floor against the pin's ridge (the tree
+    line, or the window under the crowns where there is one), stopping at the
+    first at or under CLOSED_DEG. returns that candidate's index (or None)
+    and the raw medians, inf where none was run. a candidate under its own
+    crown reads the cap on the grid, so it never reaches this check."""
     raw = np.full(len(med), np.inf)
     tm = np.isin(cls, TREES)
     tx, ty, tz = dx[tm], dy[tm], z[tm]
-    cap = bh.ALT_MIN + bh.ALT_RANGE
     order = [k for k in np.argsort(np.hypot(cx, cy), kind='stable') if med[k] <= CLOSED_DEG + CONFIRM_DEG]
     for k in order[:CONFIRM_MAX]:
         near = (np.abs(tx - cx[k]) < SKY_R) & (np.abs(ty - cy[k]) < SKY_R)
-        t = skyline(tx[near] - cx[k], ty[near] - cy[k], tz[near], ground + dz[k] + bh.EYE, MIN_R)
-        raw[k] = float(np.median(np.minimum(t, cap)))
+        ex, ey, eye = tx[near] - cx[k], ty[near] - cy[k], ground + dz[k] + bh.EYE
+        f, b = canopy_bands(ex, ey, tz[near], eye, MIN_R)   # nan where no window, which sight_floor reads as none
+        raw[k] = float(np.median(sight_floor(skyline(ex, ey, tz[near], eye, MIN_R), f, b, ridge)))
         if raw[k] <= CLOSED_DEG:
             break
     return pick_spot(cx, cy, raw), raw
@@ -483,19 +497,22 @@ def suggest(site, rec):
     x0, y0 = mercator(lat, lon)
     dx, dy = local_xy(x, y, x0, y0, lat)
     ground = ground_at_pin(dx, dy, z, c)
-    top = bh.ALT_MIN + bh.ALT_RANGE
+    # the pin's ridge stands in for the spot's too: the spot is at most SEARCH_R off
+    ridge = terrain_for(site).get('alt')
+    now = sight_floor(rec['t'], rec.get('f'), rec.get('b'), ridge)
     row = {'name': site['name'], 'key': site['key'], 'lat': lat, 'lon': lon,
-           'before': float(np.median(np.minimum(rec['t'], top))), 'open_before': open_pct(rec['t']), 'spot': None}
+           'before': float(np.median(now)), 'open_before': open_pct(now), 'spot': None}
     cx, cy, dz, med, _ = sky_candidates(dx, dy, z, c, ground) if ground is not None else [np.zeros(0)] * 5
-    k, raw = confirm_spot(dx, dy, z, c, ground, cx, cy, dz, med)
+    k, raw = confirm_spot(dx, dy, z, c, ground, cx, cy, dz, med, ridge)
     if k is not None:
         spot = (float(cx[k]), float(cy[k]))
         slat, slon = from_local(spot[0], spot[1], lat, lon)
         p = profiles_for(x, y, z, c, slat, slon)
+        then = sight_floor(p['t'], p['f'], p['b'], ridge) if p else None
         row.update(spot=(round(slat, 6), round(slon, 6)), moved_m=math.hypot(*spot),
                    bearing=math.degrees(math.atan2(spot[0], spot[1])) % 360, dz_m=float(dz[k]),
-                   after=float(np.median(np.minimum(p['t'], top))) if p else None,
-                   open_after=open_pct(p['t']) if p else None,
+                   after=float(np.median(then)) if p else None,
+                   open_after=open_pct(then) if p else None,
                    under_trees_m=walk_under_trees(dx, dy, z, c, ground, spot))
     elif len(med):
         # the lowest candidate, nearest first on a tie (every one under a
@@ -512,7 +529,8 @@ def suggest(site, rec):
 def suggest_params():
     """the tunables a saved row was computed with; a retuned constant is a
     reason to recompute, the same as a moved pin"""
-    return [CLOSED_DEG, SEARCH_R, LEVEL_M, CAND_STEP, SKY_R, OPEN_DEG, CLEAR_H, CONFIRM_DEG, CONFIRM_MAX]
+    return [CLOSED_DEG, SEARCH_R, LEVEL_M, CAND_STEP, SKY_R, OPEN_DEG, CLEAR_H, CONFIRM_DEG, CONFIRM_MAX,
+            VGAP_M, THROUGH_M, WINDOW_MIN_DEG]
 
 
 def suggest_path(site):
@@ -555,11 +573,12 @@ def review_md(rows):
     with satellite links for the pin and the proposed spot"""
     sat = 'https://www.google.com/maps/@%.6f,%.6f,40m/data=!3m1!1e3'
     out = ['# Canopy standing spots for review', '',
-           'Sites whose median tree altitude from the pin is over %g degrees. For each: approve the '
+           'Sites whose median sight floor from the pin is over %g degrees. For each: approve the '
            'proposed spot, reject it (the site really is under trees), or give a better coordinate, and '
            'say whether the walk to it needs a line on the card. "now" and "open now" are from the '
-           'pin, "then" and "open then" from the spot: the median tree altitude, and the percent of '
-           'azimuths whose tree line is under %g degrees. "up/down" is the spot\'s ground against the '
+           'pin, "then" and "open then" from the spot: the median lowest altitude a star is seen at, '
+           'looking under the canopy where it leaves a window, and the percent of azimuths where that '
+           'is under %g degrees. "up/down" is the spot\'s ground against the '
            'pin\'s; "walk under trees" is metres of the straight line from the pin that pass under a '
            'crown.' % (CLOSED_DEG, OPEN_DEG), '',
            '| site | key | now | open now | proposed | moved | bearing | up/down | then | open then | walk under trees | pin | spot |',
@@ -854,7 +873,7 @@ def main():
 
     if args.suggest_views:
         closed = [(s, load_cached(s)) for s in todo]
-        closed = [(s, r) for s, r in closed if r and closed_in(r)]
+        closed = [(s, r) for s, r in closed if r and closed_in(r, terrain_for(s).get('alt'))]
         os.makedirs(os.path.join(CACHE, 'suggest'), exist_ok=True)
         rows = []
         failed = []

@@ -712,8 +712,11 @@ class TestStandingSpot(unittest.TestCase):
         self.assertLessEqual(raw[pin], bc.CLOSED_DEG)
 
     def test_suggest_rows_carry_open_sky_and_the_best_candidate(self):
-        site = {'name': 'S', 'key': 'S', 'view_lat': LAT, 'view_lon': LON}
+        site = {'name': 'S', 'key': 'S', 'ov_id': None, 'view_lat': LAT, 'view_lon': LON}
         rec = {'t': [10.0] * 90 + [40.0] * 270}
+        no_ridge = mock.patch.object(bc, 'terrain_for', return_value={})
+        no_ridge.start()
+        self.addCleanup(no_ridge.stop)
         with self.small(15.0), mock.patch.object(bc, 'fetch_site', side_effect=self.fetch_of(FOREST)):
             row = bc.suggest(site, rec)
         self.assertIsNone(row['spot'])
@@ -722,10 +725,11 @@ class TestStandingSpot(unittest.TestCase):
         self.assertLessEqual(row['best_m'], 15.0)
         self.assertEqual(row['best_dz_m'], 0.0)
         self.assertEqual(row['best_by'], 'grid')   # every candidate under a crown, so none was raycast raw
-        # a dense 7 m stand 6 to 9 m out: the grid lets the candidates through
-        # to the raw check, which reads about 40 and confirms none
-        stand = lattice(lambda a, b: 0.0) + [(a * .25, b * .25, 7.0, 5) for a in range(-40, 41) for b in range(-40, 41)
-                                            if 6 <= math.hypot(a * .25, b * .25) <= 9]
+        # a dense 7 m stand 6 to 9 m out, solid from the ground up so there is
+        # no window under it: the grid lets the candidates through to the raw
+        # check, which reads about 40 and confirms none
+        stand = lattice(lambda a, b: 0.0) + [(a * .25, b * .25, h, 5) for a in range(-40, 41) for b in range(-40, 41)
+                                            for h in np.arange(0.0, 7.01, 1.0) if 6 <= math.hypot(a * .25, b * .25) <= 9]
         with mock.patch.multiple(bc, SEARCH_R=2.0, SKY_R=15.0), \
              mock.patch.object(bc, 'fetch_site', side_effect=self.fetch_of(stand)):
             row = bc.suggest(site, rec)
@@ -950,6 +954,67 @@ class TestCanopyBands(unittest.TestCase):
         hi_bot = 7.0 * math.tan(math.radians(22)) + self.EYE
         f, b = self.bands(crown(6.0, 0.0, 0.0, lo_top, lo_top / 40), crown(7.0, 0.0, hi_bot, hi_bot + 8, 0.1))
         self.assertTrue(np.isnan(f[90]), (f[90], b[90]))
+
+
+class TestSightFloor(unittest.TestCase):
+
+    def test_a_window_above_the_ridge_is_the_floor(self):
+        s = bc.sight_floor([70.0] * 360, [-10.0] * 360, [45.0] * 360, [3.0] * 360)
+        self.assertEqual(float(s[0]), 3.0)
+
+    def test_without_a_window_the_tree_line_is_the_floor(self):
+        s = bc.sight_floor([70.0] * 360, [70.0] * 360, [70.0] * 360, [3.0] * 360)
+        self.assertEqual(float(s[0]), 70.0)
+
+    def test_a_window_shorter_than_window_min_deg_over_the_ridge_does_not_count(self):
+        s = bc.sight_floor([70.0] * 360, [-10.0] * 360, [5.0] * 360, [3.0] * 360)
+        self.assertEqual(float(s[0]), 70.0)
+
+    def test_the_tree_line_is_capped_at_the_top_of_the_encoding(self):
+        s = bc.sight_floor([85.0] * 360, [85.0] * 360, [85.0] * 360)
+        self.assertEqual(float(s[0]), bh.ALT_MIN + bh.ALT_RANGE)
+
+    def test_closed_in_uses_the_sight_floor(self):
+        open_under = {'t': [70.0] * 360, 'f': [-10.0] * 360, 'b': [45.0] * 360}
+        self.assertFalse(bc.closed_in(open_under, [3.0] * 360))
+        walled = {'t': [70.0] * 360, 'f': [70.0] * 360, 'b': [70.0] * 360}
+        self.assertTrue(bc.closed_in(walled, [3.0] * 360))
+
+    def test_profiles_for_reads_no_window_as_f_and_b_equal_to_t(self):
+        """the sight floor leans on this: a stem-to-crown column east has no
+        window (canopy_bands gives nan) and an empty west has no trees, and on
+        both the record's f and b are its t"""
+        col = [(10.0, 0.0, h, 5) for h in np.arange(0.0, 15.01, 0.5)]
+        p = bc.profiles_for(*pts(*ring(2), *col), LAT, LON)
+        self.assertGreater(p['t'][90], 50)
+        for a in (90, 270):
+            self.assertEqual(p['f'][a], p['t'][a])
+            self.assertEqual(p['b'][a], p['t'][a])
+
+    # crowns from 8 to 18 m, 6 to 9 m around the pin, open trunk space under
+    # them: the tree line is about 70, the sky under the crowns is open
+    UNDER = lattice(lambda a, b: 0.0) + [(a * .5, b * .5, h, 5) for a in range(-20, 21) for b in range(-20, 21)
+                                        for h in np.arange(8.0, 18.01, 1.0) if 6 <= math.hypot(a * .5, b * .5) <= 9]
+
+    def test_confirm_spot_looks_under_the_crowns(self):
+        dx, dy, z, c = arrays(self.UNDER)
+        one = np.zeros(1)
+        k, raw = bc.confirm_spot(dx, dy, z, c, 0.0, one, one, one, np.array([40.0]), [3.0] * 360)
+        self.assertEqual(k, 0)
+        self.assertEqual(raw[0], 3.0)    # the window's floor is the ridge
+
+    def test_suggest_reads_before_and_open_before_as_the_sight_floor(self):
+        site = {'name': 'S', 'key': 'S', 'ov_id': None, 'view_lat': LAT, 'view_lon': LON}
+        rec = {'t': [70.0] * 360, 'f': [-10.0] * 360, 'b': [45.0] * 360}
+        fetch = TestStandingSpot.fetch_of(self, FOREST)
+        with mock.patch.multiple(bc, SEARCH_R=15.0, SKY_R=5.0), mock.patch.object(bc, 'fetch_site', side_effect=fetch), \
+             mock.patch.object(bc, 'terrain_for', return_value={'alt': [3.0] * 360}):
+            row = bc.suggest(site, rec)
+        self.assertEqual(row['before'], 3.0)
+        self.assertEqual(row['open_before'], 100.0)
+
+    def test_suggest_params_carry_the_window_tunables(self):
+        self.assertEqual(bc.suggest_params()[-3:], [bc.VGAP_M, bc.THROUGH_M, bc.WINDOW_MIN_DEG])
 
 
 class TestCanopyEntryWindows(unittest.TestCase):
