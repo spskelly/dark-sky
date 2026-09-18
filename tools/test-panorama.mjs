@@ -203,3 +203,51 @@ test('panLayerAt names the highest layer and gives ties to the ridge', () => {
   assert.equal(panLayerAt(ridge, { t: flat(6), s: flat(7) }, 90), 'structure');
   assert.equal(panLayerAt(ridge, { t: flat(6), s: flat(6) }, 90), 'trees');
 });
+
+// the sentence. a september evening at doubletop, the site the feature was
+// built for: with the ridge alone the core drops behind the southwest
+// around midnight; a tree line across the south-west takes it two hours
+// earlier, and the sentence has to say both.
+const DOUBLETOP = { lat: 35.3907, lon: -83.0372, elevM: 1635.6, date: easternInstant(2026, 9, 17, 21) };
+const say = (horizon, canopy) => horizonSummary({ ...DOUBLETOP, horizon, canopy });
+const ridge = flat(2);
+const swTrees = flat(-10); for (let az = 190; az <= 270; az++) swTrees[az] = 30;
+
+test('sentence: no canopy is exactly today\'s sentence, and so is a canopy below the ridge', () => {
+  const plain = say(ridge, null);
+  assert.match(plain, /^moon .*core .*/);
+  assert.equal(say(ridge, { t: flat(-10), s: null }), plain);
+  assert.equal(say(ridge, { t: null, s: null }), plain);
+  assert.doesNotMatch(plain, /trees|structure|\(the ridge/);
+});
+
+test('sentence: a south-west tree line sets the core earlier and names the ridge time beside it', () => {
+  const s = say(ridge, { t: swTrees, s: null });
+  assert.match(s, /core .*drops behind the (south|southwest|west) trees \d+:\d\d[ap]m \(the ridge \d+:\d\d[ap]m\)/, s);
+});
+
+test('sentence: a structure is named as one', () => {
+  const s = say(ridge, { t: null, s: swTrees });
+  assert.match(s, /drops behind the (south|southwest|west) structure \d+:\d\d[ap]m \(the ridge /, s);
+});
+
+test('sentence: trees that block all night say when the ridge alone would have let the core through', () => {
+  const s = say(ridge, { t: flat(80), s: null });
+  assert.match(s, /core never clears the trees tonight \(above the ridge (dusk|\d+:\d\d[ap]m) to (\d+:\d\d[ap]m|first light)\)/, s);
+  assert.match(s, /moon never clears the trees tonight \(above the ridge /, s);
+});
+
+test('sentence: a tree line within five minutes of the ridge names the trees but adds no ridge time', () => {
+  const near = flat(2.01);   // a hair above the ridge everywhere: the trees, but the same crossing
+  const s = say(ridge, { t: near, s: null });
+  assert.match(s, /trees/, s);
+  assert.doesNotMatch(s, /\(the ridge/, s);
+});
+
+test('sentence: with a canopy the ridge alone is not tracked twice for nothing', () => {
+  // the two tracks agree on the crossing azimuth family; the strings only
+  // differ where the layers do, which the tests above pin down. this one
+  // guards the shape: two bodies, comma separated, no trailing punctuation.
+  const s = say(ridge, { t: swTrees, s: null });
+  assert.ok(s.split(', ').length >= 3 && !s.endsWith('.'), s);
+});

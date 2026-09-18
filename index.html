@@ -3771,24 +3771,25 @@ function crossingTime(at, horizon, t0, t1) {
 // ponytail: the first rise and the first set only. a body that drops into a
 // notch and comes back out gets one line rather than four, which is the right
 // trade for a caption.
-function trackBody(opts, at) {
+function trackBody(opts, at, profile) {
+  const prof = profile || opts.horizon;
   const night = nightWindow(opts);
   const out = { rise: null, set: null, upAtDusk: false, everUp: false, stillUp: false };
   let prevT = night.dusk;
   let prevP = at(prevT);
-  let prevUp = clearsRidge(opts.horizon, prevP);
+  let prevUp = clearsRidge(prof, prevP);
   out.upAtDusk = prevUp;
   out.everUp = prevUp;
   out.duskAz = prevP.az;
   for (let t = night.dusk.getTime() + 600000; t <= night.dawn.getTime(); t += 600000) {
     const now = new Date(t);
     const p = at(now);
-    const up = clearsRidge(opts.horizon, p);
+    const up = clearsRidge(prof, p);
     if (up && !prevUp && !out.rise) {
-      out.rise = { at: crossingTime(at, opts.horizon, prevT, now), az: p.az };
+      out.rise = { at: crossingTime(at, prof, prevT, now), az: p.az };
       out.everUp = true;
     } else if (!up && prevUp && !out.set && out.everUp) {
-      out.set = { at: crossingTime(at, opts.horizon, prevT, now), az: prevP.az };
+      out.set = { at: crossingTime(at, prof, prevT, now), az: prevP.az };
     }
     prevT = now; prevP = p; prevUp = up;
   }
@@ -3796,41 +3797,94 @@ function trackBody(opts, at) {
   return out;
 }
 
+const PAN_SAME_MS = 5 * 60000;
+
+// "the southwest ridge", "the southwest trees", "the southwest structure".
+// withRidge says whether a plain ridge gets its noun at all: today's "back
+// behind the southwest 10:21pm" has none, and keeps none.
+function panLayerPhrase(dir, layer, withRidge) {
+  if (layer === 'ridge') return dir + (withRidge ? ' ridge' : '');
+  return dir + ' ' + (layer === 'trees' ? 'trees' : 'structure');
+}
+
+// which layer a body crossed, and what the ridge alone would have said if
+// that differs by more than five minutes: an empty note otherwise, so the
+// no-canopy sentence stays exactly what it was. r is the ridge-only track,
+// null when there is no canopy to disagree with.
+function panCrossing(ridge, canopy, ev, r, kind) {
+  const layer = panLayerAt(ridge, canopy, ev.az);
+  if (!r || layer === 'ridge') return { layer, note: '' };
+  let own;   // the ridge's own version of this event
+  if (kind === 'set') own = r.set ? { at: r.set.at } : { text: 'clear of the ridge until first light' };
+  else own = r.upAtDusk ? { text: 'above the ridge at dusk' } : r.rise ? { at: r.rise.at } : null;
+  if (!own) return { layer, note: '' };
+  if (own.at && Math.abs(own.at - ev.at) <= PAN_SAME_MS) return { layer, note: '' };
+  return { layer, note: ' (' + (own.at ? 'the ridge ' + panTime(own.at) : own.text) + ')' };
+}
+
+// the body stayed behind everything all night. if the ridge alone would
+// have let it through, say when, so the reader knows the trees are the
+// whole story here.
+function panNever(body, r, ridge, canopy) {
+  const plain = body === 'moon' ? 'moon stays behind the ridge all night' : 'core never clears the ridge tonight';
+  if (!r || !r.everUp) return plain;
+  const from = r.upAtDusk ? 'dusk' : panTime(r.rise.at);
+  const to = r.set ? panTime(r.set.at) : 'first light';
+  const layer = panLayerAt(ridge, canopy, r.upAtDusk ? r.duskAz : r.rise.az);
+  return body + ' never clears the ' + (layer === 'structure' ? 'structure' : 'trees')
+    + ' tonight (above the ridge ' + from + ' to ' + to + ')';
+}
+
+function panMoonParts(a, r, ridge, canopy) {
+  const parts = [];
+  if (a.upAtDusk) {
+    parts.push('moon already up in the ' + panDir(a.duskAz) + ' at dusk');
+    if (a.set) {
+      const c = panCrossing(ridge, canopy, a.set, r, 'set');
+      parts.push('sets behind the ' + panLayerPhrase(panDir(a.set.az), c.layer, true) + ' ' + panTime(a.set.at) + c.note);
+    } else parts.push('still up at first light');
+  } else if (a.rise) {
+    const c = panCrossing(ridge, canopy, a.rise, r, 'rise');
+    parts.push('moon clears the ' + panLayerPhrase(panDir(a.rise.az), c.layer, true) + ' ' + panTime(a.rise.at) + c.note);
+    if (a.set) {
+      const d = panCrossing(ridge, canopy, a.set, r, 'set');
+      parts.push('back behind the ' + panLayerPhrase(panDir(a.set.az), d.layer, false) + ' ' + panTime(a.set.at) + d.note);
+    } else parts.push('still up at first light');
+  } else parts.push(panNever('moon', r, ridge, canopy));
+  return parts;
+}
+
+function panCoreParts(a, r, ridge, canopy) {
+  const parts = [];
+  const drop = () => {
+    const c = panCrossing(ridge, canopy, a.set, r, 'set');
+    return 'drops behind the ' + panLayerPhrase(panDir(a.set.az), c.layer, false) + ' ' + panTime(a.set.at) + c.note;
+  };
+  if (a.upAtDusk) {
+    parts.push('core already clear of the ' + panLayerPhrase(panDir(a.duskAz), panLayerAt(ridge, canopy, a.duskAz), true) + ' at dusk');
+    if (a.set) parts.push(drop());
+  } else if (a.rise) {
+    const c = panCrossing(ridge, canopy, a.rise, r, 'rise');
+    parts.push('core clears the ' + panLayerPhrase(panDir(a.rise.az), c.layer, true) + ' ' + panTime(a.rise.at) + c.note);
+    if (a.set) parts.push(drop());
+  } else parts.push(panNever('core', r, ridge, canopy));
+  return parts;
+}
+
+// both bodies against everything in the way, and against the ridge alone
+// where a canopy could make the two disagree
 function horizonSummary(opts) {
   if (!opts.horizon || typeof Sky === 'undefined') return '';
-  const parts = [];
-
-  const moon = trackBody(opts, function (t) {
-    return moonAltAz(skyContext({ date: t, lat: opts.lat, lon: opts.lon, elevM: opts.elevM }));
-  });
-  if (moon.upAtDusk) {
-    parts.push('moon already up in the ' + panDir(moon.duskAz) + ' at dusk');
-    parts.push(moon.set ? 'sets behind the ' + panDir(moon.set.az) + ' ridge ' + panTime(moon.set.at)
-      : 'still up at first light');
-  } else if (moon.rise) {
-    parts.push('moon clears the ' + panDir(moon.rise.az) + ' ridge ' + panTime(moon.rise.at));
-    parts.push(moon.set ? 'back behind the ' + panDir(moon.set.az) + ' ' + panTime(moon.set.at)
-      : 'still up at first light');
-  } else {
-    parts.push('moon stays behind the ridge all night');
-  }
-
-  const core = trackBody(opts, function (t) {
-    const sky = skyContext({ date: t, lat: opts.lat, lon: opts.lon, elevM: opts.elevM });
-    const p = galAltAz(0, 0, sky);
-    return { alt: Sky.refract(p.alt), az: p.az };
-  });
-  if (core.upAtDusk) {
-    parts.push('core already clear of the ' + panDir(core.duskAz) + ' ridge at dusk');
-    if (core.set) parts.push('drops behind the ' + panDir(core.set.az) + ' ' + panTime(core.set.at));
-  } else if (core.rise) {
-    parts.push('core clears the ' + panDir(core.rise.az) + ' ridge ' + panTime(core.rise.at));
-    if (core.set) parts.push('drops behind the ' + panDir(core.set.az) + ' ' + panTime(core.set.at));
-  } else {
-    parts.push('core never clears the ridge tonight');
-  }
-
-  return parts.join(', ');
+  const ridge = opts.horizon;
+  const canopy = opts.canopy || null;
+  const all = panBlocking(ridge, canopy);
+  const ctxAt = t => skyContext({ date: t, lat: opts.lat, lon: opts.lon, elevM: opts.elevM });
+  const moonAt = t => moonAltAz(ctxAt(t));
+  const coreAt = t => { const p = galAltAz(0, 0, ctxAt(t)); return { alt: Sky.refract(p.alt), az: p.az }; };
+  const both = at => [trackBody(opts, at, all), all === ridge ? null : trackBody(opts, at, ridge)];
+  const [ma, mr] = both(moonAt);
+  const [ca, cr] = both(coreAt);
+  return panMoonParts(ma, mr, ridge, canopy).concat(panCoreParts(ca, cr, ridge, canopy)).join(', ');
 }
 // --- sky:end ---
 
