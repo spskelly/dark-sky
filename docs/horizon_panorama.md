@@ -124,9 +124,9 @@ Nothing downstream of `index.html` needs regenerating. `build-og.mjs` and
 | `NODATA` | -999999.0 | 3DEP's own. Masked explicitly before pooling so an all-void block stays void rather than becoming a sea level plain |
 | Grid box | 34-37 N, -85 to -80 | Nearly the smallest whole-degree box holding every 100 km ray. Rays from Doughton Park run about 0.3 degrees off the north edge; no n38 tile exists at these longitudes and nothing that far north is on a parkway skyline |
 | `MAG_LIMIT` | 4.5 | Plus the 121 fainter stars the constellation figures need to close, admitted for that reason alone and drawn at their true magnitude |
-| Thumbnail scale | -3 to +24 degrees | 27 degrees over a 60 px strip is 0.44 px per degree, which reads as a dark smear otherwise. Fixed and shared across every spot, so thumbnails stay comparable; it no longer has an "open" state to be compared against, since the turnable sky moved into the sky viewer dialog (below), which is centred on wherever the reader is looking rather than windowed onto a fixed strip |
+| Thumbnail scale | -3 to +24 degrees | 27 degrees over a 60 px strip is 0.44 px per degree, which reads as a dark smear otherwise. Fixed and shared across every spot, so thumbnails stay comparable; it no longer has an "open" state to be compared against, since the turnable sky moved into the sky viewer (below, the "what will i see?" tab), which is centred on wherever the reader is looking rather than windowed onto a fixed strip |
 | Sky viewer default field of view | 100 degrees, range 40 to 140 | Added 2026-09-17 with the dialog, replacing `PAN_FOV` (120 degrees, a fixed cylindrical window). Stereographic rather than cylindrical, so the field of view is a true angular measure, calibrated in `panViewScale` against a pure-altitude offset rather than an azimuth one so it means the same thing at any altitude, including near the zenith. Not tuned against a reader; a round number in the middle of the range, chosen once and left alone |
-| Sky viewer altitude clamp | -10 to +90 degrees | Added 2026-09-17. Replaces the old fixed altitude window (-5..+40); the dialog looks anywhere the reader drags it to, clamped so it cannot look further below the horizon than the old open view did, or past straight up |
+| Sky viewer altitude clamp | -10 to +90 degrees | Added 2026-09-17. Replaces the old fixed altitude window (-5..+40); the viewer looks anywhere the reader drags it to, clamped so it cannot look further below the horizon than the old open view did, or past straight up |
 | Sky viewer cull | 100 degrees from the view centre | Added 2026-09-17. `panProject` returns `null` past this, which is what lets every draw routine skip a segment instead of drawing it stretched across the canvas; comfortably inside the true singularity at 180 degrees (directly behind the viewer), where the projection's `1 + cos(angle)` denominator reaches zero |
 | Sky viewer default view | south, 25 degrees up (az 180, alt 25) | Added 2026-09-17, replacing the open view's old default heading, south at dead centre with no altitude of its own. Azimuth kept at 180 for the same reason it was chosen the first time: a visitor who already knew the old drawing sees the same heading on their first look at the new one. 25 degrees up is new, chosen for a first look with the ridge low in the frame and most of the canvas given to sky |
 | `NEAR_ROAD_M` (`build-overlooks.mjs`) | 400 m | A viewpoint farther than this from the parkway is treated as a trail summit, not a pull-off. Not a count from the dry run: it is baked into the Overpass query itself (`around.bp:400`), so all 164 raw results are inside it by construction |
@@ -237,7 +237,7 @@ fails, not a glance at the page.
 
 **The turned heading is one value for the whole page, not one per spot.**
 `darksky.skyView` (`{ az, alt, fov }`) is shared across every card, overlook
-and, in phase 2, picked point that opens the sky viewer, regardless of which
+and picked point that opens the sky viewer, regardless of which
 one the reader dragged. Turning to face a landmark on one spot's sky and
 opening another spot's next keeps facing the same way, on purpose: it is
 "which way am I used to looking," the same kind of preference as the basemap
@@ -247,6 +247,29 @@ scrubber's remembered clock time is. Superseded 2026-09-17: this used to be
 looks around in altitude and zoom too, so the same key now carries all
 three, and `darksky.panoAz` is read once, as a fallback for `az` alone, and
 never written again.
+
+**The sky viewer is a tab, and a restore on load does not switch to it.**
+Changed 2026-09-17, from a `<dialog>` opened over the map, at Shawn's request
+(the popup and the card thumbnail were both too cramped to turn a sky in).
+Everything that loads a place (a card thumbnail, an overlook's button, the
+chooser, a picked point) calls `openSkyViewer(o, { show })`. With `show`
+(the default) it clicks `#tab-sky` and scrolls the viewer into view; the two
+restores on load (`spotState.pano` for a spot, `darksky.pano` in `initMap`
+for `ov:` and `pt:` keys) pass `show: false`, so the tab the reader left on
+still wins. `paintSkyViewer` returns before drawing while the canvas has no
+width, and `showSkyTab` paints on every show of the panel, not just the
+first, because the loaded place can change while the panel is hidden. A cold
+visit to `#sky` loads the spot the list leads with (`visibleSpots()`, not
+the DOM: the cards only render once the map tab has shown).
+
+**A picked point gets a flat horizon, on purpose, until the terrain tiles
+exist.** `openSkyViewerForPoint` passes `new Float64Array(360)`, not `null`,
+so the summary sentence and the level line still work; the caveat under the
+canvas says the ridge is really higher, so rises shown are early and sets
+late. Phase 2 (the browser raycast over the tiles, see "Terrain tiles for
+picked points") replaces the zeros with a real horizon and drops the caveat.
+The key `pt:<lat>,<lon>` carries the point itself, so there is no second
+storage key to keep in step.
 
 **The viewer's 0 degree level line is drawn after the ridge, on purpose.** Added
 2026-09-17 at Shawn's request. It marks true level over the ground, so the gap

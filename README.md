@@ -10,19 +10,27 @@ will be clear, and where to drive.
 
 ## What it does
 
-- **Three tabs, one question each.** *When is it dark?* (calendar and the
-  window list), *will it be clear?* (tonight's hourly forecast) and *where do
-  i go?* (the map and the spot list) are tabs rather than eight screens of
-  scroll. The URL still points where it always did: `#when`, `#tonight`,
-  `#where`, or any id inside a panel such as `#check-before-you-go`, opens the
-  tab that owns it. Cards on a wide screen, a sticky strip of short labels on a
-  phone, and the tab you were last on is remembered between visits.
-- **Home, above the tabs.** Where home is answers none of the three questions
-  on its own, so it sits in its own strip above them: the town picker, pick
-  on map, use my location and exact coordinates, plus a one-line read on
-  tonight's sky there with a link to the full hour-by-hour breakdown on
-  *will it be clear?*. Picking on the map switches to *where do i go?* first,
-  since the map only has a real size once that panel has been shown.
+- **Four tabs.** *When is it dark?* (calendar and the window list), *where
+  do i go?* (the map and the spot list), *what will i see?* (the sky viewer)
+  and *field notes* (reading the mountains, how the numbers are made, and the
+  credits) are tabs rather than eight screens of scroll. The URL still points
+  where it always did: `#when`, `#where`, `#sky`, `#notes`, or any id inside
+  a panel such as `#check-before-you-go`, opens the tab that owns it. Cards on
+  a wide screen, a sticky strip of short labels on a phone, and the tab you
+  were last on is remembered between visits.
+- **Home, above the tabs.** Where home is answers none of the questions on
+  its own, so it sits in its own strip above them: the town picker, pick on
+  map, use my location and exact coordinates, plus a one-line read on
+  tonight's sky there and, folded under it, the hour-by-hour row. Picking on
+  the map switches to *where do i go?* first, since the map only has a real
+  size once that panel has been shown.
+- **The sky from anywhere.** *What will i see?* draws the ridge, the moon and
+  the Milky Way from a place on a chosen night: drag to look around, scroll
+  or pinch to zoom, slide through the dark hours. The place comes from the
+  chooser (the forty spots and every parkway overlook), from a spot card's
+  thumbnail, from an overlook popup's button, or from a point picked on the
+  map. A picked point has no terrain model yet, so its horizon is drawn flat
+  at 0 degrees and the caveat under the canvas says so.
 - **Moon phase calendar.** True phase times from the Meeus algorithm
   (*Astronomical Algorithms*, ch. 49), converted to your local time zone, so
   dates match published almanacs to the day. Phases are drawn at 9pm local,
@@ -58,9 +66,9 @@ will be clear, and where to drive.
 ## What's remembered
 
 The page comes back as you left it: the tab (above), the home point, the map
-view, the spot filter and sort, the overlook layer, whichever sky viewer
-dialog was open with its scrubber where you left it, and the view it was
-turned to. One pair, `recall(key, fallback)`
+view, the spot filter and sort, the overlook layer, the place loaded in the
+sky viewer with its scrubber where you left it, and the view it was turned
+to. One pair, `recall(key, fallback)`
 and `remember(key, value)`, owns the `localStorage` read/write and the
 `try/catch` a private window can throw. A remembered value that no longer
 means anything (a removed filter name, a map view outside the page's box)
@@ -78,9 +86,9 @@ falls back to the default instead of being trusted.
 | `darksky.mapView` | `{lat, lon, zoom}`; ignored if outside 34-37.5 N, -85.5 to -79.5 E, or zoom outside 6-17 | framed on the visible spots |
 | `darksky.overlooks` | `'1'` or `'0'` | off |
 | `darksky.active` | a curated spot's name, or `ov:<osm id>`; dropped if it no longer exists. An overlook is only restored if its layer is on, and is cleared again when its popup is closed, so a popup dismissed on one visit does not reopen on the next | none |
-| `darksky.pano` | which sky viewer dialog is open: a curated spot's name, or `ov:<osm id>` for an overlook opened from its popup's "open sky view" button. Reopened on return, independent of the overlook layer or `darksky.active` | none |
+| `darksky.pano` | the place loaded in the sky viewer: a curated spot's name, `ov:<osm id>` for an overlook, or `pt:<lat>,<lon>` (four decimals) for a point picked on the map. Loaded again on return without switching tabs, independent of the overlook layer or `darksky.active`; a picked point also gets its map marker back | none |
 | `darksky.panoWhen` | `{key: "HH:MM", ...}`, one entry per spot or overlook ever opened; the clock is the Eastern one now (was the reader's own device clock), matched to the nearest of that evening's dark-hour slices on return | nearest 9pm |
-| `darksky.skyView` | `{az, alt, fov}`, the sky viewer's heading, altitude and zoom; shared by every spot, overlook and, in phase 2, picked point, not stored per key, since it is which way the reader is used to looking rather than something about a particular place | south, 25 up, 100 degree field |
+| `darksky.skyView` | `{az, alt, fov}`, the sky viewer's heading, altitude and zoom; shared by every spot, overlook and picked point, not stored per key, since it is which way the reader is used to looking rather than something about a particular place | south, 25 up, 100 degree field |
 | `darksky.panoAz` | legacy: a heading in degrees, 0-360. Read once by `loadSkyView`, as a fallback for `darksky.skyView`'s own `az` when that key is not set yet, and never written again | (read-once fallback only) |
 
 `darksky.home`, `darksky.lightpollution` and `darksky.tab` predate this table
