@@ -236,3 +236,97 @@ def profiles_for(x, y, z, cls, lat, lon, deck_m=None):
     out.update(pair(ground + bh.EYE, MIN_R))
     out['deck'] = pair(ground + deck_m + bh.EYE, DECK_MIN_R) if deck_m else None
     return out
+
+
+# ---------- sites, cache, the block ----------
+
+def site_list(html):
+    """every spot and overlook in the page, in an order that keeps geographic
+    neighbours together: the octree nodes a parkway overlook needs are mostly
+    the ones the next pull-off needs, and the in-memory node cache only helps
+    when those two run back to back."""
+    spots = [{'name': s['name'], 'key': s['name'], 'ov_id': None,
+              'view_lat': s['view_lat'], 'view_lon': s['view_lon'], 'deck': s['deck']}
+             for s in bh.parse_spots(html)]
+    ovs = [{'name': o['name'], 'key': 'ov:' + o['id'], 'ov_id': o['id'],
+            'view_lat': o['lat'], 'view_lon': o['lon'], 'deck': None}
+           for o in bh.parse_overlooks(html)]
+    # 0.05 degree bands of latitude, west to east within a band
+    return sorted(spots + ovs, key=lambda s: (round(s['view_lat'] / 0.05), s['view_lon']))
+
+
+def page_key(site):
+    """the key the page already uses: the osm id for an overlook, the name
+    for a spot. an overlook name can repeat; an id cannot."""
+    return site['ov_id'] or site['name']
+
+
+def cache_path(site):
+    return os.path.join(CACHE, bh.cache_name({'name': site['name'], 'ov_id': site['ov_id']}))
+
+
+def cache_ok(rec, site):
+    """a finished record is taken only when everything it was computed from
+    still holds: the coordinate, the radius, the deck height and the list of
+    datasets it was allowed to look in. a new county in DATASETS recomputes
+    every site, which is the point of recording the list."""
+    return (abs(rec.get('lat', 1e9) - site['view_lat']) < 1e-9
+            and abs(rec.get('lon', 1e9) - site['view_lon']) < 1e-9
+            and rec.get('radius_m') == RADIUS
+            and rec.get('deck_m') == site.get('deck')
+            and rec.get('candidates') == DATASETS)
+
+
+def load_cached(site):
+    """the finished record, or None. only the final name counts: a .tmp left
+    by a killed run is a file that was never renamed, and so never finished."""
+    path = cache_path(site)
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding='utf-8') as f:
+        rec = json.load(f)
+    return rec if cache_ok(rec, site) else None
+
+
+def terrain_for(site):
+    """what build_horizons cached for the same place, so the block can decide
+    whether structures clear the ridge. {} when the terrain has not been built."""
+    path = os.path.join(bh.CACHE, bh.cache_name({'name': site['name'], 'ov_id': site['ov_id']}))
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding='utf-8') as f:
+        return json.load(f)
+
+
+def needs_s(s_alt, t_alt, terrain_alt):
+    """structures earn a layer only where they stand S_MIN_DEG above both the
+    ridge and the trees somewhere: a shed under the canopy is not a layer."""
+    base = np.maximum(np.asarray(t_alt, float),
+                      np.asarray(terrain_alt, float) if terrain_alt is not None else bh.ALT_MIN)
+    return bool(np.any(np.asarray(s_alt, float) - base >= S_MIN_DEG))
+
+
+def canopy_entry(rec, terrain):
+    e = {'t': bh.encode(rec['t'])}
+    if needs_s(rec['s'], rec['t'], terrain.get('alt')):
+        e['s'] = bh.encode(rec['s'])
+    if rec.get('deck'):
+        d = {'m': rec['deck_m'], 't': bh.encode(rec['deck']['t'])}
+        if needs_s(rec['deck']['s'], rec['deck']['t'], terrain.get('deck_alt')):
+            d['s'] = bh.encode(rec['deck']['s'])
+        e['deck'] = d
+    return e
+
+
+def canopy_js(sites, results, terrain):
+    """the generated block. one json object per line so check_alignment.py
+    can read an entry without evaluating the page."""
+    lines = []
+    for s in sites:
+        rec = results.get(s['key'])
+        if not rec or rec.get('t') is None:
+            continue
+        e = canopy_entry(rec, terrain.get(s['key'], {}))
+        lines.append('  %s: %s,' % (json.dumps(page_key(s)), json.dumps(e, separators=(',', ':'))))
+    return (START + "\nconst CANOPY_VINTAGE = '%s';\nconst CANOPY = {\n" % VINTAGE
+            + '\n'.join(lines) + '\n};\n' + END)

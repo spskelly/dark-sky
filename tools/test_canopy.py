@@ -198,5 +198,114 @@ class TestDeck(unittest.TestCase):
         self.assertIsNone(bc.profiles_for(x, y, z, c, LAT, LON)['deck'])
 
 
+class TestCache(unittest.TestCase):
+
+    SITE = {'name': 'Doubletop', 'key': 'ov:n1', 'ov_id': 'n1', 'view_lat': LAT, 'view_lon': LON, 'deck': None}
+
+    def rec(self, **over):
+        r = {'lat': LAT, 'lon': LON, 'radius_m': bc.RADIUS, 'deck_m': None, 'candidates': list(bc.DATASETS)}
+        r.update(over)
+        return r
+
+    def test_a_matching_record_is_taken(self):
+        self.assertTrue(bc.cache_ok(self.rec(), self.SITE))
+
+    def test_moved_pin_deck_radius_or_dataset_list_recomputes(self):
+        self.assertFalse(bc.cache_ok(self.rec(lat=LAT + 1e-6), self.SITE))
+        self.assertFalse(bc.cache_ok(self.rec(deck_m=18.0), self.SITE))
+        self.assertFalse(bc.cache_ok(self.rec(), dict(self.SITE, deck=18.0)))
+        self.assertFalse(bc.cache_ok(self.rec(radius_m=150.0), self.SITE))
+        self.assertFalse(bc.cache_ok(self.rec(candidates=bc.DATASETS[:-1]), self.SITE))
+
+    def test_cache_files_are_keyed_like_the_horizon_cache(self):
+        self.assertTrue(bc.cache_path(self.SITE).endswith(os.path.join('.canopy-cache', 'ov-n1.json')))
+        self.assertTrue(bc.cache_path({'name': "Devil's Courthouse", 'ov_id': None}).endswith('devil-s-courthouse.json'))
+        self.assertEqual(bc.page_key(self.SITE), 'n1')
+        self.assertEqual(bc.page_key({'name': 'Max Patch', 'ov_id': None}), 'Max Patch')
+
+    def test_a_leftover_temp_file_is_never_taken_as_finished(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            saved = bc.CACHE
+            bc.CACHE = d
+            try:
+                with open(os.path.join(d, 'ov-n1.json.tmp'), 'w') as f:
+                    f.write('{"half": "written"')
+                self.assertIsNone(bc.load_cached(self.SITE))
+                with open(os.path.join(d, 'ov-n1.json'), 'w') as f:
+                    json.dump(self.rec(t=[0.0] * 360), f)
+                self.assertEqual(bc.load_cached(self.SITE)['t'], [0.0] * 360)
+            finally:
+                bc.CACHE = saved
+
+
+class TestBlock(unittest.TestCase):
+
+    def test_structures_need_half_a_degree_over_ridge_and_trees(self):
+        t = [5.0] * 360
+        ridge = [8.0] * 360
+        s = [8.4] * 360
+        self.assertFalse(bc.needs_s(s, t, ridge))
+        s[10] = 8.5
+        self.assertTrue(bc.needs_s(s, t, ridge))
+        # with no terrain cache only the trees count
+        self.assertTrue(bc.needs_s([5.5] * 360, t, None))
+
+    def test_entry_omits_s_and_carries_the_deck(self):
+        rec = {'t': [1.0] * 360, 's': [0.0] * 360, 'deck_m': 18.0,
+               'deck': {'t': [-2.0] * 360, 's': [3.0] * 360}}
+        e = bc.canopy_entry(rec, {'alt': [0.5] * 360, 'deck_alt': [-1.0] * 360})
+        self.assertEqual(sorted(e), ['deck', 't'])
+        self.assertEqual(len(e['t']), 720)
+        self.assertEqual(e['deck']['m'], 18.0)
+        self.assertEqual(sorted(e['deck']), ['m', 's', 't'])      # 3 over -1 and -2: kept
+
+    def test_block_is_one_json_object_per_line_keyed_by_name_or_osm_id(self):
+        sites = [{'name': 'Max Patch', 'key': 'Max Patch', 'ov_id': None},
+                 {'name': 'View Doubletop', 'key': 'ov:n1', 'ov_id': 'n1'},
+                 {'name': 'Doughton Park', 'key': 'Doughton Park', 'ov_id': None}]
+        results = {'Max Patch': {'t': [1.0] * 360, 's': [0.0] * 360, 'deck_m': None, 'deck': None},
+                   'ov:n1': {'t': [2.0] * 360, 's': [9.0] * 360, 'deck_m': None, 'deck': None},
+                   'Doughton Park': {'t': None, 'reason': 'no lidar'}}
+        js = bc.canopy_js(sites, results, {'Max Patch': {'alt': [0.0] * 360}})
+        lines = js.split('\n')
+        self.assertEqual(lines[0], bc.START)
+        self.assertEqual(lines[1], "const CANOPY_VINTAGE = '2017, leaf-off';")
+        self.assertEqual(lines[2], 'const CANOPY = {')
+        self.assertTrue(lines[3].startswith('  "Max Patch": {"t":"'))
+        self.assertTrue(lines[4].startswith('  "n1": {"t":"'))
+        self.assertIn('"s":"', lines[4])
+        self.assertNotIn('Doughton', js)
+        self.assertEqual(lines[-2:], ['};', bc.END])
+        for line in lines[3:5]:
+            json.loads(line.split(': ', 1)[1].rstrip(','))     # each entry parses on its own
+
+
+class TestSites(unittest.TestCase):
+
+    HTML = ('const SPOTS = [\n'
+            "  { name: 'Fryingpan Mountain tower', lat: 35.3951, lon: -82.7686, elev: 5340, view: [35.3933, -82.7749], deck: 18.5, kind: 'view' },\n"
+            "  { name: 'Max Patch', lat: 35.7963, lon: -82.9620, elev: 4629, kind: 'view' },\n"
+            '];\n'
+            'const OVERLOOKS = [\n'
+            '  {"id":"n1","name":"View Doubletop Mountain (MP 435.3)","lat":35.3907,"lon":-83.0372,"mp":435.3},\n'
+            '];\n')
+
+    def test_spots_and_overlooks_with_keys_and_decks(self):
+        sites = bc.site_list(self.HTML)
+        by = {s['key']: s for s in sites}
+        self.assertEqual(sorted(by), ['Fryingpan Mountain tower', 'Max Patch', 'ov:n1'])
+        self.assertEqual(by['Fryingpan Mountain tower']['deck'], 18.5)
+        self.assertEqual((by['Fryingpan Mountain tower']['view_lat'], by['Fryingpan Mountain tower']['view_lon']), (35.3933, -82.7749))
+        self.assertIsNone(by['Max Patch']['deck'])
+        self.assertEqual(by['ov:n1']['ov_id'], 'n1')
+        self.assertIsNone(by['Max Patch']['ov_id'])
+
+    def test_order_keeps_neighbours_together(self):
+        names = [s['name'] for s in bc.site_list(self.HTML)]
+        # the two southern sites (35.39 N) come out adjacent, max patch (35.80 N) apart from them
+        self.assertEqual(names.index('Max Patch'), 2)
+
+
 if __name__ == '__main__':
     unittest.main()
