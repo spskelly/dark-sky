@@ -20,13 +20,30 @@ python tools/build_horizons.py --only cowee
 # discard the cache and recompute everything
 python tools/build_horizons.py --force
 
+# trees and structures from the 2017 lidar, 200 m around each site. resumes;
+# about 15 GB and about 65 to 80 minutes from cold at 32 workers, seconds
+# when everything is cached.
+python tools/build_canopy.py --dry-run
+python tools/build_canopy.py
+python tools/build_canopy.py --only doubletop   # one site, index.html left alone
+
 # refetch the star catalogue and rebuild tools/stars.js. runs about never.
 node tools/build-starcat.mjs
 
 # tests
 node --test tools/test-astro.mjs
+node --test tools/test-panorama.mjs tools/test-inline-parity.mjs
 python -m unittest discover -s tools -p "test_*.py"
+CANOPY_LIVE=1 python -m unittest discover -s tools -p "test_canopy.py" -k Live   # network, two sites, about 130 MB
 ```
+
+`build_canopy.py` keeps going past a site whose download fails: it is logged,
+no cache file is written for it, and the same command retries it on the next
+run. It does not rewrite `index.html` unless every requested site succeeded,
+so a partial run never drops an entry. Each progress line carries the run's
+own real network total and throughput (`net ... MB at ... MB/s`), which is
+the run's own wire traffic, not the site's box size, since neighbouring
+sites reuse each other's octree nodes.
 
 Refreshing the parkway overlooks is three commands, in this order:
 
@@ -63,7 +80,7 @@ standing beside it.
 
 ## Caches
 
-Three, all gitignored, all resumable: an interrupted run picks up rather than
+Four, all gitignored, all resumable: an interrupted run picks up rather than
 redoing finished work.
 
 - `tools/.horizon-cache/`: one JSON file per spot or overlook, the name slug
@@ -89,6 +106,13 @@ redoing finished work.
   404; and a tile that stops 404ing leaves its `.missing` sentinel behind,
   unread but harmless.
 
+- `tools/.canopy-cache/`: one JSON per spot or overlook, named like the
+  horizon cache. Each records the coordinate, radius, deck height and the
+  dataset list it was computed from, plus the datasets that had points, the
+  node and byte counts, the per-class point counts, the eye height and the
+  raw profiles, so a change to any input recomputes that site and a 2025
+  re-run is `--force`. About 8 kB a site.
+
 `python` here means an interpreter with `numpy` and `rasterio` installed, as
 listed in `tools/requirements.txt`. Screenshot work is a separate interpreter
 again: it needs `playwright`, which the elevation work does not.
@@ -107,6 +131,10 @@ again: it needs `playwright`, which the elevation work does not.
 | OSM refreshed, or a curated spot added or moved near the parkway | all three, in order: `build-overlooks.mjs`, `build_horizons.py`, `build-skyglow.mjs --fix` | The 300 m dedupe in `build-overlooks.mjs` only sees the spot list as it stood when it last ran; a spot that moves or is added afterward can leave a duplicate overlook pin standing beside it |
 | `SKY` or `OVERLOOK_SKY` might be stale | `node tools/build-skyglow.mjs --check` | Neither block records what it was generated from, so nothing else notices. Exit 1 names the entries that differ. Run it after any spot move and after every overlook rebuild |
 | An overlook's OSM id changes | nothing required | Orphans the old `tools/.horizon-cache/ov-<old-id>.json`, harmlessly; the new id gets its own cache file on the next `build_horizons.py` run |
+| A spot's `lat, lon` or its `view:` | `build_canopy.py` as well as `build_horizons.py` | The canopy cache records the coordinate; a moved site recomputes |
+| A spot's `deck:` | `build_horizons.py`, then `build_canopy.py` | Both cache the deck height. `build_horizons.py` recomputes that spot (about 2 s); `build_canopy.py` refetches its box (about 8 s). Run the terrain first: the block's structures rule compares against the deck terrain line |
+| `RADIUS`, `MAX_DEPTH`, `TREE_MAX_M`, the class routing or `COUNTIES` in `build_canopy.py` | `build_canopy.py` | `RADIUS` and `COUNTIES` are recorded per site and recompute by themselves; a routing or depth change, `TREE_MAX_M` included, needs `--force`, since the cache does not record which routing rule computed it. `TREE_MAX_M` shipped 2026-09-18 after the live check found the Pisgah tower routed to vegetation, not partly unclassified as first assumed; that day's full run was `--force` for this reason |
+| The 2025 point clouds arrive | change `VINTAGE` and the dataset source in `build_canopy.py`, then `--force` | The vintage is one page constant, so every site is rebuilt together |
 
 Nothing downstream of `index.html` needs regenerating. `build-og.mjs` and
 `build-moon-preview.mjs` do not read any of this.
@@ -137,11 +165,13 @@ Nothing downstream of `index.html` needs regenerating. `build-og.mjs` and
 
 ## Stated limits
 
-**Bare earth, no canopy.** Every horizon here is a best case. A wooded pull-off
-shows less sky than the drawing does. A 1 m lidar canopy model was considered and
-rejected: it covers 14 of the relevant counties, mixes 2017 and 2025 epochs,
-and predates Helene's blowdown. The page says this in a footnote rather than
-pretending to correct for it.
+**Bare earth ridge, 2017 canopy.** Superseded 2026-09-17: the ridge is still
+raycast from 3DEP bare earth from 150 m out, but trees and structures within
+200 m now come from the 2017 NC Phase 5 lidar as their own layers (see
+Canopy below). What remains true: the canopy is leaf-off and nine growing
+seasons old, so every tree line is a floor; the 8 Doughton Park area sites
+have no 2017 lidar and say "trees not modelled"; the cut bank inside 150 m is
+still in neither line.
 
 **UTC is treated as TD.** Delta-T is about 70 s, which is 0.04 arcmin of lunar
 motion. The existing chapter 49 phase code makes the same choice, so this
@@ -208,6 +238,61 @@ overlooks would need more 3DEP tiles fetched and the far field grid rebuilt
 to cover them; not attempted here. The Overpass box runs to 36.7 N and so
 crosses the state line, which let one Virginia overlook through until
 `NC_NORTH` was added on 2026-09-17; the filter is in `pick`, not in the query.
+
+## Canopy
+
+Trees and structures around each site, from the public USGS EPT mirror of
+the state's 2017 lidar (`NC_Phase5_<County>_2017`, EPSG:3857), raycast
+straight from the classified points by `tools/build_canopy.py` into two
+profiles per site in the same encoding as the ridge. Design record:
+`docs/canopy_horizon_spike.md` has the measurements that argued for it.
+
+### Constants, their values and the evidence
+
+| Constant | Value | Evidence |
+|---|---|---|
+| `RADIUS` | 200 m | Canopy past 150 m added 0.7 degrees at Cove Field, 0.1 at Doubletop, none at the two Buncombe sites (spike, 2026-09-17). Recorded per cache file |
+| `MIN_R` | 2 m | Closer than this is the observer and the car. A return at 1 m subtends whatever the pin happens to sit under |
+| `DECK_MIN_R` | 6 m | From the deck, the tower's own cab and roof read as a wall without it. Placeholder: the Fryingpan cab is about 4 m across; retune against the lidar tower footprint |
+| `MAX_DEPTH` | 10 | About 24 points per square metre on Haywood; the depth every spike used. Deeper costs bytes and adds nothing a degree-wide profile can see |
+| Trees | classes 3, 4, 5 | The acquisition's low, medium and high vegetation. Doubletop: 4, 8 and 69 per cent of returns |
+| Structures | class 6, plus class 1 at `TALL_M` 2 m or more above the `GROUND_CELL` 5 m ground mean with `CLUSTER_MIN` 3 returns in a `CLUSTER_CELL` 2 m cell | Company in a cell is what separates a tower from a bird. Placeholder, not tuned beyond the two sites, and the assumption behind it turned out wrong: the 2017 classifier did not leave the Pisgah tower partly unclassified, it put the whole thing in the vegetation classes, so this route has not yet caught a real tower. See `TREE_MAX_M` below for what did |
+| `TREE_MAX_M` | 50 m | Vegetation returns (classes 3, 4, 5) this far or more above their `GROUND_CELL` ground mean route to structures too, no cluster required, since a 50 m return is never a bird. The 2017 Buncombe classifier put the Mount Pisgah broadcast tower entirely in the vegetation classes: it read 78.2 degrees in the trees layer with structures empty (live check, 2026-09-17). Shawn chose 50 m 2026-09-18; after it, Pisgah reads structures 74 to 78 degrees over trees about 69 on azimuths 175 to 194, and 2,947 of 6.78 million vegetation returns moved. Untested: no other site has been checked for 50 m of vegetation that is really a tree |
+| Dropped | classes 7, 18 | Noise |
+| Counted, not drawn | everything else (class 13: 2.8 per cent at Doubletop, meaning unknown) | Written into each cache file's `classes` so a future reading of the spec can decide |
+| Eye | median class 2 within 3 m of the pin, else 10 m, plus 1.7 m | The median so one return down a drain does not lower the eye. Reported against the 3DEP post when the two differ by over 5 m |
+| `S_MIN_DEG` | 0.5 degrees | Structures get a layer only where they stand this far above both ridge and trees somewhere; a shed under the canopy is not a layer |
+| Same-time threshold | 5 minutes | The sentence gives one time when the ridge and the canopy crossings agree within this |
+| Trees opacity | 0.7 | Shawn, 2026-09-17: the moon and the core stay visible behind the tree band while scrubbing the night |
+| Deck heights | see Task 11's entry below once measured | The platform floor above ground at the view coordinate, from the lidar tower top less an allowance for the cab |
+| `WORKERS` | 32 | Concurrent node downloads. Latency-bound at 0.2 to 0.3 MB/s per connection from us-west-2, so throughput scales with connection count rather than bytes: 8 workers measured about 1.6 MB/s, 32 about 4.5, 64 about 10 (probe below). 32 is the middle value tried, not a peak |
+
+### Measured runs
+
+`WORKERS` probe, desktop, 2026-09-17 23:34-23:40: downloads are latency-bound
+at 0.2 to 0.3 MB/s per connection from us-west-2. 8 workers gave about 1.6
+MB/s (44 to 80 s a site), 32 about 4.5, 64 about 10. Sites ran 83 to 111 MB
+and 143 to 240 nodes, with only 10 to 25 per cent of a site's nodes reused
+from its neighbour. The plan's original estimate (63 MB a dataset, 8 s a
+site, 20 to 30 minutes total) was wrong on every count; this probe is the
+result that argued for 32 workers over the plan's 8.
+
+The full run (started 2026-09-18 00:28, `--force`, 32 workers) held a steady
+4.0 MB/s, about 25 s and 100 to 130 MB a site, which is where "about 15 GB
+and about 65 to 80 minutes from cold" in the commands above comes from.
+
+- Full run 2026-09-18: <filled in after the run: sites covered, GB, minutes, MB/s, ground warnings>
+
+### What the page shows
+
+Three rings, back to front: structures (slate, dashed crest, opaque), trees
+(dark green, 70 per cent), ridge (unchanged, last). Each ring is the highest
+of itself and what is below it. The legend lists only the layers present.
+The sentence names the layer at the crossing and gives the ridge time in
+brackets when it differs by more than five minutes; with no canopy entry
+the sentence is exactly what it was. Tower spots with `deck:` get a
+two-button toggle, from the ground and from the deck, that swaps all three
+profiles; it resets on every new place and is not remembered.
 
 ## Behaviours worth keeping
 

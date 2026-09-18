@@ -26,7 +26,10 @@ will be clear, and where to drive.
   size once that panel has been shown.
 - **The sky from anywhere.** *What will i see?* draws the ridge, the moon and
   the Milky Way from a place on a chosen night: drag to look around, scroll
-  or pinch to zoom, slide through the dark hours. The place comes from the
+  or pinch to zoom, slide through the dark hours. The ridge is bare
+  earth; the trees and any tower or building within 200 m are drawn as their
+  own layers from 2017 lidar and named in the sentence when they are what the
+  moon or the core actually sets behind. The place comes from the
   chooser (the forty spots and every parkway overlook), from a spot card's
   thumbnail, from an overlook popup's button, or from a point picked on the
   map. A picked point has no terrain model yet, so its horizon is drawn flat

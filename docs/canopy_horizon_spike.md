@@ -1,5 +1,9 @@
 # Does canopy change a skyline? A spike, 2026-09-17
 
+Built: the canopy layers shipped from this spike are made by
+`tools/build_canopy.py` and documented in
+[horizon_panorama.md](horizon_panorama.md#canopy).
+
 Measured on 2026-09-17 against the two viewpoints that already have a finished
 CHM on disk. Throwaway code, kept findings. Nothing in the page changed.
 
