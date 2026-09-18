@@ -943,6 +943,20 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   await ctx.close();
 }
 
+// --- a tower deck, and a corrupt one costs only the deck ---
+{
+  const page = await open(browser, DESKTOP, '#where');
+  const got = await page.evaluate(() => {
+    const good = placeProfiles('Fryingpan Mountain tower');
+    CANOPY['Fryingpan Mountain tower'].deck.t = 42;
+    const bad = placeProfiles('Fryingpan Mountain tower');
+    return { m: good && good.deck && good.deck.m, canopy: !!(bad && bad.canopy), entry: !!(bad && bad.entry), deck: bad && bad.deck };
+  });
+  ok(got.m === 18.5, `fryingpan has its deck, 18.5 m up (${got.m})`);
+  ok(got.canopy && got.entry && got.deck === null, `a corrupt deck drops the deck toggle, not the canopy (${JSON.stringify(got)})`);
+  await page.close();
+}
+
 if (SHOTS) {
   for (const [name, viewport] of [['desktop', DESKTOP], ['phone', PHONE]]) {
     for (const tab of ['when', 'where', 'sky', 'notes']) {
