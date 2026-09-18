@@ -235,7 +235,7 @@ class TestCache(unittest.TestCase):
     SITE = {'name': 'Doubletop', 'key': 'ov:n1', 'ov_id': 'n1', 'view_lat': LAT, 'view_lon': LON, 'deck': None}
 
     def rec(self, **over):
-        r = {'lat': LAT, 'lon': LON, 'radius_m': bc.RADIUS, 'deck_m': None, 'candidates': list(bc.DATASETS)}
+        r = {'lat': LAT, 'lon': LON, 'radius_m': bc.RADIUS, 'deck_m': None, 'candidates': list(bc.DATASETS), 'model': bc.MODEL}
         r.update(over)
         return r
 
@@ -248,6 +248,11 @@ class TestCache(unittest.TestCase):
         self.assertFalse(bc.cache_ok(self.rec(), dict(self.SITE, deck=18.0)))
         self.assertFalse(bc.cache_ok(self.rec(radius_m=150.0), self.SITE))
         self.assertFalse(bc.cache_ok(self.rec(candidates=bc.DATASETS[:-1]), self.SITE))
+
+    def test_a_record_from_before_the_band_model_recomputes(self):
+        r = self.rec()
+        del r['model']
+        self.assertFalse(bc.cache_ok(r, self.SITE))
 
     def test_cache_files_are_keyed_like_the_horizon_cache(self):
         self.assertTrue(bc.cache_path(self.SITE).endswith(os.path.join('.canopy-cache', 'ov-n1.json')))
@@ -505,6 +510,33 @@ class TestLive(unittest.TestCase):
         p = bc.profiles_for(x, y, z, c, lat, lon)
         self.assertGreater(max(p['s']), 45)       # the spike read 78.7 degrees at 19 m
         self.assertTrue(bc.needs_s(p['s'], p['t'], None))
+
+    def test_north_cove_sees_the_valley_under_the_oaks(self):
+        """shawn's photo, 2026-09-18: oak crowns overhead, the valley open
+        under them. the window has to be there, well above the ridge. read
+        from the full store on H:, with the network shut, so nothing is
+        fetched and nothing is written there"""
+        site = next(s for s in bc.site_list(bh.read_html()) if s['key'] == 'ov:n1731068878')
+        with mock.patch.object(bc, 'STORE', os.environ.get('CANOPY_STORE', 'H:/dark-sky/ept')), \
+             mock.patch.object(bc, 'http_get', side_effect=AssertionError('the store should hold every node')):
+            x, y, z, c, *_ = bc.fetch_site(site['view_lat'], site['view_lon'])
+        p = bc.profiles_for(x, y, z, c, site['view_lat'], site['view_lon'])
+        ridge = np.asarray(bc.terrain_for(site)['alt'], float)
+        open_deg = np.asarray(p['b']) - np.maximum(np.asarray(p['f']), ridge)
+        wide = np.flatnonzero(open_deg >= 10)
+        print('\nnorth cove: %d azimuths with a 10 degree window: %s' % (wide.size, runs_of(wide)))
+        self.assertGreaterEqual(int(wide.size), 40, 'azimuths with a 10 degree window: %d' % int(wide.size))
+
+
+def runs_of(az):
+    """consecutive azimuths as 'a-b' ranges, for a live test to print"""
+    out = []
+    for a in az:
+        if out and a == out[-1][1] + 1:
+            out[-1][1] = a
+        else:
+            out.append([a, a])
+    return ', '.join('%d-%d' % (a, b) for a, b in out)
 
 
 class TestStore(unittest.TestCase):
@@ -868,6 +900,74 @@ class TestSuggestCheckpoint(unittest.TestCase):
                 self.assertIn('net 0 MB', summary[0])   # fake_suggest never calls http_get
             finally:
                 bc.CACHE = saved
+
+
+
+def crown(x0, y0, z_lo, z_hi, step=0.5):
+    """one leaf-off crown filling a 1 m cell from z_lo to z_hi"""
+    zs = np.arange(z_lo, z_hi + 1e-9, step)
+    return np.full(zs.size, x0), np.full(zs.size, y0), zs
+
+
+class TestCanopyBands(unittest.TestCase):
+    EYE = 1.7
+
+    def bands(self, *parts):
+        dx = np.concatenate([p[0] for p in parts]); dy = np.concatenate([p[1] for p in parts]); z = np.concatenate([p[2] for p in parts])
+        return bc.canopy_bands(dx, dy, z, self.EYE, bc.MIN_R)
+
+    def test_a_crown_overhead_leaves_the_sky_under_it_open(self):
+        """a crown 6 m east from 8 to 18 m: on azimuth 90 the window runs from
+        the bottom of the range up to the crown base, about 46 degrees"""
+        f, b = self.bands(crown(6.0, 0.0, 8.0, 18.0))
+        self.assertAlmostEqual(f[90], bh.ALT_MIN, delta=0.6)
+        self.assertAlmostEqual(b[90], math.degrees(math.atan2(8.0 - self.EYE, 6.0)), delta=1.5)
+        self.assertTrue(np.isnan(f[270]))          # nothing west, no tree line, no window to speak of
+
+    def test_understory_under_the_crown_does_not_close_the_window(self):
+        f, b = self.bands(crown(6.0, 0.0, 8.0, 18.0), crown(6.0, 0.0, 0.2, 1.0, 0.2))
+        self.assertAlmostEqual(f[90], math.degrees(math.atan2(1.0 - self.EYE, 6.0)), delta=1.5)
+        self.assertGreater(b[90] - f[90], 40)
+
+    def test_a_solid_stem_to_crown_column_has_no_window(self):
+        f, b = self.bands(crown(10.0, 0.0, 0.0, 15.0))
+        self.assertTrue(np.isnan(f[90]) and np.isnan(b[90]))
+
+    def test_nobody_sees_through_a_forest_past_through_m(self):
+        """the same understory-then-crown cell that leaves a window at 6 m
+        leaves none at 60 m: past THROUGH_M a cell is solid from its lowest
+        return up"""
+        f, b = self.bands(crown(60.0, 0.0, 12.0, 22.0), crown(60.0, 0.0, 0.2, 1.0, 0.2))
+        # the only open run left is under the forest's lowest return, below the
+        # horizon, which canopy_entry's ridge test never ships
+        self.assertTrue(np.isnan(b[90]) or b[90] <= 0.0, b[90])
+
+    def test_a_window_narrower_than_window_min_deg_is_not_one(self):
+        """a slab 6 m out topping at 20 degrees and a crown 7 m out starting at
+        22: two cells, so they never merge, and the 2 degree gap between them
+        is under WINDOW_MIN_DEG"""
+        lo_top = 6.0 * math.tan(math.radians(20)) + self.EYE
+        hi_bot = 7.0 * math.tan(math.radians(22)) + self.EYE
+        f, b = self.bands(crown(6.0, 0.0, 0.0, lo_top, lo_top / 40), crown(7.0, 0.0, hi_bot, hi_bot + 8, 0.1))
+        self.assertTrue(np.isnan(f[90]), (f[90], b[90]))
+
+
+class TestCanopyEntryWindows(unittest.TestCase):
+
+    def rec(self, t, f, b):
+        return {'t': [t] * 360, 's': [bh.ALT_MIN] * 360, 'f': [f] * 360, 'b': [b] * 360, 'deck': None}
+
+    def test_a_window_above_the_ridge_ships_f_and_b(self):
+        e = bc.canopy_entry(self.rec(60.0, -5.0, 40.0), {'alt': [2.0] * 360})
+        self.assertIn('f', e); self.assertIn('b', e)
+
+    def test_a_window_under_the_ridge_ships_nothing_extra(self):
+        e = bc.canopy_entry(self.rec(60.0, -5.0, 4.0), {'alt': [3.0] * 360})
+        self.assertNotIn('f', e); self.assertNotIn('b', e)
+
+    def test_no_window_anywhere_ships_the_entry_as_before(self):
+        e = bc.canopy_entry(self.rec(60.0, 60.0, 60.0), {'alt': [2.0] * 360})
+        self.assertEqual(sorted(e), ['t'])
 
 
 if __name__ == '__main__':

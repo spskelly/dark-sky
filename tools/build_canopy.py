@@ -47,6 +47,7 @@ START = '// --- canopy:start (generated, do not edit by hand) ---'
 END = '// --- canopy:end ---'
 
 VINTAGE = '2017, leaf-off'
+MODEL = 2  # 2: trees as bands (f, b beside t). a record from an older model is recomputed
 
 EPT = 'https://s3-us-west-2.amazonaws.com/usgs-lidar-public/'
 # the western counties. a dataset is used for a site when its octree has
@@ -61,6 +62,11 @@ DATASETS = ['NC_Phase5_%s_2017' % c for c in COUNTIES]
 
 RADIUS = 200.0       # metres. canopy past 150 m added 0.7 degrees at cove field, 0.1 at doubletop
 MIN_R = 2.0          # metres. closer than this is the observer and the car
+BAND_CELL = 1.0      # metres. vegetation is gridded at this size before each cell's vertical extent is taken. placeholder
+VGAP_M = 2.0         # metres. a vertical gap this big inside one cell splits it into slabs, so understory under a crown leaves the window between them. placeholder
+THROUGH_M = 30.0     # metres from the eye. past this a cell is solid from its lowest return up: trunks add up, and nobody sees through a wood under its crowns. placeholder
+BAND_STEP = 0.5      # degrees of altitude per occupancy bin
+WINDOW_MIN_DEG = 3.0 # degrees. an open run under the tree line shorter than this is not a window. placeholder
 DECK_MIN_R = 6.0     # metres. from the deck, the tower's own cab and roof are not a wall
 MAX_DEPTH = 10       # octree depth. about 24 points per square metre on haywood, what every spike used
 PIN_R = 3.0          # metres. ground returns this close to the pin set the eye height
@@ -203,6 +209,70 @@ def skyline(dx, dy, z, eye_z, min_r, cell=0.0):
     return out
 
 
+def canopy_bands(dx, dy, z, eye_z, min_r):
+    """the widest window under the tree line on each azimuth, as (f, b): the
+    floor and the top of an open run of altitude, NaN where there is none.
+    each BAND_CELL cell's returns are one slab from lowest to highest (a
+    leaf-off crown is sparse, and summer fills it), split where VGAP_M or
+    more separates them, except past THROUGH_M where the cell is one solid
+    slab. every slab blocks its altitude span across the azimuths its cell
+    covers; the window is the widest unblocked run below the top."""
+    r = np.hypot(dx, dy)
+    keep = r >= min_r
+    dx, dy, z = dx[keep], dy[keep], z[keep]
+    f = np.full(360, np.nan)
+    b = np.full(360, np.nan)
+    if not z.size:
+        return f, b
+    cell = cell_index(dx, dy, BAND_CELL)
+    order = np.lexsort((z, cell))
+    cell, zz, xs, ys = cell[order], z[order], dx[order], dy[order]
+    far = np.hypot(xs, ys) > THROUGH_M
+    new = np.ones(zz.size, bool)
+    new[1:] = (cell[1:] != cell[:-1]) | ((zz[1:] - zz[:-1] > VGAP_M) & ~far[1:])
+    start = np.flatnonzero(new)
+    n = np.diff(np.append(start, zz.size))
+    zlo = zz[start]
+    zhi = np.maximum.reduceat(zz, start)
+    cx = np.add.reduceat(xs, start) / n
+    cy = np.add.reduceat(ys, start) / n
+    rr = np.maximum(np.hypot(cx, cy), min_r)
+    drop = rr ** 2 / (2.0 * bh.R_EFF)
+    a_lo = np.degrees(np.arctan2(zlo - eye_z - drop, rr))
+    a_hi = np.degrees(np.arctan2(zhi - eye_z - drop, rr))
+    deg = np.degrees(np.arctan2(cx, cy))
+    half = np.degrees(np.arctan2(BAND_CELL / 2.0, rr))
+    az0 = np.floor(deg - half).astype(np.int64)
+    az1 = np.floor(deg + half).astype(np.int64)
+    nb = int(math.ceil((90.0 - bh.ALT_MIN) / BAND_STEP))
+    blo = np.clip(((a_lo - bh.ALT_MIN) / BAND_STEP).astype(np.int64), 0, nb - 1)
+    bhi = np.clip(((a_hi - bh.ALT_MIN) / BAND_STEP).astype(np.int64), 0, nb - 1)
+    diff = np.zeros((360, nb + 1), np.int32)
+    for s in range(int((az1 - az0).max()) + 1):
+        m = az0 + s <= az1
+        a = (az0[m] + s) % 360
+        np.add.at(diff, (a, blo[m]), 1)
+        np.add.at(diff, (a, bhi[m] + 1), -1)
+    occ = np.cumsum(diff, axis=1)[:, :nb] > 0
+    need = int(round(WINDOW_MIN_DEG / BAND_STEP))
+    for a in range(360):
+        filled = np.flatnonzero(occ[a])
+        if not filled.size:
+            continue
+        # open runs below the highest filled bin; the widest one is the window
+        col = ~occ[a, :filled[-1]]
+        if not col.any():
+            continue
+        edges = np.diff(np.concatenate(([0], col.astype(np.int8), [0])))
+        runs = np.column_stack((np.flatnonzero(edges == 1), np.flatnonzero(edges == -1)))
+        w = runs[:, 1] - runs[:, 0]
+        k = int(np.argmax(w))
+        if w[k] >= need:
+            f[a] = bh.ALT_MIN + runs[k, 0] * BAND_STEP
+            b[a] = bh.ALT_MIN + runs[k, 1] * BAND_STEP
+    return f, b
+
+
 def cell_index(dx, dy, size):
     """one integer per point naming its size x size cell, dense from zero"""
     i = np.floor(dx / size).astype(np.int64)
@@ -268,6 +338,11 @@ def profiles_for(x, y, z, cls, lat, lon, deck_m=None):
 
     out = {'ground_m': ground, 'eye_m': ground + bh.EYE, 'classes': counts}
     out.update(pair(ground + bh.EYE, MIN_R))
+    wf, wb = canopy_bands(dx[trees], dy[trees], z[trees], ground + bh.EYE, MIN_R)
+    top = np.asarray(out['t'])
+    # no window reads as f = b = t, so the page draws exactly what it drew before
+    out['f'] = [round(float(v), 4) for v in np.where(np.isnan(wf), top, np.minimum(wf, top))]
+    out['b'] = [round(float(v), 4) for v in np.where(np.isnan(wb), top, np.minimum(wb, top))]
     out['deck'] = pair(ground + deck_m + bh.EYE, DECK_MIN_R) if deck_m else None
     return out
 
@@ -539,7 +614,8 @@ def cache_ok(rec, site):
             and abs(rec.get('lon', 1e9) - site['view_lon']) < 1e-9
             and rec.get('radius_m') == RADIUS
             and rec.get('deck_m') == site.get('deck')
-            and rec.get('candidates') == DATASETS)
+            and rec.get('candidates') == DATASETS
+            and rec.get('model') == MODEL)
 
 
 def load_cached(site):
@@ -575,12 +651,22 @@ def canopy_entry(rec, terrain):
     e = {'t': bh.encode(rec['t'])}
     if needs_s(rec['s'], rec['t'], terrain.get('alt')):
         e['s'] = bh.encode(rec['s'])
+    if rec.get('f') is not None and has_window(rec, terrain.get('alt')):
+        e['f'] = bh.encode(rec['f'])
+        e['b'] = bh.encode(rec['b'])
     if rec.get('deck'):
         d = {'m': rec['deck_m'], 't': bh.encode(rec['deck']['t'])}
         if needs_s(rec['deck']['s'], rec['deck']['t'], terrain.get('deck_alt')):
             d['s'] = bh.encode(rec['deck']['s'])
         e['deck'] = d
     return e
+
+
+def has_window(rec, ridge):
+    """a window earns its two strings only where it opens WINDOW_MIN_DEG of
+    sky above the ridge somewhere; one under the ridge is never seen"""
+    lo = np.maximum(np.asarray(rec['f'], float), np.asarray(ridge, float) if ridge is not None else bh.ALT_MIN)
+    return bool(np.any(np.asarray(rec['b'], float) - lo >= WINDOW_MIN_DEG))
 
 
 def canopy_js(sites, results, terrain):
@@ -847,7 +933,7 @@ def main():
             continue
         rec = {'name': s['name'], 'ov_id': s['ov_id'], 'lat': s['view_lat'], 'lon': s['view_lon'],
                'radius_m': RADIUS, 'deck_m': s['deck'], 'candidates': DATASETS, 'datasets': used,
-               'nodes': nodes, 'bytes': nbytes, 'vintage': VINTAGE, 't': None, 's': None, 'deck': None}
+               'nodes': nodes, 'bytes': nbytes, 'vintage': VINTAGE, 'model': MODEL, 't': None, 's': None, 'deck': None}
         prof = profiles_for(x, y, z, c, s['view_lat'], s['view_lon'], s['deck']) if used else None
         if prof is None:
             rec['reason'] = 'no lidar in any dataset' if not used else 'no ground return within %g m of the pin' % PIN_R_WIDE
