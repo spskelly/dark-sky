@@ -9,6 +9,7 @@ tools/.shots/
 .claude/
 .superpowers/
 tools/.skyglow-cache/
+/local-tools/
 docs/handoffs/
 docs/superpowers/
 docs/research/

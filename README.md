@@ -25,8 +25,9 @@ will be clear, and where to drive.
   the map switches to *where do i go?* first, since the map only has a real
   size once that panel has been shown.
 - **The sky from anywhere.** *What will i see?* draws the ridge, the moon and
-  the Milky Way from a place on a chosen night: drag to look around, scroll
-  or pinch to zoom, slide through the dark hours. The ridge is bare
+  the Milky Way from a place on a chosen night: drag to turn through a fixed
+  110-degree horizon window and slide through the dark hours. The fixed scale
+  keeps ridge shapes comparable while the heading changes. The ridge is bare
   earth; the trees and any tower or building within 200 m are drawn as their
   own layers from 2017 lidar and named in the sentence when they are what the
   moon or the core actually sets behind. The place comes from the
@@ -51,7 +52,8 @@ will be clear, and where to drive.
   North Carolina, from the Cherohala Skyway to Doughton Park, on a topo map.
   Everything reorders around home, ranked by estimated drive time or
   straight-line distance. Each spot links to its Clear Outside forecast,
-  light-pollution map and driving directions.
+  light-pollution map and driving directions. The map also carries 116
+  Parkway overlooks; opening one loads its own hourly forecast on demand.
 
   Drive time is estimated rather than routed: each spot carries the minutes
   of slow going once you are off the highway (gravel, the parkway detour,
@@ -63,8 +65,8 @@ will be clear, and where to drive.
   remembered, alongside topo and imagery in the map's own layers control. The
   Blue Ridge Parkway is drawn as a line so the route the notes keep referring
   to is one you can actually see. Both are off the critical path: the overlay
-  says so if its tiles stop loading, and the parkway is simply absent until
-  `tools/build-parkway.mjs` has been run.
+  says so if its tiles stop loading, and the parkway is simply absent if its
+  generated block is empty.
 
 ## What's remembered
 
@@ -90,34 +92,36 @@ falls back to the default instead of being trusted.
 | `darksky.overlooks` | `'1'` or `'0'` | off |
 | `darksky.active` | a curated spot's name, or `ov:<osm id>`; dropped if it no longer exists. An overlook is only restored if its layer is on, and is cleared again when its popup is closed, so a popup dismissed on one visit does not reopen on the next | none |
 | `darksky.pano` | the place loaded in the sky viewer: a curated spot's name, `ov:<osm id>` for an overlook, or `pt:<lat>,<lon>` (four decimals) for a point picked on the map. Loaded again on return without switching tabs, independent of the overlook layer or `darksky.active`; a picked point also gets its map marker back | none |
-| `darksky.panoWhen` | `{key: "HH:MM", ...}`, one entry per spot or overlook ever opened; the clock is the Eastern one now (was the reader's own device clock), matched to the nearest of that evening's dark-hour slices on return | nearest 9pm |
-| `darksky.skyView` | `{az, alt, fov}`, the sky viewer's heading, altitude and zoom; shared by every spot, overlook and picked point, not stored per key, since it is which way the reader is used to looking rather than something about a particular place | south, 25 up, 100 degree field |
+| `darksky.panoWhen` | `{key: "HH:MM", ...}`, one entry per spot or overlook ever opened; the clock is Eastern, matched to the nearest of that evening's dark-hour slices on return | nearest 9pm |
+| `darksky.skyView` | `{az}`, the sky viewer's heading; shared by every spot, overlook and picked point. The vertical range and 110-degree field are fixed so turning cannot make the terrain appear to change shape | south (180 degrees) |
 | `darksky.panoAz` | legacy: a heading in degrees, 0-360. Read once by `loadSkyView`, as a fallback for `darksky.skyView`'s own `az` when that key is not set yet, and never written again | (read-once fallback only) |
 
 `darksky.home`, `darksky.lightpollution` and `darksky.tab` predate this table
 and kept their existing names and on-disk formats. `darksky.panoWhen` can
-reach 157 keys (38 spots plus 119 overlooks), about 3 kB total; it is bounded
+reach 154 keys (38 spots plus 116 overlooks), about 3 kB total; it is bounded
 but never pruned. The sky viewer's chosen date is deliberately not
 remembered: returning next week to last week's sky would be a bug.
 
 ## Running it
 
-The site is one `index.html` with no build step and no runtime dependencies.
-Open it directly, or serve the directory:
+The published site is one `index.html` with no build step and no bundled
+runtime packages. Open it directly, or serve the directory:
 
 ```sh
-python3 -m http.server 8000   # then open http://localhost:8000
+python -m http.server 8000   # then open http://localhost:8000
 ```
 
-The map (Leaflet, from cdnjs) and the forecast (Open-Meteo) need network
-access; everything else (the phase maths, the calendar, the spot list)
-works offline, and the map degrades to the list with a note.
+Network access is needed for Leaflet and the fonts from cdnjs, Open-Meteo
+forecasts, topo/imagery/light-pollution tiles, and outbound forecast, light-map
+and directions links. The phase maths, calendar, spot list, generated horizons,
+lidar layers and sky renderer are embedded and work offline. If Leaflet is
+blocked, the map degrades to the spot list with a note.
 
 The tabs have a check, since a hidden panel cannot be measured and both the
 map and the skyline canvases need a real width the moment their tab opens:
 
 ```sh
-node tools/check-tabs.mjs                  # ~20 s, 85 assertions, exits non-zero on failure
+node tools/check-tabs.mjs                  # browser integration checks; exits non-zero on failure
 node tools/check-tabs.mjs --shots          # also writes six PNGs to tools/.shots/
 node tools/check-tabs.mjs other-copy.html  # check some other copy of the page
 ```
@@ -129,6 +133,23 @@ blank tile locally rather than aborted, because the layer's own error handler
 would otherwise remove the layer under the test. Leaflet and the fonts still
 load from their CDNs, so the check needs a network even though nothing it
 asserts depends on one.
+
+## Privacy and local-only tools
+
+There is no application backend or account. The chosen home coordinate and UI
+state stay in the browser's `localStorage`, but network features necessarily
+share location at different precision:
+
+- loading a forecast sends the selected latitude and longitude to Open-Meteo;
+- map and sky-glow providers receive the tile coordinates for the area shown;
+- Clear Outside, light-map and directions destinations receive a coordinate
+  only when their link is opened.
+
+`local-tools/` is for private, location-specific and one-off work. The whole
+directory is ignored by Git, including generated data and source lidar. Its
+tools are not part of the published site; see the local README inside that
+directory for their own run instructions. Keep reusable, non-sensitive build
+tools under `tools/` instead.
 
 ## The moon is always current
 
@@ -151,9 +172,10 @@ Two things show tonight's real phase, and neither is hand-drawn.
 
 ## The parkway line
 
-`PARKWAY` in `index.html` is a simplified centreline, generated rather than
-typed, and it ships empty. To fill it in (needs network, and only when the
-route changes, which is close to never):
+`PARKWAY` in `index.html` is a generated, simplified centreline rather than a
+hand-typed trace. The populated line ships inside the page; rebuild it only
+when the upstream route changes (needs network, which should be close to
+never):
 
 ```sh
 node tools/build-parkway.mjs             # rewrites the block in index.html
@@ -186,6 +208,42 @@ means re-running this and then `python tools/build_horizons.py` and
 `node tools/build-skyglow.mjs --fix`, in that order, so every pin keeps a
 horizon and a light-pollution reading: see
 [the runbook](docs/horizon_panorama.md#what-invalidates-what).
+
+## Terrain and canopy data
+
+The sky viewer does not fetch terrain at runtime. Its profiles are generated
+ahead of time and embedded in `index.html`, so the shipped page remains a
+single-file application:
+
+- the authoritative 360-degree terrain silhouette comes from bare-earth USGS
+  3DEP. It uses full 1/3-arc-second data inside 5 km and a max-pooled
+  1-arc-second far field out to 100 km, with Earth curvature and standard
+  refraction accounted for;
+- rays begin 50 m from the viewpoint and use a 1.8 m standing eye height unless
+  a viewpoint has an explicit calibration;
+- nearby trees and structures come from the 2017 NC Phase 5 leaf-off lidar
+  within 200 m. That lidar is deliberately labelled as a floor: later growth
+  can make the real obstruction higher.
+
+The builders need the pinned Python packages and the local 3DEP tiles at
+`S:\dem_tiles`. Canopy builds fetch public USGS EPT lidar unless their cache is
+already populated.
+
+```sh
+python -m pip install -r tools/requirements.txt
+python tools/build_horizons.py --dry-run
+python tools/build_horizons.py
+python tools/build_canopy.py --dry-run
+python tools/build_canopy.py
+node tools/sync-panorama.mjs
+
+node --test tools/test-panorama.mjs tools/test-inline-parity.mjs
+python -m unittest discover -s tools -p "test_*.py"
+```
+
+The [terrain runbook](docs/horizon_panorama.md) has the cache layout, tuning
+history and the complete invalidation order. A normal page edit or local run
+does not require any of these build steps.
 
 ## The sky glow layer
 
@@ -292,7 +350,7 @@ sentence. Before 2026-09-17, `--json` did not write the `samples` field this
 reads, so `--replay` could not have worked no matter what this said; both do
 now.
 
-It writes nothing into `index.html`. What a colour *means* is the atlas
+Without `--fix` it writes nothing into `index.html`. What a colour *means* is the atlas
 author's business and not something to invent, so the run also prints a census
 of every colour that actually turned up and whatever the site's own source says
 about its palette. The mapping from colour to sky brightness goes in once that
@@ -367,12 +425,13 @@ is simplified to about 120 m, which is roughly a pull-off apart) and measures
 each, scoring a sector you choose. Both tools need the DEM tiles and the
 far-field grid, so run `build_horizons.py` once first.
 
-Both are bare earth. 3DEP models no vegetation, and the raycast starts 150 m
-out, so a pull-off's own bank and treeline are invisible to either tool. For an
-overlook whose note says the view has grown in, the model is the best case.
+Both are bare earth. 3DEP models no vegetation, and the raycast starts 50 m
+out. It can include immediate terrain such as a pull-off cut or ridge shoulder,
+but never trees or structures. For an overlook whose note says the view has
+grown in, the model is the best case.
 
-The npm dependencies exist for that generator alone: the site itself ships
-nothing from `node_modules`. To rebuild the card by hand:
+The npm dependencies are tooling only: the site itself ships nothing from
+`node_modules`. To rebuild the card by hand:
 
 ```sh
 npm ci && npx playwright install chromium && npm run build:og
