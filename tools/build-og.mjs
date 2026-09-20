@@ -6,14 +6,12 @@
 // (leaflet, fonts, open-meteo, tiles) are blocked: the page degrades cleanly and
 // the astronomy is pure maths that needs no network.
 import { chromium } from 'playwright';
-import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, 'og.png');
-const PORT = 8977;
 
 const b64 = f => fs.readFileSync(path.join(ROOT, 'node_modules', f)).toString('base64');
 const FONT = {
@@ -22,23 +20,21 @@ const FONT = {
   sans: b64('@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-400-normal.woff2'),
 };
 
-const server = http.createServer((req, res) => {
-  const isMoon = req.url === '/assets/moon-full.jpg';
-  res.writeHead(200, { 'content-type': isMoon ? 'image/jpeg' : 'text/html; charset=utf-8' });
-  res.end(fs.readFileSync(path.join(ROOT, isMoon ? 'assets/moon-full.jpg' : 'index.html')));
-});
-await new Promise(r => server.listen(PORT, '127.0.0.1', r));
-
-const browser = await chromium.launch(
-  process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
+const browser = process.env.CHROMIUM_PATH
+  ? await chromium.launch({ executablePath: process.env.CHROMIUM_PATH })
+  : await chromium.launch({ channel: 'chrome' }).catch(() => chromium.launch());
 const page = await browser.newPage({ viewport: { width: 1200, height: 630 } });
-// everything off-origin is blocked; we only need the page's own script to evaluate
+// Everything off-disk is blocked; we only need the page's own script and moon
+// texture. Loading the file directly also avoids making the generator itself a
+// local web service merely to evaluate one static page.
 await page.route('**/*', route =>
-  route.request().url().startsWith(`http://127.0.0.1:${PORT}`)
+  route.request().url().startsWith('file:')
     ? route.continue()
     : route.abort());
-await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'domcontentloaded' });
-await page.waitForFunction(() => typeof moonSvg === 'function');
+await page.goto(pathToFileURL(path.join(ROOT, 'index.html')).href, { waitUntil: 'domcontentloaded' });
+// The embedded terrain data makes index.html several megabytes. A cold CI
+// browser can take longer than Playwright's 30-second default to parse it.
+await page.waitForFunction(() => typeof moonSvg === 'function', null, { timeout: 120000 });
 
 // ask the page what the sky is doing, using the same functions the calendar uses
 // Embed the local texture because the final card is rendered in a fresh document.
@@ -107,10 +103,10 @@ p{font-size:21px;line-height:1.5;color:#8b96b3;max-width:34ch}
 <div class="moon">${sky.svg}</div>
 <div class="credit">Moon surface: NASA&rsquo;s Scientific Visualization Studio</div>
 <div class="txt">
-  <h1>dark sky<br><em>calendar</em></h1>
-  <div class="scope">stargazing nights in the<br>carolina mountains</div>
+  <h1>Blue Ridge<br><em>Skyline</em></h1>
+  <div class="scope">night-sky conditions and<br>mountain horizons</div>
   <div class="phase">tonight: ${sky.phase} <span>· ${sky.illum}% lit</span></div>
-  <p>when the moon is out of the way, whether the sky will be clear, and forty dark places to drive to.</p>
+  <p>moonlight, weather, and mountain horizons for thirty-eight dark places across western North Carolina.</p>
   <span class="win"><i></i>${sky.window}</span>
 </div>
 <div class="url">spskelly.github.io/dark-sky</div>`;
@@ -122,5 +118,4 @@ await shot.waitForTimeout(300);
 await shot.screenshot({ path: OUT });
 
 await browser.close();
-server.close();
 console.log(`og.png: ${sky.phase}, ${sky.illum}% lit, ${sky.window}`);

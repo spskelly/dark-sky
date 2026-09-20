@@ -1,0 +1,79 @@
+name: deploy site
+
+# The page and favicon compute tonight's moon in the browser. Social-preview
+# crawlers need a static image, so build that image daily and deploy it without
+# writing generated files back to main.
+on:
+  schedule:
+    - cron: '0 18 * * *'   # 18:00 UTC daily, early afternoon in Eastern
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # The card says "tonight" for western North Carolina. Do not let the UTC
+      # runner advance the displayed date early.
+      TZ: America/New_York
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Render tonight's social card
+        run: npm run build:og
+
+      - name: Assemble static site
+        run: |
+          test -s og.png
+          stamp=$(date +%Y%m%d)
+          sed -i -E "s|(og\.png)\?v=[0-9]+|\1?v=$stamp|g" index.html
+          mkdir _site
+          cp index.html og.png moon-preview.html moon-preview.png ATTRIBUTION.md _site/
+          cp -R assets _site/assets
+          touch _site/.nojekyll
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

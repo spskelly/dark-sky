@@ -1,4 +1,4 @@
-# dark sky calendar
+# Blue Ridge Skyline
 
 A single-page planner for stargazing and astrophotography nights in the
 North Carolina mountains: when the moon is out of the way, whether the sky
@@ -6,7 +6,7 @@ will be clear, and where to drive.
 
 **[spskelly.github.io/dark-sky](https://spskelly.github.io/dark-sky/)**
 
-![dark sky calendar](og.png)
+![Blue Ridge Skyline](og.png)
 
 ## What it does
 
@@ -164,11 +164,13 @@ Two things show tonight's real phase, and neither is hand-drawn.
   `moonPath()` the calendar icons use, and follows the hemisphere toggle. The
   icon in `<head>` is only the no-script fallback.
 - **`og.png`**, the link-preview image, is rebuilt daily by
-  [a GitHub Action](.github/workflows/og-card.yml). It doesn't recompute
+  [a GitHub Action](.github/workflows/deploy-pages.yml). It doesn't recompute
   anything: `tools/build-og.mjs` loads this very page in headless Chromium and
   calls the page's own `lunationFraction()`, `moonSvg()` and `phaseWord()`, so
-  the card cannot drift from the calendar it advertises. It commits only when
-  the image actually changes.
+  the card cannot drift from the calendar it advertises. The workflow stamps a
+  fresh cache-busting image URL into its temporary copy of `index.html` and
+  deploys a Pages artifact. Daily moon changes therefore create deployments,
+  not repository commits.
 
 ## The parkway line
 
