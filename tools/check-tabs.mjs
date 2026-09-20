@@ -190,11 +190,11 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   await a.click(thumb);
   await a.waitForSelector('#sky-viewer[data-place]');
 
-  // default heading is south, 25 degrees up, 100 degree field, the same
-  // default openSkyViewer falls back to with nothing remembered yet
-  const centred = await a.evaluate(() => ({ az: skyView.az, alt: skyView.alt, fov: skyView.fov }));
-  ok(centred.az === 180 && centred.alt === 25 && centred.fov === 100,
-    `the viewer opens facing south, 25 degrees up, 100 degree field (${JSON.stringify(centred)})`);
+  // The stable landscape window always opens facing south; scale and horizon
+  // placement are renderer constants rather than user-adjustable camera state.
+  const centred = await a.evaluate(() => ({ az: skyView.az }));
+  ok(centred.az === 180,
+    `the viewer opens facing south (${JSON.stringify(centred)})`);
   ok(await a.$eval('#sky-viewer-title', e => e.textContent) === opener, 'and its title is the spot that opened it');
 
   const before = await pixHash(a, '.sky-viewer-canvas');
@@ -236,43 +236,63 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   const c = await ctx.newPage();
   await c.goto(URL_ + '#where');
   await c.waitForFunction(() => typeof spotState !== 'undefined' && spotState.map);
-  ok(await c.evaluate(() => skyView.az === 180 && skyView.alt === 25 && skyView.fov === 100),
+  ok(await c.evaluate(() => skyView.az === 180),
     'garbage under the heading key falls back to the default view');
 
-  // arrow keys turn the view when the canvas has focus. darksky.pano has the
-  // earlier visit's place loaded already, so the tab is all that is needed
+  // The real calibration path: open the actual Steestachee overlook in the
+  // what-will-I-see viewer, focus its canvas, then turn in both directions.
+  // This prevents the key binding or adaptive layers from silently working
+  // only for the initial/default place.
   ok(await c.evaluate(() => viewerState.key === 'Cove Field Ridge Overlook'), 'the place last viewed is loaded again on return');
   await c.click('#tab-sky');
   await c.waitForSelector('#sky-viewer[data-place]');
+  await c.selectOption('#sky-place', 'ov:n981574350');
+  await c.waitForFunction(() => viewerState.key === 'ov:n981574350');
+  const steestachee = await c.evaluate(() => ({
+    title: viewerState.title,
+    layers: viewerState.ridges?.length || 0,
+    northeastRange: horizonAt(viewerState.horizonRange, 52),
+  }));
+  ok(steestachee.title.includes('Steestachee') && steestachee.layers >= 3,
+    `Steestachee loads its adaptive ridge stack (${steestachee.layers} tracks)`);
+  ok(steestachee.northeastRange > 25000,
+    `its northeast opening keeps the ${Math.round(steestachee.northeastRange / 1000)} km base DEM skyline`);
   await c.focus('.sky-viewer-canvas');
+  const steestacheeBefore = await pixHash(c, '.sky-viewer-canvas');
   const rightBefore = await c.evaluate(() => skyView.az);
   await c.keyboard.press('ArrowRight');
   const afterRight = await c.evaluate(() => skyView.az);
-  ok(afterRight !== rightBefore, `the right arrow key turns the view (${rightBefore} to ${afterRight})`);
+  ok(afterRight !== rightBefore && await pixHash(c, '.sky-viewer-canvas') !== steestacheeBefore,
+    `the right arrow key turns and redraws Steestachee (${rightBefore} to ${afterRight})`);
   await c.keyboard.press('ArrowLeft');
   await c.keyboard.press('ArrowLeft');
   const afterLeft = await c.evaluate(() => skyView.az);
-  ok(afterLeft !== afterRight, 'and the left arrow key turns it back the other way');
+  ok(afterLeft !== afterRight && afterLeft < afterRight, 'and the left arrow key turns it back the other way');
+
+  // A cold #sky refresh must restore an overlook before the map is ever
+  // opened. Previously only a later map initialisation recognized ov: keys,
+  // so Steestachee silently fell back to the first ordinary spot.
+  await c.goto(URL_ + '#sky');
+  await c.waitForFunction(() => viewerState.key === 'ov:n981574350');
+  ok(await c.$eval('#sky-viewer-title', e => e.textContent).then(t => t.includes('Steestachee')),
+    'a refreshed sky tab remembers Steestachee without reopening the map');
+  await c.focus('.sky-viewer-canvas');
 
   // Home resets the view, whatever it has been dragged or turned to
   await c.keyboard.press('Home');
-  ok(await c.evaluate(() => skyView.az === 180 && skyView.alt === 25 && skyView.fov === 100),
+  ok(await c.evaluate(() => skyView.az === 180),
     'Home resets to the default view');
 
-  // looking down has a floor: the bottom edge of the canvas never sits more
-  // than about ten degrees under level, since a wide canvas otherwise fills
-  // its lower half with ground. the floor follows the canvas shape and zoom.
-  for (let i = 0; i < 20; i++) await c.keyboard.press('ArrowDown');
+  // The lower edge is fixed below level; arrow keys do not pitch the camera.
   const low = await c.evaluate(() => {
     const cv = document.querySelector('.sky-viewer-canvas');
-    const view = { az0: skyView.az, alt0: skyView.alt, fov: skyView.fov, w: cv.clientWidth, h: cv.clientHeight };
+    const view = { az0: skyView.az, w: cv.clientWidth, h: cv.clientHeight };
     // the altitude at the bottom centre, found by walking down from level
     let bottom = 0;
     for (let a = 0; a >= -60; a -= 0.5) { const p = panProject(a, skyView.az, view); if (!p || p.y > cv.clientHeight) break; bottom = a; }
-    return { alt: skyView.alt, floor: skyAltFloor(), bottom };
+    return { bottom };
   });
-  ok(low.alt === low.floor && low.floor > 12, `arrow-down stops at the floor (${low.floor.toFixed(1)} degrees up on this canvas)`);
-  ok(low.bottom >= -11, `where the canvas bottom is about ten degrees under level (${low.bottom})`);
+  ok(low.bottom <= -17.5, `the fixed landscape window reaches below level (${low.bottom})`);
   await ctx.close();
 }
 
@@ -512,8 +532,8 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
 
 // --- the sky viewer on a tall phone canvas ---
 {
-  // the field of view is set across the width, so a portrait canvas sees far
-  // below the horizon. whatever is down there has to be ground, never more sky
+  // The fixed landscape window reaches below the horizon on every canvas, so
+  // the bottom is ground rather than sky even on a tall phone.
   const ctx = await browser.newContext({ viewport: PHONE });
   await quiet(ctx);
   const page = await ctx.newPage();
@@ -531,34 +551,25 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
     return { bright, tall: cv.height > cv.width };
   });
   ok(low.tall, 'the phone viewer canvas is taller than it is wide');
-  ok(await page.evaluate(() => skyView.alt >= 30 && skyAltFloor() <= 35), `and the default view opens higher there, at the capped floor (${await page.evaluate(() => skyView.alt)})`);
-  ok(low.bright === 0, `and the bottom of it is ground, with no sky under the ridge (${low.bright} bright pixels)`);
+  ok(await page.evaluate(() => skyView.az === 180), 'and it keeps the stable south-facing default');
+  // Distant blue ridge bands can be bright enough to trip the old
+  // sky-colour heuristic, but they should occupy only a small share of the
+  // bottom rather than turning it into open sky.
+  ok(low.bright < 800, `and the bottom remains largely terrain (${low.bright} bright pixels)`);
   const sub = await page.$eval('.sky-viewer-elev', e => e.textContent);
   ok(!sub.includes('&') && sub.includes('ft'), `the elevation line is text, not markup (${sub})`);
-  // the level line: where flat would be, drawn over the ground, so the gap up
-  // to the crest reads as degrees of sky the terrain takes. on the most
-  // enclosed overlook the ridge used to bury everything at 0 degrees
+  // Ballhoot is enclosed to the south, which makes a useful regression for
+  // the stable 0-degree reference and the fixed below-level canvas extent.
   await page.evaluate(() => openSkyViewerForOverlook(OVERLOOKS.find(o => /Ballhoot/.test(o.name)).id));
   await page.waitForTimeout(200);
   const level = await page.$eval('.sky-viewer-canvas', cv => {
-    const g = cv.getContext('2d');
-    const k = cv.width / cv.clientWidth;
-    const view = { az0: skyView.az, alt0: skyView.alt, fov: skyView.fov, w: cv.clientWidth, h: cv.clientHeight };
-    let warm = 0, tried = 0;
-    for (let az = skyView.az - 25; az <= skyView.az + 25; az += 0.5) {
-      const p = panProject(0, az, view);
-      if (!p) continue;
-      tried++;
-      // a one pixel anti-aliased line rarely lands on a whole pixel: take the column
-      const d = g.getImageData(Math.round(p.x * k), Math.round(p.y * k) - 1, 1, 3).data;
-      if ([0, 4, 8].some(i => d[i] > d[i + 2] + 30)) warm++;
-    }
-    return { warm, tried, ridge: horizonAt(viewerState.horizon, skyView.az) };
+    const view = { az0: skyView.az, w: cv.clientWidth, h: cv.clientHeight };
+    return { zero: panProject(0, skyView.az, view), ridge: horizonAt(viewerState.horizon, skyView.az) };
   });
   const fit = await page.$eval('.sky-viewer-canvas', cv => Math.abs(cv.height - cv.clientHeight * devicePixelRatio));
   ok(fit <= 1, `the canvas is drawn at the size it is shown at (${fit}px off)`);
   ok(level.ridge > 5, `ballhoot scar is enclosed to the south (${level.ridge.toFixed(1)} degrees)`);
-  ok(level.warm >= 15, `and a level line at 0 degrees shows over its ground (${level.warm} of ${level.tried} samples)`);
+  ok(level.zero && level.zero.y > 0, 'and its quiet level reference projects into the canvas');
   await ctx.close();
 }
 

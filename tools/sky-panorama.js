@@ -10,8 +10,10 @@
      STARS              from the star block (tools/stars.js)
      HORIZON_ALT_MIN, HORIZON_ALT_RANGE, HORIZONS   from the generated
                         horizons block, which is why they are not declared here
-     CANOPY             from the generated canopy block: decoded here, drawn
-                        as layers under the ridge, never combined in the page
+     HORIZON_LAYERS     from the generated horizons block: the near, middle
+                        and far bare-earth ridge bands, when available
+     CANOPY             from the generated canopy block: decoded here and
+                        painted in front of every terrain band
 
    public: decodeHorizon(s), decodeCanopy(e), drawPanorama(canvas, opts),
             horizonSummary(opts), panBlocking(horizon, canopy),
@@ -32,6 +34,31 @@ function decodeHorizon(s) {
     alt[i] = HORIZON_ALT_MIN + v * HORIZON_ALT_RANGE / 4095;
   }
   return alt;
+}
+
+// Three distance-separated bare-earth profiles, nearest first. Old cached
+// pages do not have them, so a missing or malformed entry simply leaves the
+// established single skyline in place.
+function decodeRidgeLayers(entry) {
+  if (!Array.isArray(entry)) return null;
+  try {
+    const out = entry.map(decodeHorizon);
+    return out.length ? out : null;
+  } catch (e) { return null; }
+}
+
+// Ridge-band distances use the same 12-bit two-character packing as altitude,
+// but at 25 m per step. Zero is an empty shell at that bearing.
+const PAN_RANGE_UNIT_M = 25;
+function decodeRidgeRanges(entry) {
+  if (!Array.isArray(entry)) return null;
+  try {
+    return entry.map(s => {
+      const out = new Float64Array(360);
+      for (let i = 0; i < 360; i++) out[i] = (PAN_B64.indexOf(s.charAt(2 * i)) * 64 + PAN_B64.indexOf(s.charAt(2 * i + 1))) * PAN_RANGE_UNIT_M;
+      return out;
+    });
+  } catch (e) { return null; }
 }
 
 // ridge altitude at any azimuth, linear between the two whole degrees either side
@@ -139,7 +166,7 @@ function panLayerAt(horizon, canopy, az, alt) {
 // pixels and it reads as a smudge otherwise. every thumbnail shares the one
 // window, so two spots side by side still compare honestly.
 const PAN_TOP = 24;
-const PAN_BOT = -3;
+const PAN_BOT = -8;
 const PAN_AZ0 = 180;      // where the fixed window's centre sits; nothing in
                           // a full turn depends on where that centre falls
 const PAN_FOV_DEG = 360;
@@ -156,72 +183,39 @@ function azToX(az, az0, fovDeg, w) {
 const panXLin = (az, w) => azToX(az, PAN_AZ0, PAN_FOV_DEG, w);
 const panY = (alt, h) => (PAN_TOP - alt) / (PAN_TOP - PAN_BOT) * h;
 
-// ---------- stereographic projection, for the dialog viewer ----------
-// the open view above is a flat cylinder: fast, and right for a strip meant
-// to compare spots, but it tears apart anything wider than about 60 degrees.
-// the dialog looks around freely, so it needs a projection that keeps angles
-// honest wherever the reader turns: stereographic, centred on the view
-// direction, conformal (a circle on the sky is still a circle on screen),
-// and the one real all-sky cameras use for the same reason.
+// ---------- stable horizon window, for the dialog viewer ----------
+// The viewer is intentionally a conventional landscape window, not a virtual
+// camera.  A fixed scale keeps the ridges legible as the reader turns, and
+// avoids the fish-eye/zoom effect that made the old free-look view feel like
+// it was changing the terrain rather than simply looking along it.
+const PAN_VIEW_FOV = 110;
+const PAN_VIEW_TOP = 68;
+const PAN_VIEW_BOT = -18;
 
-// alt/az to a unit vector, east-north-up
-function panWorldVec(altDeg, azDeg) {
-  const alt = altDeg * PAN_D2R, az = azDeg * PAN_D2R;
-  return { x: Math.cos(alt) * Math.sin(az), y: Math.cos(alt) * Math.cos(az), z: Math.sin(alt) };
+function panAzDelta(az, az0) {
+  return ((az - az0 + 540) % 360) - 180;
 }
 
-// rotates a world vector into the view frame: first the heading (a rotation
-// about the up axis, which only ever shifts azimuth), then the altitude (a
-// rotation about the resulting east axis) so the view centre lands on the
-// frame's own z axis. z2 is then the cosine of the angular distance from the
-// view centre for every point, x2/y2 its right/up components. the altitude
-// step's angle is 90 - alt0, which passes through zero rather than blowing up
-// as alt0 reaches 90 -- looking straight up needs no special case here.
-function panViewFrame(v, az0, alt0) {
-  const a0 = az0 * PAN_D2R;
-  const x1 = v.x * Math.cos(a0) - v.y * Math.sin(a0);
-  const y1 = v.x * Math.sin(a0) + v.y * Math.cos(a0);
-  const phi = (90 - alt0) * PAN_D2R;
-  const cp = Math.cos(phi), sp = Math.sin(phi);
-  return { x2: x1, y2: y1 * cp - v.z * sp, z2: y1 * sp + v.z * cp };
-}
-
-// pixels per unit of the stereographic radius, 2*tan(half the angular
-// distance from the view centre). that radius depends only on the angular
-// distance, never on which direction it is measured in -- x2/y2 above sit on
-// a circle of radius sin(c) at every c, whichever way x2 and y2 split it --
-// so calibrating against fov/2 of pure altitude gives the same scale as
-// calibrating fov/2 of pure azimuth would, without the azimuth version's
-// failure mode: an azimuth offset from a view centre near the zenith is
-// still almost the zenith itself, and the reference point collapses toward
-// the pole instead of landing fov/2 away from it.
-function panViewScale(fov, w) {
-  const half = (fov / 2) * PAN_D2R;
-  return (w / 2) / (2 * Math.tan(half / 2));
-}
-
-// beyond this, 1+z2 is still comfortably away from zero (that only happens
-// 180 degrees out, directly behind the viewer) but the point is not worth
-// drawing, and the caller can skip the segment instead of stretching it
-const PAN_CULL_COS = Math.cos(100 * PAN_D2R);
-
-// the pure function every draw routine in the dialog goes through: alt/az to
-// canvas pixel, or null when the point is more than 100 degrees from the view
-// centre. view is { az0, alt0, fov, w, h }.
-// ponytail: recomputes the view scale on every call rather than caching it on
-// the view object. a full redraw is a few thousand calls, comfortably under a
-// millisecond of trig; cache it if a profiler ever says otherwise.
+// The one projection used by the dialog: azimuth and altitude are both
+// linear. It returns null beyond this fixed horizon window, so callers can
+// split a star path or ridge run at its edges.
 function panProject(alt, az, view) {
-  const v = panWorldVec(alt, az);
-  const p = panViewFrame(v, view.az0, view.alt0);
-  if (p.z2 < PAN_CULL_COS) return null;
-  const scale = panViewScale(view.fov, view.w);
-  const factor = 2 / (1 + p.z2);
-  // y2 falls as altitude rises (the frame's own "up" is toward the view
-  // centre, not the canvas edge), and canvas y already runs the other way
-  // from screen "up", so the two flips cancel: higher altitude wants a
-  // smaller y, which is scale * y2 added, not subtracted.
-  return { x: view.w / 2 + scale * p.x2 * factor, y: view.h / 2 + scale * p.y2 * factor };
+  const d = panAzDelta(az, view.az0);
+  if (Math.abs(d) > PAN_VIEW_FOV / 2 || alt < PAN_VIEW_BOT || alt > PAN_VIEW_TOP) return null;
+  return {
+    x: view.w / 2 + d / PAN_VIEW_FOV * view.w,
+    y: (PAN_VIEW_TOP - alt) / (PAN_VIEW_TOP - PAN_VIEW_BOT) * view.h,
+  };
+}
+
+// Like panProject, but deliberately allows an off-canvas point. It is used
+// to close a filled silhouette cleanly at the two sides of the clipped window.
+function panProjectWide(alt, az, view) {
+  const d = panAzDelta(az, view.az0);
+  return {
+    x: view.w / 2 + d / PAN_VIEW_FOV * view.w,
+    y: (PAN_VIEW_TOP - alt) / (PAN_VIEW_TOP - PAN_VIEW_BOT) * view.h,
+  };
 }
 
 // ---------- sky positions ----------
@@ -275,11 +269,21 @@ function drawPanorama(canvas, opts) {
   ctx.clearRect(0, 0, w, h);
 
   if (opts.mode === 'view') { drawSkyView(ctx, w, h, opts); return true; }
-  if (opts.mode === 'thumb') { drawRidge(ctx, opts.horizon, w, h, opts.canopy); return true; }
+  if (opts.mode === 'thumb') { drawRidge(ctx, opts.horizon, w, h, opts.canopy, opts.ridges); return true; }
   return false;
 }
 
 const PAN_COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+
+// The few cardinal/intercardinal marks inside the current landscape window.
+// They deliberately live at the top, outside the terrain-and-distance label
+// zone, while the precise sixteen-point heading remains in the control bar.
+function panCompassMarks(view) {
+  const half = PAN_VIEW_FOV / 2;
+  return PAN_COMPASS.map((label, i) => ({ label, az: i * 45, d: panAzDelta(i * 45, view.az0) }))
+    .filter(mark => Math.abs(mark.d) <= half - 2)
+    .map(mark => ({ ...mark, x: (mark.d + half) / (2 * half) * view.w }));
+}
 
 // STARS is an array of arrays, [ra, dec, mag] with a name appended only for the
 // ones worth labelling, so anything past index 2 is optional.
@@ -293,7 +297,7 @@ const starMagLimit = w => (w < 520 ? 4.2 : 6);
 // its own ridge fill, wash, stars and moon live in drawSkyView below now.
 // one filled strip: the full turn, degree by degree, from the crest down to
 // the bottom edge, plus a one pixel crest line. the thumbnail's whole
-// drawing is three of these back to front.
+// drawing is distance bands back to front, then the nearby lidar layers.
 function panRidgeStrip(ctx, prof, w, h, style, holes) {
   const altAt = i => prof[((Math.round(i) % 360) + 360) % 360];
   ctx.beginPath();
@@ -333,23 +337,179 @@ function panRidgeStrip(ctx, prof, w, h, style, holes) {
   ctx.setLineDash([]);
 }
 
-// the layers, back to front. structures opaque slate with a dashed crest;
-// trees a dark green at 70 per cent, so a moon or the core sliding behind the
-// tree band stays visible while the reader scrubs the night; the ridge last
-// and as it always was. each ring is the highest of itself and what is
-// below it, so a tree line under the ridge never pokes through.
+// the layers, back to front. A tree crown against open sky stays translucent,
+// which preserves a little depth in the near field. Where that crown overlaps
+// the top terrain silhouette it is painted again, opaque: a distant ridge,
+// moon or core must never show through nearby foliage. The only other opening
+// is a lidar-confirmed canopy window, cut out before either pass is filled.
 const PAN_LAYERS = {
+  far: { fill: '#334d7c', crest: 'rgba(174,193,226,0.28)', dash: [], rim: null },
+  farMiddle: { fill: '#2a416d', crest: 'rgba(160,181,220,0.32)', dash: [], rim: null },
+  middle: { fill: '#21365e', crest: 'rgba(150,173,213,0.38)', dash: [], rim: null },
+  nearMiddle: { fill: '#182b4d', crest: 'rgba(143,165,207,0.42)', dash: [], rim: null },
+  near: { fill: null, crest: 'rgba(122,140,186,0.75)', dash: [], rim: null },
   structures: { fill: '#343946', crest: 'rgba(196,200,210,0.75)', dash: [4, 3], rim: null },
   trees: { fill: 'rgba(8,28,16,0.7)', crest: 'rgba(118,168,118,0.6)', dash: [], rim: 'rgba(130,190,130,0.10)' },
+  // This is a depth mask, not a statement that every square metre below a
+  // crown is forest. Keeping it translucent lets the bare-earth surface read
+  // through a foreground tree wall (road cut, grass verge, rock), while the
+  // crown itself above the terrain retains its green, opaque presence.
+  treeOcclusion: { fill: 'rgba(7,16,18,0.38)', crest: 'rgba(0,0,0,0)', dash: [], rim: null },
 };
 
-function drawRidge(ctx, horizon, w, h, canopy) {
-  if (canopy && canopy.s) panRidgeStrip(ctx, panMaxProfile(panMaxProfile(horizon, canopy.t), canopy.s), w, h, PAN_LAYERS.structures, panStructureHoles(canopy, false));
-  if (canopy && canopy.t) panRidgeStrip(ctx, panMaxProfile(horizon, canopy.t), w, h, PAN_LAYERS.trees, panWindowHoles(canopy.lo, canopy.hi, false));
+// Local ground context is deliberately separate from the horizon. These are
+// surveyed/map features in metres east, north, and elevation relative to the
+// calibrated ground. More sites will be generated into this shape once the
+// Steestachee reference implementation is settled.
+const PAN_FOREGROUND = {
+  'ov:n981574350': { eye: 1.2, roads: [
+    { width: 6.5, points: [[79.1,70.8,-6.8],[33.3,37.1,-2.9],[15.1,24.1,-1.2],[-34.5,-1.5,5.8],[-52,-7.1,3.2],[-70.4,-11.1,6.3],[-91,-13.6,5.4],[-113.3,-13.4,7]] },
+    { width: 5.5, points: [[-34.5,-1.5,5.8],[-15.6,-5.8,1.2],[-2,-5,0.2],[12.6,1,-0.5],[25.4,10.6,-1.9],[33.5,26.4,-3],[33.3,37.1,-2.9]] },
+  ] },
+};
+
+function drawForegroundRoads(ctx, foreground, view, terrain) {
+  if (!foreground || !foreground.roads) return;
+  const project = ([east, north, z]) => {
+    const r = Math.hypot(east, north);
+    if (r < 1) return null;
+    const az = Math.atan2(east, north) / PAN_D2R;
+    const alt = Math.atan2(z - foreground.eye, r) / PAN_D2R;
+    // A local road hidden by the terrain silhouette must stay hidden.
+    if (terrain && alt < horizonAt(terrain, az) - 0.35) return null;
+    return panProject(alt, az, view);
+  };
+  ctx.save();
+  ctx.fillStyle = 'rgba(65,70,79,0.78)';
+  ctx.strokeStyle = 'rgba(174,179,187,0.26)';
+  ctx.lineWidth = 1;
+  for (const road of foreground.roads) {
+    for (let i = 0; i < road.points.length - 1; i++) {
+      const a = road.points[i], b = road.points[i + 1];
+      const dx = b[0] - a[0], dy = b[1] - a[1], d = Math.hypot(dx, dy);
+      if (!d) continue;
+      const nx = -dy / d * road.width / 2, ny = dx / d * road.width / 2;
+      const q = [project([a[0]+nx,a[1]+ny,a[2]]), project([b[0]+nx,b[1]+ny,b[2]]),
+                 project([b[0]-nx,b[1]-ny,b[2]]), project([a[0]-nx,a[1]-ny,a[2]])];
+      if (q.some(p => !p)) continue;
+      ctx.beginPath(); ctx.moveTo(q[0].x,q[0].y); q.slice(1).forEach(p => ctx.lineTo(p.x,p.y)); ctx.closePath(); ctx.fill(); ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+// The area shared by a tree fill and terrain is the part at or below the
+// lower of their crests. Paint that second pass solid, but leave foliage above
+// the terrain line in the translucent sky-facing pass.
+function panTreeOcclusionProfile(trees, terrain) {
+  if (!trees || !terrain) return null;
+  return trees.map((tree, az) => Math.min(tree, terrain[az]));
+}
+
+// Generated stacks are near-to-far by actual exposed crest rank. Paint the
+// farthest first, then step toward the observer. A legacy place has one line.
+function panTerrainBands(horizon, ridges) {
+  const bands = ridges && ridges.length ? ridges : [horizon];
+  return bands.slice().reverse();
+}
+
+// The adaptive profiles describe additional, sustained ridge traces; they do
+// not replace the DEM's per-bearing skyline. Keep that complete envelope as
+// the far ground layer, or a short/fragmented track can leave a real distant
+// crest out of the view altogether.
+function panSceneBands(horizon, ridges) {
+  return ridges && ridges.length ? [horizon, ...panTerrainBands(horizon, ridges)] : [horizon];
+}
+
+// An adaptive DEM stack is already made of exposed crest records. This client
+// pass supports old shell caches too: a farther crest must still rise clearly
+// above the terrain already visible at that bearing, and must persist long
+// enough to read as a ridge rather than a one-degree sampling blip.
+const PAN_RIDGE_SEPARATION = 0.75;
+const PAN_RIDGE_MIN_RUN = 3;
+const PAN_RIDGE_EMPTY = HORIZON_ALT_MIN + 0.1;
+
+function panSustainedRidgeMask(candidate) {
+  const n = candidate.length;
+  const out = new Uint8Array(n);
+  // Rotate after any gap so a run across north is treated as one run.
+  const gap = candidate.findIndex(v => !v);
+  if (gap < 0) return candidate.slice();
+  let run = [];
+  for (let j = 1; j <= n; j++) {
+    const i = (gap + j) % n;
+    if (candidate[i]) run.push(i);
+    else {
+      if (run.length >= PAN_RIDGE_MIN_RUN) run.forEach(k => { out[k] = 1; });
+      run = [];
+    }
+  }
+  return out;
+}
+
+function panVisibleRidgeMasks(ridges) {
+  if (!ridges || !ridges.length) return null;
+  const masks = ridges.map(() => new Uint8Array(360));
+  const visibleTop = new Float64Array(360);
+  visibleTop.fill(-Infinity);
+  for (let az = 0; az < 360; az++) {
+    if (ridges[0][az] > PAN_RIDGE_EMPTY) {
+      masks[0][az] = 1;
+      visibleTop[az] = ridges[0][az];
+    }
+  }
+  // Walk outward. Every sustained crest that clears the previous visible
+  // envelope gets its own band; rejected one-degree fluctuations do not lift
+  // the envelope and cannot hide a real farther ridge.
+  for (let i = 1; i < ridges.length; i++) {
+    const candidate = new Uint8Array(360);
+    for (let az = 0; az < 360; az++) {
+      if (ridges[i][az] > PAN_RIDGE_EMPTY && ridges[i][az] > visibleTop[az] + PAN_RIDGE_SEPARATION) candidate[az] = 1;
+    }
+    masks[i] = panSustainedRidgeMask(candidate);
+    for (let az = 0; az < 360; az++) {
+      if (masks[i][az]) visibleTop[az] = ridges[i][az];
+    }
+  }
+  return masks;
+}
+
+function panMaskAt(mask, az) {
+  if (!mask) return true;
+  return !!mask[((Math.round(az) % 360) + 360) % 360];
+}
+
+function panTerrainLayer(i, n) {
+  if (n === 1 || i === n - 1) return PAN_LAYERS.near;
+  // No palette bucket count: interpolate the haze from remote blue to the
+  // nearer indigo so a location with eight real crests remains legible.
+  const t = i / (n - 1);
+  const mix = (a, b) => Math.round(a + (b - a) * t);
+  return {
+    fill: `rgb(${mix(51, 24)},${mix(77, 43)},${mix(124, 77)})`,
+    crest: `rgba(${mix(174, 143)},${mix(193, 165)},${mix(226, 207)},${(0.28 + 0.18 * t).toFixed(2)})`,
+    dash: [], rim: null,
+  };
+}
+
+function drawRidge(ctx, horizon, w, h, canopy, ridges) {
   const g = ctx.createLinearGradient(0, panY(PAN_TOP * 0.3, h), 0, h);
   g.addColorStop(0, '#121c38');
   g.addColorStop(1, '#070c1a');
-  panRidgeStrip(ctx, horizon, w, h, { fill: g, crest: 'rgba(122,140,186,0.75)', dash: [] });
+  const bands = panSceneBands(horizon, ridges);
+  bands.forEach((profile, i) => {
+    const layer = panTerrainLayer(i, bands.length);
+    panRidgeStrip(ctx, profile, w, h, { ...layer, fill: layer.fill || g }, undefined);
+  });
+  // Lidar is sampled within 200 m of the pin; it is foreground, not a tint on
+  // the distant horizon. Its own profile must be drawn, rather than maxed with
+  // the ridge, so trees below a ridge still stand in front of it.
+  if (canopy && canopy.t) {
+    const holes = panWindowHoles(canopy.lo, canopy.hi, false);
+    panRidgeStrip(ctx, canopy.t, w, h, PAN_LAYERS.trees, holes);
+    panRidgeStrip(ctx, panTreeOcclusionProfile(canopy.t, horizon), w, h, PAN_LAYERS.treeOcclusion, holes);
+  }
+  if (canopy && canopy.s) panRidgeStrip(ctx, canopy.s, w, h, PAN_LAYERS.structures, panStructureHoles(canopy, false));
 }
 
 // ---------- the dialog viewer (stereographic) ----------
@@ -582,117 +742,258 @@ function drawGridView(ctx, view, w, h) {
   }
 }
 
-// true level, drawn after the ridge and so over the ground: the gap between
-// this line and the crest is how much sky the terrain takes, which is the
-// number the whole drawing exists to show. the compass letters ride on it,
-// because on an enclosed site the ridge used to bury them.
+// True level is a quiet reference, drawn after the ridge so its gap to the
+// crest still reads as sky taken by terrain. Heading already lives in the
+// control bar; repeating compass letters across the landscape made a crowded
+// ridge hard to read.
 function drawLevelView(ctx, view) {
   const pts = [];
   for (let az = 0; az <= 360; az += 5) pts.push(panProject(0, az, view));
-  ctx.setLineDash([6, 5]);
-  ctx.strokeStyle = 'rgba(236,200,120,0.55)';
+  ctx.setLineDash([3, 7]);
+  ctx.strokeStyle = 'rgba(155,170,202,0.28)';
   ctx.lineWidth = 1;
   panStrokeRuns(ctx, pts, true);
   ctx.setLineDash([]);
+}
 
+function drawCompassTopView(ctx, view) {
+  ctx.save();
   ctx.font = '10px "IBM Plex Sans", system-ui, sans-serif';
-  ctx.textBaseline = 'alphabetic';
-  ctx.textAlign = 'left';
-  ctx.fillStyle = 'rgba(236,200,120,0.8)';
-  const zero = panProject(0, view.az0 + 12, view);
-  if (zero) ctx.fillText('0\u00b0 level', zero.x, zero.y + 12);
-
-  if ('letterSpacing' in ctx) ctx.letterSpacing = '0.14em';
   ctx.textAlign = 'center';
-  for (let i = 0; i < 8; i++) {
-    const p = panProject(0, i * 45, view);
-    if (!p) continue;
-    ctx.fillStyle = i === 0 ? 'rgba(236,231,212,0.9)' : 'rgba(200,196,175,0.8)';
-    ctx.fillText(PAN_COMPASS[i], p.x, p.y - 6);
+  ctx.textBaseline = 'top';
+  for (const mark of panCompassMarks(view)) {
+    ctx.fillStyle = Math.abs(mark.d) < 1 ? 'rgba(236,231,212,0.82)' : 'rgba(174,190,220,0.58)';
+    ctx.fillText(mark.label, mark.x, 12);
   }
-  if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+  ctx.restore();
 }
 
-// the same projection with nothing culled, for the one shape that has to go
-// all the way round: the ridge ring. stereographic is finite everywhere but
-// the point directly behind the viewer, so the depth is held just short of it.
-function panProjectAll(alt, az, view) {
-  const p = panViewFrame(panWorldVec(alt, az), view.az0, view.alt0);
-  const factor = 2 / (1 + Math.max(p.z2, -0.996));
-  const scale = panViewScale(view.fov, view.w);
-  return { x: view.w / 2 + scale * p.x2 * factor, y: view.h / 2 + scale * p.y2 * factor };
-}
-
-// the ridge: 360 samples of the horizon (or a flat line at 0 when none is
-// modelled, which is what a picked point gets without terrain). the ground is
-// everything on the far side of that ring from the zenith, however far down
-// the canvas reaches: a portrait phone sees 60 degrees below the horizon, and
-// a wall 30 degrees deep let the sky come back underneath it. in this
-// projection the point behind the viewer is at infinity, so whichever side of
-// the ring holds it is the unbounded side.
-// ponytail: ring sampled per degree with straight chords. if the ridge passes
-// within a degree of the point directly behind the viewer a chord can cut the
-// canvas; only reachable looking at or below the horizon. sample finer there
-// if it ever shows.
-function panRingView(ctx, prof, view, w, h, style, holes) {
-  const altAt = az => horizonAt(prof, az);
-  const top = [];
-  for (let az = 0; az < 360; az++) top.push(panProject(altAt(az), az, view));
+// One open landscape silhouette. Unlike the former all-sky ring, this has
+// no back side or moving vanishing point: it is simply the 110 degrees in
+// front of the reader, which makes a drag feel like turning toward a view.
+function panWindowRidge(ctx, prof, view, w, h, style, holes, mask) {
+  const step = 0.5, half = PAN_VIEW_FOV / 2;
+  const crest = [];
+  ctx.save();
   ctx.beginPath();
-  for (let az = 0; az < 360; az++) {
-    const p = panProjectAll(altAt(az), az, view);
-    if (az === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+  ctx.rect(0, 0, w, h);
+  ctx.clip();
+  for (let d = -half; d <= half + 0.01; d += step) {
+    const p = panProjectWide(horizonAt(prof, view.az0 + d), view.az0 + d, view);
+    crest.push({ ...p, active: panMaskAt(mask, view.az0 + d) });
   }
-  ctx.closePath();
-  const behindIsGround = -view.alt0 < altAt(view.az0 + 180);
-  if (behindIsGround) ctx.rect(-1, -1, w + 2, h + 2);
-  // each window a closed subpath on the filled side of the ring, so even-odd
-  // leaves it unfilled whichever side of the ring the ground is
-  for (const { top: up, floor } of holes || []) {
-    up.forEach(([az, alt], k) => { const p = panProjectAll(alt, az, view); if (k) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y); });
-    for (let k = floor.length - 1; k >= 0; k--) { const p = panProjectAll(floor[k][1], floor[k][0], view); ctx.lineTo(p.x, p.y); }
+  // Terrain masks have no canopy holes. Fill each exposed run independently,
+  // rather than filling the hidden shell underneath a nearer ridge.
+  const runs = [];
+  let run = null;
+  crest.forEach((p, i) => {
+    if (p.active) (run || (run = [])).push(i);
+    else if (run) { runs.push(run); run = null; }
+  });
+  if (run) runs.push(run);
+  if (mask) {
+    for (const r of runs) {
+      if (!r.length) continue;
+      ctx.beginPath();
+      ctx.moveTo(crest[r[0]].x, h);
+      r.forEach(i => ctx.lineTo(crest[i].x, crest[i].y));
+      ctx.lineTo(crest[r.at(-1)].x, h);
+      ctx.closePath();
+      if (style.fill) { ctx.fillStyle = style.fill; ctx.fill(); }
+    }
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(0, h);
+    crest.forEach(p => ctx.lineTo(p.x, p.y));
+    ctx.lineTo(w, h);
+    ctx.closePath();
+  // Tree windows are still punched out before the crown band is painted, so
+  // nearby vegetation remains foreground without becoming one solid wall.
+  for (const { top, floor } of holes || []) {
+    // panWindowHoles is circular because it is also used by the thumbnail.
+    // In this open window, a hole on the far side of the horizon can wrap
+    // across the projected seam and carve a false vertical drop through the
+    // local tree line. Only carry a mask path that reaches this view.
+    if (!top.some(([az]) => Math.abs(panAzDelta(az, view.az0)) <= half + 1)) continue;
+    top.forEach(([az, alt], k) => {
+      const p = panProjectWide(alt, az, view);
+      if (k) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y);
+    });
+    for (let k = floor.length - 1; k >= 0; k--) {
+      const p = panProjectWide(floor[k][1], floor[k][0], view);
+      ctx.lineTo(p.x, p.y);
+    }
     ctx.closePath();
   }
-  ctx.fillStyle = style.fill;
-  ctx.fill('evenodd');
-
-  // the crest along the ring, and along each window's floor: the tops of what
-  // stands under the crowns
-  const lines = panRuns(top, true).map(run => run.map(i => top[i]));
-  for (const { floor } of holes || []) {
-    const pts = floor.map(([az, alt]) => panProject(alt, az, view));
-    for (const run of panRuns(pts, false)) lines.push(run.map(i => pts[i]));
+    if (style.fill) { ctx.fillStyle = style.fill; ctx.fill('evenodd'); }
   }
-  for (const line of lines) {
-    if (line.length < 2) continue;
-    // the rim of sky light along the crest, same as the flat ridge
-    ctx.beginPath();
-    ctx.moveTo(line[0].x, line[0].y);
-    for (let k = 1; k < line.length; k++) ctx.lineTo(line[k].x, line[k].y);
-    if (style.rim) {
-      ctx.save();
+  if (style.rim) {
+    for (const r of runs) {
+      ctx.beginPath();
+      r.forEach((i, k) => k ? ctx.lineTo(crest[i].x, crest[i].y) : ctx.moveTo(crest[i].x, crest[i].y));
       ctx.strokeStyle = style.rim;
       ctx.lineWidth = 11;
       ctx.stroke();
-      ctx.restore();
     }
+  }
+  for (const r of runs) {
+    ctx.beginPath();
+    r.forEach((i, k) => k ? ctx.lineTo(crest[i].x, crest[i].y) : ctx.moveTo(crest[i].x, crest[i].y));
     ctx.setLineDash(style.dash);
     ctx.strokeStyle = style.crest;
-    ctx.lineWidth = 1;
+    ctx.lineWidth = style.crestWidth || 1;
     ctx.stroke();
-    ctx.setLineDash([]);
   }
+  ctx.setLineDash([]);
+  ctx.restore();
 }
 
+function panDistanceLabel(m) {
+  if (m >= 10000) return Math.round(m / 1000) + ' km';
+  if (m >= 1000) return (m / 1000).toFixed(1) + ' km';
+  return Math.round(m / 25) * 25 + ' m';
+}
 
-function drawRidgeView(ctx, horizon, view, w, h, canopy) {
+// A few quiet labels belong beside their actual ridge crests, not in a key
+// below the scene. Each uses its own bearing so it reports a real ray rather
+// than a generic distance for the whole band.
+// Whether a terrain point is actually visible through the local vegetation.
+// This mirrors the foreground mask: an open lidar window is transparent, but
+// a crown or structure in front of the point is not.
+function panTerrainVisibleThroughCanopy(alt, canopy, az) {
+  if (!canopy) return true;
+  if (canopy.s && horizonAt(canopy.s, az) > alt + 0.1) return false;
+  if (!canopy.t || horizonAt(canopy.t, az) <= alt + 0.1) return true;
+  if (!canopy.lo || !canopy.hi) return false;
+  const lo = horizonAt(canopy.lo, az), hi = horizonAt(canopy.hi, az);
+  return hi > lo + 0.1 && alt > lo + 0.1 && alt < hi - 0.1;
+}
+
+const PAN_MAX_RIDGE_LABELS = 3;
+const PAN_DISTANCE_TRACK_LOG_GAP = 0.22;
+
+// The all-azimuth DEM skyline is not itself a single ridge. Split its clear
+// samples where the terrain hit jumps in range, so 29 km and 76 km crests in
+// adjacent notches receive their own anchored labels rather than one label
+// that chases the middle of the window.
+function panDistanceRuns(runs) {
+  const out = [];
+  for (const run of runs) {
+    let part = [];
+    for (const point of run) {
+      const prev = part.at(-1);
+      if (prev && Math.abs(Math.log(point.m / prev.m)) > PAN_DISTANCE_TRACK_LOG_GAP) {
+        if (part.length >= PAN_RIDGE_MIN_RUN) out.push(part);
+        part = [];
+      }
+      part.push(point);
+    }
+    if (part.length >= PAN_RIDGE_MIN_RUN) out.push(part);
+  }
+  return out;
+}
+
+function drawRidgeDistancesView(ctx, terrain, terrainRange, ridges, ridgeRanges, canopy, ridgeMasks, view, w, h) {
+  const sources = [];
+  // The complete skyline is most important: it can be a far crest precisely
+  // where a short tracked profile ends. Then add sustained tracks far to near.
+  if (terrain && terrainRange) sources.push({ profile: terrain, ranges: terrainRange, mask: null, base: true });
+  if (ridges && ridgeRanges) {
+    for (let i = ridges.length - 1; i >= 0; i--)
+      if (ridgeRanges[i]) sources.push({ profile: ridges[i], ranges: ridgeRanges[i], mask: ridgeMasks && ridgeMasks[i] });
+  }
+  if (!sources.length) return;
+  ctx.save();
+  ctx.font = '10px "IBM Plex Sans", system-ui, sans-serif';
+  ctx.textBaseline = 'bottom';
+  const half = PAN_VIEW_FOV / 2;
+  const placed = [];
+  for (const source of sources) {
+    if (placed.length >= PAN_MAX_RIDGE_LABELS) break;
+    // A global physical ridge can only cross part of this particular window.
+    // Find its longest exposed local run, rather than deriving a label bearing
+    // from its global array index (which made a 16-track view label one ridge).
+    const runs = [], run = [];
+    for (let d = -half; d <= half; d += 1) {
+      const az = view.az0 + d;
+      const alt = horizonAt(source.profile, az);
+      const m = horizonAt(source.ranges, az);
+      const p = panProject(alt, az, view);
+      if (m && panMaskAt(source.mask, az) &&
+          panTerrainVisibleThroughCanopy(alt, canopy, az) && p && p.y >= 16 && p.y <= h - 8) {
+        run.push({ p, m });
+      } else if (run.length) { runs.push(run.splice(0)); }
+    }
+    if (run.length) runs.push(run);
+    const longest = runs.reduce((best, candidate) => candidate.length > best.length ? candidate : best, []);
+    if (!longest.length) continue;
+    // A complete skyline can cross several physical ridges in this one view;
+    // each stable distance run gets its own anchor. Tracked profiles already
+    // represent one physical ridge, so they keep their longest clear run.
+    const labelRuns = source.base
+      ? panDistanceRuns(runs).sort((a, b) =>
+        Math.abs(a[Math.floor(a.length / 2)].p.x - w / 2) - Math.abs(b[Math.floor(b.length / 2)].p.x - w / 2))
+      : [longest];
+    for (const preferred of labelRuns) {
+      if (placed.length >= PAN_MAX_RIDGE_LABELS) break;
+      // Work outward from the actual run's midpoint if another label is there.
+      // Unlike the previous centre-seeking rule, turning the view does not
+      // make this text migrate onto an unrelated ridge or notch.
+      const mid = Math.floor(preferred.length / 2);
+      const candidates = [mid];
+      for (let step = 1; step < preferred.length; step++) {
+        if (mid - step >= 0) candidates.push(mid - step);
+        if (mid + step < preferred.length) candidates.push(mid + step);
+      }
+      const label = panDistanceLabel(preferred[mid].m);
+      const labelW = ctx.measureText(label).width;
+      const choice = candidates.map(k => preferred[k]).find(({ p }) => {
+        const box = { left: p.x + 4, right: p.x + 4 + labelW, top: p.y - 16, bottom: p.y - 3 };
+        return placed.every(q =>
+          // Two tracks at effectively the same distance do not earn two
+          // labels merely because their pale fills happened to separate.
+          Math.abs(Math.log(preferred[mid].m / q.m)) > 0.12 &&
+          (box.right + 10 < q.left || box.left > q.right + 10 ||
+           box.bottom + 7 < q.top || box.top > q.bottom + 7));
+      });
+      if (!choice) continue;
+      // The full skyline identifies the actual opening being viewed. Keep it
+      // quiet, but give it enough contrast to survive the sky wash.
+      ctx.fillStyle = source.base
+        ? 'rgba(215,226,246,0.72)'
+        : 'rgba(207,219,239,0.42)';
+      ctx.fillText(label, Math.min(w - 42, choice.p.x + 5), choice.p.y - 4);
+      placed.push({ left: choice.p.x + 4, right: choice.p.x + 4 + labelW, top: choice.p.y - 16, bottom: choice.p.y - 3, m: choice.m });
+    }
+  }
+  const near = ridges && ridges[0] || terrain;
+  const nearAlt = near && horizonAt(near, view.az0);
+  if (near && nearAlt <= -1.5 && panTerrainVisibleThroughCanopy(nearAlt, canopy, view.az0)) {
+    const p = panProject(nearAlt, view.az0, view);
+    if (p) ctx.fillText('valley \u2193', p.x + 7, Math.max(14, p.y - 5));
+  }
+  ctx.restore();
+}
+
+function drawRidgeView(ctx, horizon, horizonRange, view, w, h, canopy, ridges, ridgeRanges, key) {
   const terrain = horizon || new Float64Array(360);   // a picked point: flat at 0
-  if (canopy && canopy.s) panRingView(ctx, panMaxProfile(panMaxProfile(terrain, canopy.t), canopy.s), view, w, h, PAN_LAYERS.structures, panStructureHoles(canopy, true));
-  if (canopy && canopy.t) panRingView(ctx, panMaxProfile(terrain, canopy.t), view, w, h, PAN_LAYERS.trees, panWindowHoles(canopy.lo, canopy.hi, true));
   const g = ctx.createLinearGradient(0, 0, 0, h);
   g.addColorStop(0, '#0b1226');
   g.addColorStop(1, '#03060f');
-  panRingView(ctx, terrain, view, w, h, { fill: g, crest: 'rgba(132,152,204,0.5)', dash: [], rim: 'rgba(140,164,220,0.10)' });
+  // The full DEM raycast is the authoritative skyline. The experimental
+  // tracked crests and local road ribbons can form angular 1-D fragments or
+  // duplicate the same physical ridge, so they remain analysis data only
+  // until a real surface renderer can validate them against the ground view.
+  const ridgeMasks = null;
+  panWindowRidge(ctx, terrain, view, w, h,
+    { fill: g, crest: 'rgba(202,220,248,0.78)', crestWidth: 1.6, dash: [], rim: null });
+  if (canopy && canopy.t) {
+    const holes = panWindowHoles(canopy.lo, canopy.hi, true);
+    panWindowRidge(ctx, canopy.t, view, w, h, PAN_LAYERS.trees, holes);
+    panWindowRidge(ctx, panTreeOcclusionProfile(canopy.t, terrain), view, w, h, PAN_LAYERS.treeOcclusion, holes);
+  }
+  if (canopy && canopy.s) panWindowRidge(ctx, canopy.s, view, w, h, PAN_LAYERS.structures, panStructureHoles(canopy, true));
+  drawRidgeDistancesView(ctx, horizon, horizonRange, null, null, canopy, ridgeMasks, view, w, h);
   if (!horizon) {
     const label = panProject(0, view.az0, view);
     if (label) {
@@ -705,14 +1006,15 @@ function drawRidgeView(ctx, horizon, view, w, h, canopy) {
 }
 
 function drawSkyView(ctx, w, h, opts) {
-  const view = { az0: opts.az0, alt0: opts.alt0, fov: opts.fov, w: w, h: h };
+  const view = { az0: opts.az0, w: w, h: h };
   const sky = skyContext(opts);
   drawSkyWashView(ctx, w, h, view);
   drawMilkyWayView(ctx, sky, view, w, h);
   drawStarsView(ctx, sky, view, w, h);
   drawMoonView(ctx, sky, view);
   drawGridView(ctx, view, w, h);
-  drawRidgeView(ctx, opts.horizon, view, w, h, opts.canopy);
+  drawCompassTopView(ctx, view);
+  drawRidgeView(ctx, opts.horizon, opts.horizonRange, view, w, h, opts.canopy, opts.ridges, opts.ridgeRanges, opts.key);
   drawLevelView(ctx, view);
 }
 

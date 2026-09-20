@@ -333,7 +333,7 @@ def structure_mask(dx, dy, z, cls):
     return built | very_tall
 
 
-def profiles_for(x, y, z, cls, lat, lon, deck=None):
+def profiles_for(x, y, z, cls, lat, lon, deck=None, eye_m=bh.EYE):
     """both layers from one site's points, and the deck pair when deck, the
     tower's [lat, lon, m], is set: raycast from the tower's own ground, not
     the view's. None when no ground return sits near enough to the pin to put an eye
@@ -356,9 +356,9 @@ def profiles_for(x, y, z, cls, lat, lon, deck=None):
         return {'t': [round(float(a), 4) for a in skyline(dx[trees] - ex, dy[trees] - ey, z[trees], eye_z, min_r)],
                 's': [round(float(a), 4) for a in skyline(dx[built] - ex, dy[built] - ey, z[built], eye_z, min_r)]}
 
-    out = {'ground_m': ground, 'eye_m': ground + bh.EYE, 'classes': counts}
-    out.update(pair(ground + bh.EYE, MIN_R))
-    wf, wb = canopy_bands(dx[trees], dy[trees], z[trees], ground + bh.EYE, MIN_R)
+    out = {'ground_m': ground, 'eye_m': ground + eye_m, 'classes': counts}
+    out.update(pair(ground + eye_m, MIN_R))
+    wf, wb = canopy_bands(dx[trees], dy[trees], z[trees], ground + eye_m, MIN_R)
     top = np.asarray(out['t'])
     # no window reads as f = b = t, so the page draws exactly what it drew before
     out['f'] = [round(float(v), 4) for v in np.where(np.isnan(wf), top, np.minimum(wf, top))]
@@ -837,10 +837,13 @@ def site_list(html):
     the ones the next pull-off needs, and the in-memory node cache only helps
     when those two run back to back."""
     spots = [{'name': s['name'], 'key': s['name'], 'ov_id': None,
-              'view_lat': s['view_lat'], 'view_lon': s['view_lon'], 'deck': s['deck']}
+              'view_lat': s['view_lat'], 'view_lon': s['view_lon'], 'deck': s['deck'], 'eye_m': bh.EYE}
              for s in bh.parse_spots(html)]
+    calibrations = bh.viewpoint_calibrations()
     ovs = [{'name': o['name'], 'key': 'ov:' + o['id'], 'ov_id': o['id'],
-            'view_lat': o['lat'], 'view_lon': o['lon'], 'deck': None}
+            'view_lat': calibrations.get(o['id'], {}).get('lat', o['lat']),
+            'view_lon': calibrations.get(o['id'], {}).get('lon', o['lon']), 'deck': None,
+            'eye_m': calibrations.get(o['id'], {}).get('eye_m', bh.EYE)}
            for o in bh.parse_overlooks(html)]
     # 0.05 degree bands of latitude, west to east within a band
     return sorted(spots + ovs, key=lambda s: (round(s['view_lat'] / 0.05), s['view_lon']))
@@ -863,6 +866,7 @@ def cache_ok(rec, site):
     every site, which is the point of recording the list."""
     return (abs(rec.get('lat', 1e9) - site['view_lat']) < 1e-9
             and abs(rec.get('lon', 1e9) - site['view_lon']) < 1e-9
+            and abs(float(rec.get('eye_offset_m', bh.EYE)) - site.get('eye_m', bh.EYE)) < 1e-9
             and rec.get('radius_m') == RADIUS
             and rec.get('deck_at') == site.get('deck')
             and rec.get('candidates') == DATASETS
@@ -1202,9 +1206,10 @@ def main():
             print('[%s] %s ... fetch failed: %s' % (time.strftime('%H:%M:%S'), s['name'], e), flush=True)
             continue
         rec = {'name': s['name'], 'ov_id': s['ov_id'], 'lat': s['view_lat'], 'lon': s['view_lon'],
+               'eye_offset_m': s.get('eye_m', bh.EYE),
                'radius_m': RADIUS, 'deck_m': s['deck'][2] if s['deck'] else None, 'deck_at': s['deck'], 'candidates': DATASETS, 'datasets': used,
                'nodes': nodes, 'bytes': nbytes, 'vintage': VINTAGE, 'model': MODEL, 't': None, 's': None, 'deck': None}
-        prof = profiles_for(x, y, z, c, s['view_lat'], s['view_lon'], s['deck']) if used else None
+        prof = profiles_for(x, y, z, c, s['view_lat'], s['view_lon'], s['deck'], s.get('eye_m', bh.EYE)) if used else None
         if prof is None:
             rec['reason'] = 'no lidar in any dataset' if not used else 'no ground return within %g m of the pin' % PIN_R_WIDE
             print('[%s] %s ... %s, left out' % (time.strftime('%H:%M:%S'), s['name'], rec['reason']), flush=True)

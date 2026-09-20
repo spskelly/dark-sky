@@ -34,7 +34,7 @@ const ctx = { Math, HORIZON_ALT_MIN: -10, HORIZON_ALT_RANGE: 90 };
 vm.createContext(ctx);
 vm.runInContext(astro, ctx);
 vm.runInContext(src, ctx);
-const { azToX, panProject, easternInstant, easternParts, decodeHorizon, decodeCanopy, panMaxProfile, panBlocking, panBlock, clearsRidge, panLayerAt, horizonSummary } = ctx;
+const { azToX, panProject, panCompassMarks, easternInstant, easternParts, decodeHorizon, decodeRidgeLayers, decodeRidgeRanges, panTerrainBands, panSceneBands, panVisibleRidgeMasks, panDistanceRuns, panTreeOcclusionProfile, decodeCanopy, panMaxProfile, panBlocking, panBlock, clearsRidge, panLayerAt, panTerrainVisibleThroughCanopy, horizonSummary } = ctx;
 
 test('azToX is a plain affine map: the window edges land on 0 and w', () => {
   // centre 180, a 120 degree window: the edges are 120 and 240
@@ -55,76 +55,98 @@ test('azToX at the thumb defaults reproduces the old full-turn formula exactly',
   assert.equal(azToX(360, 180, 360, 720), 720);
 });
 
-// panProject: the stereographic map the dialog viewer draws through. every
-// draw routine in that mode goes through this one function, so a bug here is
-// a bug everywhere -- the ridge, the stars, the grid, the moon.
-test('panProject: the view centre maps to the centre of the canvas', () => {
-  const view = { az0: 200, alt0: 25, fov: 100, w: 900, h: 600 };
-  const p = panProject(25, 200, view);
-  assert.ok(Math.abs(p.x - 450) < 1e-6 && Math.abs(p.y - 300) < 1e-6, `expected (450, 300), got (${p.x}, ${p.y})`);
+test('compass marks stay in the sky at the top of the current landscape window', () => {
+  const marks = panCompassMarks({ az0: 180, w: 1100, h: 600 });
+  assert.deepEqual(Array.from(marks, m => m.label), ['SE', 'S', 'SW']);
+  assert.deepEqual(Array.from(marks, m => Math.round(m.x)), [100, 550, 1000]);
+  assert.deepEqual(Array.from(panCompassMarks({ az0: 160, w: 1100, h: 600 }), m => m.label), ['SE', 'S']);
 });
 
-test('panProject: a point 90 degrees off in azimuth at the view centre\'s own altitude lands left or right, never above or below the centre row by much', () => {
-  const view = { az0: 200, alt0: 25, fov: 100, w: 900, h: 600 };
-  const right = panProject(25, 290, view);   // +90 degrees of azimuth: clockwise, so screen-right
-  const left = panProject(25, 110, view);    // -90 degrees: screen-left
-  assert.ok(right.x > 450, `expected right of centre, got x=${right.x}`);
-  assert.ok(left.x < 450, `expected left of centre, got x=${left.x}`);
-  // symmetric off the view centre's own meridian, so the two are mirror images
-  assert.ok(Math.abs((right.x - 450) + (left.x - 450)) < 1e-6,
-    `expected the pair symmetric about the centre column (right ${right.x}, left ${left.x})`);
+test('ridge bands decode nearest first and paint farthest first', () => {
+  const band = v => {
+    const n = Math.round((v + 10) / 90 * 4095);
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    return (chars[Math.floor(n / 64)] + chars[n % 64]).repeat(360);
+  };
+  const layers = decodeRidgeLayers([band(12), band(5), band(1)]);
+  assert.equal(layers.length, 3);
+  assert.ok(Math.abs(layers[0][0] - 12) < 0.03);
+  assert.deepEqual(Array.from(panTerrainBands(layers[0], layers), p => Math.round(p[0])), [1, 5, 12]);
+  assert.equal(decodeRidgeLayers(null), null);
 });
 
-test('panProject: directly behind the viewer returns null', () => {
-  const view = { az0: 180, alt0: 25, fov: 100, w: 900, h: 600 };
-  // the antipode of the view centre: 180 degrees of angular distance, the
-  // farthest a point can be, and well past the 100 degree cull
-  assert.equal(panProject(-25, 0, view), null);
+test('the continuous DEM skyline stays behind every adaptive ridge track', () => {
+  const skyline = flat(8), near = flat(4), far = flat(6);
+  assert.deepEqual(Array.from(panSceneBands(skyline, [near, far]), p => Math.round(p[0])), [8, 6, 4]);
+  assert.deepEqual(Array.from(panSceneBands(skyline, null), p => Math.round(p[0])), [8]);
 });
 
-test('panProject: a point 150 degrees off is culled, one 80 degrees off is not', () => {
-  const view = { az0: 180, alt0: 0, fov: 100, w: 900, h: 600 };
-  assert.equal(panProject(0, 330, view), null);          // 150 degrees of azimuth off, same altitude
-  assert.ok(panProject(0, 260, view) !== null);          // 80 degrees off: still in front of the viewer
+test('a full skyline labels separate sustained distance tracks instead of chasing the viewport centre', () => {
+  const run = [
+    { m: 29000, p: { x: 0 } }, { m: 29425, p: { x: 1 } }, { m: 29125, p: { x: 2 } },
+    { m: 76450, p: { x: 3 } }, { m: 80200, p: { x: 4 } }, { m: 79725, p: { x: 5 } },
+  ];
+  const tracks = panDistanceRuns([run]);
+  assert.deepEqual(Array.from(tracks, a => a.length), [3, 3]);
+  assert.equal(Math.round(tracks[0][1].m / 1000), 29);
+  assert.equal(Math.round(tracks[1][1].m / 1000), 80);
 });
 
-test('panProject: the zenith projects to a finite point when looking straight up', () => {
-  const view = { az0: 0, alt0: 90, fov: 100, w: 900, h: 600 };
-  const p = panProject(90, 0, view);
-  assert.ok(Number.isFinite(p.x) && Number.isFinite(p.y), `expected finite, got (${p.x}, ${p.y})`);
-  assert.ok(Math.abs(p.x - 450) < 1e-6 && Math.abs(p.y - 300) < 1e-6, 'and it is the view centre, so it is the canvas centre');
-  // a point 10 degrees down from the zenith, at any azimuth, is the same
-  // angular distance from centre either way -- looking straight up, altitude
-  // circles are rings, not the strips they are everywhere else
-  const a = panProject(80, 0, view), b = panProject(80, 200, view);
-  const ra = Math.hypot(a.x - 450, a.y - 300), rb = Math.hypot(b.x - 450, b.y - 300);
-  assert.ok(Math.abs(ra - rb) < 1e-6, `expected the same radius at any azimuth (${ra} vs ${rb})`);
+test('every sustained, distinct exposed ridge is drawn at a bearing', () => {
+  const bands = [flat(4), flat(4.5), flat(6), flat(8), flat(10)];
+  const masks = panVisibleRidgeMasks(bands);
+  assert.equal(masks[0][120], 1, 'foreground terrain is always present');
+  assert.equal(masks[1][120], 0, 'a shallow shell is not a separate ridge');
+  assert.equal(masks[2][120], 1, 'the first clear farther crest is retained');
+  assert.equal(masks[3][120], 1, 'another independently exposed crest is retained');
+  assert.equal(masks[4][120], 1, 'a deep view may retain still another crest');
 });
 
-test('panProject: fov is a true angular field, not an azimuth degree count', () => {
-  // at alt0 = 0, an azimuth offset and the true angular distance from centre
-  // are the same thing (both points sit on the horizon), so this is the one
-  // case an edge lands at a known pixel exactly
-  const view = { az0: 90, alt0: 0, fov: 80, w: 1000, h: 600 };
-  const edgeR = panProject(0, 90 + 40, view);
-  const edgeL = panProject(0, 90 - 40, view);
-  assert.ok(Math.abs(edgeR.x - 1000) < 1e-6, `right edge of the window at x=1000, got ${edgeR.x}`);
-  assert.ok(Math.abs(edgeL.x - 0) < 1e-6, `left edge of the window at x=0, got ${edgeL.x}`);
+test('a one-degree notch does not manufacture an extra ridge band', () => {
+  const near = flat(4), middle = flat(4);
+  const far = flat(4);
+  far[120] = 8;
+  const masks = panVisibleRidgeMasks([near, middle, far]);
+  assert.equal(masks[2][120], 0);
+});
 
-  // away from the horizon, an azimuth offset of fov/2 is NOT fov/2 of true
-  // angular distance (lines of azimuth converge toward the pole, the same
-  // way lines of longitude do) -- an offset that has to hug the edge exactly
-  // would be the wrong fix; a straight-up offset of fov/2, which is always a
-  // true angular distance whatever the altitude, is the one that belongs on
-  // the edge instead
-  const tilted = { az0: 90, alt0: 40, fov: 80, w: 1000, h: 600 };
-  const notEdge = panProject(40, 90 + 40, tilted);
-  assert.ok(Math.abs(notEdge.x - 1000) > 1, `an azimuth offset off the horizon should miss the edge, got ${notEdge.x}`);
-  const trueEdge = panProject(40 + 40, 90, tilted);
-  assert.ok(Math.abs(trueEdge.x - 500) < 1e-6, 'a pure altitude offset stays on the centre column');
-  assert.ok(trueEdge.y < 300, 'and moves toward the top of the canvas');
-  const radius = Math.hypot(trueEdge.x - 500, trueEdge.y - 300);
-  assert.ok(Math.abs(radius - 500) < 1e-6, `fov/2 of true angular distance lands exactly on the edge radius (${radius})`);
+test('tree crowns are opaque only where they overlap the terrain silhouette', () => {
+  const cover = panTreeOcclusionProfile([12, 3, -6], [5, 5, -2]);
+  assert.deepEqual(Array.from(cover), [5, 3, -6]);
+  assert.equal(panTreeOcclusionProfile(null, [5]), null);
+});
+
+test('ridge distance bands decode in 25 m steps', () => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const encoded = n => (chars[Math.floor(n / 64)] + chars[n % 64]).repeat(360);
+  const ranges = decodeRidgeRanges([encoded(20), encoded(480)]);
+  assert.deepEqual(Array.from(ranges, p => p[0]), [500, 12000]);
+  assert.equal(decodeRidgeRanges(undefined), null);
+});
+
+// panProject is a deliberately stable horizon window. There is no virtual
+// camera pitch or zoom: turning only moves the bearing beneath a fixed scale.
+test('panProject: the centre bearing stays centred and level stays at one stable row', () => {
+  const view = { az0: 200, w: 900, h: 600 };
+  const p = panProject(0, 200, view);
+  assert.ok(Math.abs(p.x - 450) < 1e-6, `expected centre x 450, got ${p.x}`);
+  assert.ok(Math.abs(p.y - (68 / 86 * 600)) < 1e-6, `expected fixed level row, got ${p.y}`);
+});
+
+test('panProject: bearings map linearly across the fixed 110 degree window', () => {
+  const view = { az0: 90, w: 1100, h: 600 };
+  assert.equal(panProject(0, 35, view).x, 0);
+  assert.equal(panProject(0, 145, view).x, 1100);
+  assert.equal(panProject(0, 146, view), null);
+  assert.equal(panProject(0, 34, view), null);
+});
+
+test('panProject: altitude is linear and independent of bearing', () => {
+  const view = { az0: 0, w: 1000, h: 860 };
+  const a = panProject(20, 0, view), b = panProject(20, 30, view);
+  assert.equal(a.y, b.y);
+  assert.ok(panProject(30, 0, view).y < a.y, 'higher altitude moves up');
+  assert.equal(panProject(69, 0, view), null);
 });
 
 // eastern-date anchoring: which evening a picked date or "tonight" means has
@@ -233,6 +255,14 @@ test('clearsRidge: inside the window is seen, in the crowns is not, above the tr
   assert.equal(clearsRidge(w, { alt: 50, az: 90 }), false);
   assert.equal(clearsRidge(w, { alt: 65, az: 90 }), true);
   assert.equal(clearsRidge(w, { alt: 2, az: 90 }), false);
+});
+
+test('ridge labels only appear where their terrain is visible through foreground canopy', () => {
+  const c = withWindow();
+  assert.equal(panTerrainVisibleThroughCanopy(20, c, 90), true, 'the open window exposes a ridge inside it');
+  assert.equal(panTerrainVisibleThroughCanopy(40, c, 90), false, 'the crown above that window hides it');
+  assert.equal(panTerrainVisibleThroughCanopy(-6, c, 90), false, 'the foreground below that window hides it');
+  assert.equal(panTerrainVisibleThroughCanopy(20, { ...c, s: flat(25) }, 90), false, 'a foreground structure hides it too');
 });
 
 test('a window under the ridge is no window', () => {

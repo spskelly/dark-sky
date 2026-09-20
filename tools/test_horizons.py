@@ -137,6 +137,68 @@ class TestCodec(unittest.TestCase):
         self.assertEqual(bh.encode([180.0]), '//')
 
 
+class TestRidgeLayers(unittest.TestCase):
+
+    def test_adaptive_stack_keeps_each_exposed_local_summit_without_a_fixed_count(self):
+        # Three successive local maxima rise by more than the prominence cut;
+        # the intervening valleys make them actual mountain crests, not an
+        # arbitrary distance-bin maximum.
+        ranges = np.arange(50.0, 3600.0, 50.0)
+        peaks = [(500.0, 2.0), (1500.0, 3.0), (2500.0, 4.0)]
+        alt = np.array([[max(0.0, h * (1 - abs(r - c) / 300.0)) for r in ranges]
+                        for c, h in [peaks[0]]], dtype=float)
+        for center, height in peaks[1:]:
+            alt[0] = np.maximum(alt[0], [max(0.0, height * (1 - abs(r - center) / 300.0)) for r in ranges])
+        layers, layer_ranges = bh.ridge_stack(np.repeat(alt, 12, axis=0), ranges)
+        self.assertEqual(len(layers), 3)
+        self.assertTrue(np.all(np.diff([p[0] for p in layers]) > bh.RIDGE_PROMINENCE))
+        np.testing.assert_allclose([p[0] for p in layer_ranges], [500.0, 1500.0, 2500.0], atol=100.0)
+
+    def test_adaptive_stack_rejects_a_shallow_bump_and_keeps_the_outer_horizon(self):
+        ranges = np.arange(50.0, 3600.0, 50.0)
+        peaks = [(500.0, 2.0), (1500.0, 2.3), (2500.0, 5.0)]
+        alt = np.array([[max(0.0, h * (1 - abs(r - c) / 300.0)) for r in ranges]
+                        for c, h in [peaks[0]]], dtype=float)
+        for center, height in peaks[1:]:
+            alt[0] = np.maximum(alt[0], [max(0.0, height * (1 - abs(r - center) / 300.0)) for r in ranges])
+        layers, layer_ranges = bh.ridge_stack(np.repeat(alt, 12, axis=0), ranges)
+        self.assertEqual(len(layers), 2)
+        np.testing.assert_allclose([p[0] for p in layer_ranges], [500.0, 2500.0], atol=100.0)
+
+    def test_legacy_layers_keep_each_visible_skyline_sample_in_its_range_band(self):
+        alt = np.arange(360, dtype=float)
+        ranges = np.full(360, 500.0)
+        ranges[1:5] = [2000.0, 7000.0, 20000.0, 50000.0]
+        layers = bh.legacy_ridge_layers(alt, ranges)
+        self.assertEqual(len(layers), 5)
+        for i in range(5):
+            self.assertEqual(layers[i][i], float(i))
+        self.assertEqual(layers[0][1], bh.ALT_MIN)
+
+    def test_range_codec_is_25_m_quantised_and_fits_two_characters(self):
+        values = [0.0, 150.0, 1234.0, 99999.0]
+        enc = bh.encode_range(values)
+        self.assertEqual(len(enc), 8)
+        got = [((bh.B64.index(enc[2 * i]) * 64 + bh.B64.index(enc[2 * i + 1])) * bh.RANGE_UNIT_M)
+               for i in range(len(values))]
+        np.testing.assert_allclose(got, values, atol=bh.RANGE_UNIT_M / 2)
+
+    def test_layer_block_uses_page_keys_and_three_encoded_profiles(self):
+        layers = [[0.0] * 360, [1.0] * 360, [2.0] * 360]
+        results = {'ov:n11': {'layers': layers}}
+        js = bh.ridge_layers_js('OVERLOOK_HORIZON_LAYERS', [{'id': 'n11'}], results,
+                                lambda o: 'ov:' + o['id'])
+        self.assertTrue(js.startswith('const OVERLOOK_HORIZON_LAYERS = {\n  "n11": ['))
+        self.assertEqual(js.count('"'), 8)  # key plus three base64 strings
+
+    def test_full_skyline_range_block_uses_the_same_page_key(self):
+        results = {'ov:n11': {'range_m': [29000.0] * 360}}
+        js = bh.horizon_ranges_js('OVERLOOK_HORIZON_RANGES', [{'id': 'n11'}], results,
+                                  lambda o: 'ov:' + o['id'])
+        self.assertTrue(js.startswith('const OVERLOOK_HORIZON_RANGES = {\n  "n11": "'))
+        self.assertTrue(js.endswith('",\n};'))
+
+
 class TestSpotParsing(unittest.TestCase):
 
     def test_reads_both_quote_styles(self):

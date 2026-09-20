@@ -42,13 +42,22 @@ import sys
 import time
 
 import numpy as np
-import rasterio
-from rasterio.windows import Window
+try:
+    import rasterio
+    from rasterio.windows import Window
+except ModuleNotFoundError:
+    # A cache-only run is still useful: it can inline already computed terrain
+    # (including the first distance-band migration) on a machine that does not
+    # have the raster reader installed. A fresh raycast below names the missing
+    # dependency plainly instead of failing before --dry-run can explain work.
+    rasterio = None
+    Window = None
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = os.path.join(ROOT, 'index.html')
 CACHE = os.path.join(ROOT, 'tools', '.horizon-cache')
 TILES = 'S:\\dem_tiles'
+VIEWPOINT_CALIBRATIONS = os.path.join(ROOT, 'tools', 'viewpoint-calibrations.json')
 
 START = '// --- horizons:start (generated, do not edit by hand) ---'
 END = '// --- horizons:end ---'
@@ -64,7 +73,7 @@ NODATA = -999999.0
 
 ALT_MIN = -10.0       # degrees, the bottom of the encoded range
 ALT_RANGE = 90.0      # degrees of span, so -10 .. +80
-EYE = 1.7             # metres of person above the dem
+EYE = 1.8             # metres: ordinary standing-eye baseline above the DEM
 MAX_RANGE = 100000.0  # metres; past this a ridge is haze
 NEAR = 5000.0         # metres; inside this, full resolution
 
@@ -85,15 +94,28 @@ NEAR = 5000.0         # metres; inside this, full resolution
 #   150 m                  0%            5.8 deg              32.0 deg
 #   400 m                  0%            1.0 deg              17.4 deg
 #
-# 150 m is the knee. it clears every sub-100 m artifact while keeping the
-# features that are really there: devil's courthouse holds its 32 degree rock
-# face and big bald holds its 23 degree summit. by 400 m real ground is being
-# deleted, black balsam falling to a 1 degree horizon it does not have.
-#
-# 150 m is about 15 dem cells. below that a 1/3 arc-second grid cannot tell a
-# ridge from a road cut, and neither could you without stepping ten paces
-# sideways. retune against a photograph taken from a known overlook.
-MIN_RANGE = 150.0
+# 50 m deliberately keeps the immediate terrain now that the viewer separates
+# nearby lidar vegetation from bare earth. It can include a pull-off cut or a
+# shoulder of the ridge, which is the point: many parkway overlooks begin
+# looking out well inside 150 m. The remaining sub-100 m sensitivity is an
+# honest consequence of standing beside that terrain, rather than a reason to
+# erase it from every profile.
+MIN_RANGE = 50.0
+
+# Retained only to read old caches. New profiles are not distance buckets: a
+# deep view gets an adaptive stack of every locally crested, genuinely exposed
+# ridgeline that the DEM ray contains.
+RIDGE_BANDS = ((MIN_RANGE, 1000.0), (1000.0, 4000.0), (4000.0, 12000.0),
+               (12000.0, 35000.0), (35000.0, MAX_RANGE + 1.0))
+RIDGE_PROMINENCE = 0.75  # degrees above the nearer visible crest
+RIDGE_SAMPLE_M = 50.0    # uniform radial resampling for visual crest finding
+RIDGE_SMOOTH_M = 250.0   # merge sub-ridge DEM undulations, not mountains
+RIDGE_TRACK_LOG_GAP = 0.22  # adjacent samples of one ridge may move 25% in range
+RIDGE_TRACK_MIN_DEG = 12    # a physical ridgeline persists across bearings
+RIDGE_LAYER_MODEL = 'terrain-ridge-stack-v7-tracked-continuous'
+# 12 bits, the same compact two-character codec as altitude. 25 m steps cover
+# the whole 100 km ray, and are much finer than a subtle on-screen label needs.
+RANGE_UNIT_M = 25.0
 
 SRC_CPD = 10800       # source cells per degree, ie 1/3 arc-second
 COARSE_CPD = 3600     # far field cells per degree, ie 1 arc-second
@@ -152,6 +174,8 @@ def read_lattice(cpd, row0, row1, col0, col1, block=600):
     every one of them by about 60 m, and the only symptom would be ridgelines
     that are quietly wrong. so each tile's destination is derived from its own
     affine transform and its own degree square, never from its index."""
+    if rasterio is None:
+        raise RuntimeError('rasterio is required to read DEM tiles; install tools/requirements.txt')
     pool = SRC_CPD // cpd
     out = np.full((row1 - row0, col1 - col0), NODATA, np.float32)
     for tlat in range(math.floor(90 - row1 / cpd), math.ceil(90 - row0 / cpd)):
@@ -228,7 +252,7 @@ def ray_ranges():
 RANGES = ray_ranges()
 
 
-def raycast(lat, lon, h_eye, fine, coarse):
+def raycast(lat, lon, h_eye, fine, coarse, layers=False):
     """360 azimuths, north at index 0, increasing clockwise. returns the maximum
     apparent altitude per azimuth and the range that produced it."""
     r = RANGES
@@ -248,7 +272,84 @@ def raycast(lat, lon, h_eye, fine, coarse):
     drop = r ** 2 / (2.0 * R_EFF)
     alt = np.degrees(np.arctan2(h - h_eye - drop[None, :], r[None, :]))
     i = alt.argmax(axis=1)
-    return alt[np.arange(360), i], r[i]
+    skyline = alt[np.arange(360), i]
+    if not layers:
+        return skyline, r[i]
+    stacks, stack_ranges = ridge_stack(alt, r)
+    return skyline, r[i], stacks, stack_ranges
+
+
+def ridge_stack(alt, ranges):
+    """The visible terrain crests in every azimuth ray, near to far.
+
+    A farther mountain is seen only if its summit's apparent altitude exceeds
+    the nearest already-visible crest.  Instead of asking five arbitrary
+    distance bands for their maxima, find real local summits in the sampled
+    high-resolution ray and retain every new angular record with meaningful
+    prominence.  The number of returned profiles is site-dependent: no fixed
+    layer count is imposed.
+    """
+    sample_ranges = np.arange(ranges[0], ranges[-1] + RIDGE_SAMPLE_M * 0.5, RIDGE_SAMPLE_M)
+    half = max(1, round(RIDGE_SMOOTH_M / RIDGE_SAMPLE_M / 2))
+    kernel = np.full(2 * half + 1, 1.0 / (2 * half + 1))
+    candidates = []
+    for row in alt:
+        # Terrain cells are much smaller than a named ridge. Resample each
+        # non-uniform ray to 50 m and smooth it over 250 m before identifying
+        # turning points; the original all-range skyline remains untouched for
+        # astronomy below.
+        trace = np.interp(sample_ranges, ranges, row)
+        smooth = np.convolve(np.pad(trace, half, mode='edge'), kernel, mode='valid')
+        # A summit is a turning point in the smoothed apparent elevation. The
+        # outer skyline is added explicitly: an unfinished rising slope at the
+        # map limit is still a real outer horizon.
+        peaks = np.flatnonzero((smooth[1:-1] >= smooth[:-2]) & (smooth[1:-1] > smooth[2:])) + 1
+        skyline_i = int(smooth.argmax())
+        if skyline_i not in peaks:
+            peaks = np.sort(np.append(peaks, skyline_i))
+        visible, crest = [], -np.inf
+        for at in peaks:
+            value = float(smooth[at])
+            if value > crest + RIDGE_PROMINENCE:
+                visible.append((value, float(sample_ranges[at])))
+                crest = value
+        # A ray that begins on its highest local shoulder has no interior peak
+        # above it, but that shoulder is still its foreground terrain.
+        if not visible:
+            visible = [(float(smooth[skyline_i]), float(sample_ranges[skyline_i]))]
+        candidates.append(visible)
+
+    # A physical ridge changes distance smoothly as it crosses neighbouring
+    # bearings.  Tracking candidates that way avoids the false "third crest"
+    # fragments made when independent per-ray ranks swap places.
+    tracks = []
+    for az, row in enumerate(candidates):
+        available = [t for t in tracks if az - t['last_az'] <= 2]
+        used = set()
+        for value, distance in row:
+            choices = [(abs(math.log(distance / t['last_range'])), k, t)
+                       for k, t in enumerate(available) if k not in used]
+            choices = [item for item in choices if item[0] <= RIDGE_TRACK_LOG_GAP]
+            if choices:
+                _, k, track = min(choices, key=lambda item: item[0])
+                used.add(k)
+            else:
+                track = {'points': []}
+                tracks.append(track)
+                available.append(track)
+                used.add(len(available) - 1)
+            track['points'].append((az, value, distance))
+            track['last_az'], track['last_range'] = az, distance
+
+    tracks = [t for t in tracks if len(t['points']) >= RIDGE_TRACK_MIN_DEG]
+    tracks.sort(key=lambda t: np.median([p[2] for p in t['points']]))
+    profiles = [np.full(360, ALT_MIN, dtype=float) for _ in tracks]
+    profile_ranges = [np.zeros(360, dtype=float) for _ in tracks]
+    for depth, track in enumerate(tracks):
+        for az, value, distance in track['points']:
+            profiles[depth][az] = max(value, ALT_MIN)
+            profile_ranges[depth][az] = distance
+    return profiles, profile_ranges
 
 
 # ---------- encoding ----------
@@ -256,6 +357,38 @@ def raycast(lat, lon, h_eye, fine, coarse):
 def encode(alt):
     v = np.clip(np.rint((np.asarray(alt, float) - ALT_MIN) * 4095.0 / ALT_RANGE), 0, 4095)
     return ''.join(B64[x // 64] + B64[x % 64] for x in v.astype(int))
+
+
+def encode_range(ranges):
+    v = np.clip(np.rint(np.asarray(ranges, float) / RANGE_UNIT_M), 0, 4095).astype(int)
+    return ''.join(B64[x // 64] + B64[x % 64] for x in v)
+
+
+def legacy_ridge_layers(alt, ranges):
+    """A no-new-DEM migration path for existing caches.
+
+    Old records retained the range which supplied each skyline degree. That
+    cannot reveal a ridge hidden behind that skyline, but it does faithfully
+    separate the existing visible silhouette into near/middle/far bands until
+    a --force rebuild can retain the true per-shell maxima.
+    """
+    out = [np.full(360, ALT_MIN, dtype=float) for _ in RIDGE_BANDS]
+    for i, (a, r) in enumerate(zip(alt, ranges)):
+        for j, (lo, hi) in enumerate(RIDGE_BANDS):
+            if lo <= r < hi:
+                out[j][i] = a
+                break
+    return out
+
+
+def legacy_ridge_ranges(ranges):
+    out = [np.zeros(360, dtype=float) for _ in RIDGE_BANDS]
+    for i, r in enumerate(ranges):
+        for j, (lo, hi) in enumerate(RIDGE_BANDS):
+            if lo <= r < hi:
+                out[j][i] = r
+                break
+    return out
 
 
 def decode(s):
@@ -310,6 +443,40 @@ def parse_overlooks(html):
             for line in block.splitlines() if line.strip().startswith('{')]
 
 
+def viewpoint_calibrations():
+    """Small, reviewable corrections for real observation positions.
+
+    An OSM overlook node commonly identifies a pull-off rather than the spot
+    where someone puts a chair. Keep rare, measured corrections out of the
+    generated OVERLOOKS block so an OSM refresh cannot erase them. ``lat`` and
+    ``lon`` are optional; an eye-height correction can use the mapped pin.
+    """
+    if not os.path.exists(VIEWPOINT_CALIBRATIONS):
+        return {}
+    with open(VIEWPOINT_CALIBRATIONS, encoding='utf-8') as f:
+        raw = json.load(f)
+    if not isinstance(raw, dict):
+        raise ValueError('%s must contain an object keyed by overlook id' % VIEWPOINT_CALIBRATIONS)
+    out = {}
+    for ov_id, value in raw.items():
+        if not isinstance(value, dict):
+            raise ValueError('calibration %r must be an object' % ov_id)
+        eye = value.get('eye_m', EYE)
+        if not isinstance(eye, (int, float)) or not 0.3 <= eye <= 3.0:
+            raise ValueError('calibration %r eye_m must be between 0.3 and 3 m' % ov_id)
+        point = {}
+        for field in ('lat', 'lon'):
+            if field in value:
+                if not isinstance(value[field], (int, float)):
+                    raise ValueError('calibration %r %s must be numeric' % (ov_id, field))
+                point[field] = float(value[field])
+        if ('lat' in point) != ('lon' in point):
+            raise ValueError('calibration %r must give both lat and lon' % ov_id)
+        point['eye_m'] = float(eye)
+        out[str(ov_id)] = point
+    return out
+
+
 def slug(name):
     return re.sub(r'-+', '-', re.sub(r'[^a-z0-9]+', '-', name.lower())).strip('-')
 
@@ -325,6 +492,33 @@ def overlook_horizons_js(overlooks, results):
                                           json.dumps(encode(results['ov:' + o['id']]['alt'])))
                    for o in overlooks if 'ov:' + o['id'] in results)
     return 'const OVERLOOK_HORIZONS = {\n' + body + '};'
+
+
+def ridge_layers_js(name, items, results, key):
+    # Result keys use ``ov:<osm id>`` to avoid collisions with spot names;
+    # the page's overlook map is keyed by the bare OSM id.
+    page_key = lambda item: key(item)[3:] if key(item).startswith('ov:') else key(item)
+    body = ''.join('  %s: [%s],\n' % (json.dumps(page_key(item)),
+                                        ', '.join(json.dumps(encode(p)) for p in results[key(item)]['layers']))
+                   for item in items if key(item) in results and results[key(item)].get('layers'))
+    return 'const %s = {\n%s};' % (name, body)
+
+
+def ridge_ranges_js(name, items, results, key):
+    page_key = lambda item: key(item)[3:] if key(item).startswith('ov:') else key(item)
+    body = ''.join('  %s: [%s],\n' % (json.dumps(page_key(item)),
+                                        ', '.join(json.dumps(encode_range(p)) for p in results[key(item)]['layer_range_m']))
+                   for item in items if key(item) in results and results[key(item)].get('layer_range_m'))
+    return 'const %s = {\n%s};' % (name, body)
+
+
+def horizon_ranges_js(name, items, results, key):
+    """The range of the full per-bearing DEM skyline, not only tracked layers."""
+    page_key = lambda item: key(item)[3:] if key(item).startswith('ov:') else key(item)
+    body = ''.join('  %s: %s,\n' % (json.dumps(page_key(item)),
+                                      json.dumps(encode_range(results[key(item)]['range_m'])))
+                   for item in items if key(item) in results and results[key(item)].get('range_m'))
+    return 'const %s = {\n%s};' % (name, body)
 
 
 def save_atomic(path, write):
@@ -387,6 +581,21 @@ def view_elev_js(spots, results, lots):
     return 'const VIEW_ELEV = {\n' + body + '};'
 
 
+def parse_view_elev(html):
+    """Read existing generated walk pairs for a cache-only rewrite."""
+    m = re.search(r'const VIEW_ELEV = \{(.*?)\n\};', html, re.S)
+    if not m:
+        return {}
+    return {json.loads(k): json.loads(v)
+            for k, v in re.findall(r'^\s*("(?:[^"\\]|\\.)*"):\s*(\[[^\]]+\]),?\s*$', m.group(1), re.M)}
+
+
+def view_elev_values_js(spots, values):
+    body = ''.join('  %s: [%d, %d],\n' % (json.dumps(s['name']), values[s['name']][0], values[s['name']][1])
+                   for s in spots if s['has_view'] and s['name'] in values)
+    return 'const VIEW_ELEV = {\n' + body + '};'
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--dry-run', action='store_true', help='say what the real run would do, compute nothing')
@@ -400,11 +609,19 @@ def main():
     if not spots:
         sys.exit('no spots found in index.html; the SPOTS block may have been reformatted')
     overlooks = parse_overlooks(html)
+    preserved_view_elev = parse_view_elev(html)
     for s in spots:
         s['key'] = s['name']
-    ov_spots = [{'name': o['name'], 'key': 'ov:' + o['id'], 'ov_id': o['id'],
-                 'lat': o['lat'], 'lon': o['lon'], 'view_lat': o['lat'], 'view_lon': o['lon'],
-                 'has_view': False, 'elev_ft': None} for o in overlooks]
+    calibrations = viewpoint_calibrations()
+    ov_spots = []
+    for o in overlooks:
+        calibration = calibrations.get(o['id'], {})
+        ov_spots.append({'name': o['name'], 'key': 'ov:' + o['id'], 'ov_id': o['id'],
+                         'lat': o['lat'], 'lon': o['lon'],
+                         'view_lat': calibration.get('lat', o['lat']),
+                         'view_lon': calibration.get('lon', o['lon']),
+                         'eye_m': calibration.get('eye_m', EYE),
+                         'has_view': bool(calibration), 'elev_ft': None})
     todo = [s for s in spots + ov_spots if not args.only or args.only.lower() in s['name'].lower()]
     if not todo:
         sys.exit('--only %r matched nothing' % args.only)
@@ -453,12 +670,29 @@ def main():
             # a deck added, removed or retuned recomputes the spot: the deck
             # line is a second raycast, and two seconds beats a stale profile
             redeck = rec.get('deck_at') != s.get('deck')
-            if not moved and not redeck:
+            reeye = abs(float(rec.get('eye_m', EYE)) - s.get('eye_m', EYE)) > 1e-9
+            relayer = (rec.get('layer_model') != RIDGE_LAYER_MODEL
+                        or not rec.get('layers') or not rec.get('layer_range_m'))
+            if not moved and not redeck and not reeye and not relayer:
                 results[s['key']] = rec
                 print('[%d/%d] %s ... cached' % (i, len(todo), s['name']), flush=True)
                 continue
-            print('[%d/%d] %s ... %s, recomputing' % (i, len(todo), s['name'],
-                                                     'coordinate moved' if moved else 'deck changed'), flush=True)
+            if not moved and not redeck and not reeye and relayer and rasterio is None:
+                # A cache-only machine still gets an honest, if sparse,
+                # migration based on the stored winning skyline ranges.
+                if not rec.get('layer_range_m'):
+                    rec['layers'] = [[round(float(a), 4) for a in p]
+                                     for p in legacy_ridge_layers(rec['alt'], rec.get('range_m', []))]
+                    rec['layer_range_m'] = [[float(a) for a in p]
+                                            for p in legacy_ridge_ranges(rec.get('range_m', []))]
+                rec['layer_model'] = 'skyline-range-fallback-v2'
+                save_atomic(path, write_json(rec))
+                results[s['key']] = rec
+                print('[%d/%d] %s ... cached' % (i, len(todo), s['name']), flush=True)
+                continue
+            why = ('coordinate moved' if moved else 'deck changed' if redeck else
+                   'eye height calibrated' if reeye else 'ridge bands updated')
+            print('[%d/%d] %s ... %s, recomputing' % (i, len(todo), s['name'], why), flush=True)
         t = time.time()
         if not coarse:
             coarse.append(coarse_lattice(args.force))
@@ -467,7 +701,8 @@ def main():
         if h <= NODATA:
             print('[%d/%d] %s ... skipped, no dem coverage' % (i, len(todo), s['name']), flush=True)
             continue
-        alt, rng = raycast(s['view_lat'], s['view_lon'], h + EYE, fine, coarse[0])
+        eye_m = s.get('eye_m', EYE)
+        alt, rng, layers, layer_ranges = raycast(s['view_lat'], s['view_lon'], h + eye_m, fine, coarse[0], layers=True)
         deck_alt = None
         if s.get('deck'):
             dlat, dlon, dm = s['deck']
@@ -479,9 +714,11 @@ def main():
         # peak labels both want the range, and holding it here means adding them
         # later costs an inlining step rather than another 7 GB read off S:.
         rec = {'name': s['name'], 'ov_id': s.get('ov_id'), 'lat': s['view_lat'], 'lon': s['view_lon'],
-               'from_view': s['has_view'], 'dem_m': h,
+               'from_view': s['has_view'], 'eye_m': eye_m, 'dem_m': h,
                'alt': [round(float(a), 4) for a in alt],
                'range_m': [float(x) for x in rng],
+               'layers': [[round(float(a), 4) for a in p] for p in layers],
+               'layer_range_m': [[float(a) for a in p] for p in layer_ranges], 'layer_model': RIDGE_LAYER_MODEL,
                'deck_m': s['deck'][2] if s.get('deck') else None, 'deck_at': s.get('deck'), 'deck_alt': deck_alt}
         save_atomic(path, write_json(rec))
         results[s['key']] = rec
@@ -494,33 +731,36 @@ def main():
     bad = 0
     curated = 0
     lots = {}
-    for s in todo:
-        if s['elev_ft'] is None:
-            continue
-        rec = results.get(s['key'])
-        if not rec:
-            continue
-        curated += 1
-        # compare the listed elev against the coordinate it describes. where a
-        # spot carries a view:, elev is the parking, and measuring it against
-        # the summit the panorama is drawn from would report a gap that is the
-        # walk itself rather than an error.
-        if s['has_view']:
-            fine = fine_lattice(s['lat'], s['lon'])
-            here = float(fine.sample(np.array([s['lat']]), np.array([s['lon']]))[0])
-            lots[s['name']] = here
-        else:
-            here = rec['dem_m']
-        d = here - s['elev_ft'] * 0.3048
-        if abs(d) > 30:
-            bad += 1
-            print('elev check: %-36s dem %5.0f ft, listed %5.0f ft, %+5.0f m'
-                  % (s['name'], here / 0.3048, s['elev_ft'], d))
-    print('elev check: %d of %d spots disagree by more than 30 m' % (bad, curated))
-    if bad:
-        print('  a large gap usually means the listed coordinate is not the listed viewpoint.')
-        print('  the observer stays at the dem height of the coordinate, which is where')
-        print('  somebody actually stands; fix SPOTS by hand if a coordinate is wrong.')
+    if rasterio is None:
+        print('elev check: skipped (rasterio is not installed; cached horizons are still usable)')
+    else:
+        for s in todo:
+            if s['elev_ft'] is None:
+                continue
+            rec = results.get(s['key'])
+            if not rec:
+                continue
+            curated += 1
+            # compare the listed elev against the coordinate it describes. where a
+            # spot carries a view:, elev is the parking, and measuring it against
+            # the summit the panorama is drawn from would report a gap that is the
+            # walk itself rather than an error.
+            if s['has_view']:
+                fine = fine_lattice(s['lat'], s['lon'])
+                here = float(fine.sample(np.array([s['lat']]), np.array([s['lon']]))[0])
+                lots[s['name']] = here
+            else:
+                here = rec['dem_m']
+            d = here - s['elev_ft'] * 0.3048
+            if abs(d) > 30:
+                bad += 1
+                print('elev check: %-36s dem %5.0f ft, listed %5.0f ft, %+5.0f m'
+                      % (s['name'], here / 0.3048, s['elev_ft'], d))
+        print('elev check: %d of %d spots disagree by more than 30 m' % (bad, curated))
+        if bad:
+            print('  a large gap usually means the listed coordinate is not the listed viewpoint.')
+            print('  the observer stays at the dem height of the coordinate, which is where')
+            print('  somebody actually stands; fix SPOTS by hand if a coordinate is wrong.')
 
     body = '\n'.join('  %s: %s,' % (json.dumps(s['name']), json.dumps(encode(results[s['name']]['alt'])))
                      for s in spots if s['name'] in results)
@@ -529,7 +769,15 @@ def main():
              + '\nconst HORIZON_ALT_RANGE = %g;  // degrees, so %g .. %g'
              % (ALT_RANGE, ALT_MIN, ALT_MIN + ALT_RANGE)
              + '\nconst HORIZONS = {\n' + body + '\n};\n'
-             + view_elev_js(spots, results, lots) + '\n' + overlook_horizons_js(overlooks, results) + '\n'
+             + horizon_ranges_js('HORIZON_RANGES', spots, results, lambda s: s['name']) + '\n'
+             + ridge_layers_js('HORIZON_LAYERS', spots, results, lambda s: s['name']) + '\n'
+             + ridge_ranges_js('HORIZON_LAYER_RANGES', spots, results, lambda s: s['name']) + '\n'
+             + (view_elev_js(spots, results, lots) if rasterio is not None
+                else view_elev_values_js(spots, preserved_view_elev)) + '\n'
+             + overlook_horizons_js(overlooks, results) + '\n'
+             + horizon_ranges_js('OVERLOOK_HORIZON_RANGES', overlooks, results, lambda o: 'ov:' + o['id']) + '\n'
+             + ridge_layers_js('OVERLOOK_HORIZON_LAYERS', overlooks, results, lambda o: 'ov:' + o['id']) + '\n'
+             + ridge_ranges_js('OVERLOOK_HORIZON_LAYER_RANGES', overlooks, results, lambda o: 'ov:' + o['id']) + '\n'
              + deck_horizons_js(spots, results) + '\n' + END)
 
     print('\n%d spots and %d overlooks, %.1f kB of index.html'
