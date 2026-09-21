@@ -169,6 +169,17 @@ Nothing downstream of `index.html` needs regenerating. `build-og.mjs` and
 | Sky viewer altitude clamp | floor to +90 degrees, floor = min(35, vertical half-angle - 10), where the half-angle is 2 atan((h/w) tan(fov/4)) | Added 2026-09-17, retuned the same day at Shawn's request: the field of view is set across the width, so a 1100x620 canvas looking 7 degrees up showed 21 degrees of ground, which read as "how far below the 0 line we are". The floor keeps the canvas bottom within about 10 degrees under level (19 degrees up on that desktop canvas, fov 100), and the 35 cap keeps a portrait phone, whose half-angle passes 60, from being forced upward; there the default 25 is raised to 35. `skyAltFloor()` in index.html; a remembered altitude below the floor is raised on paint and saved |
 | Sky viewer cull | 100 degrees from the view centre | Added 2026-09-17. `panProject` returns `null` past this, which is what lets every draw routine skip a segment instead of drawing it stretched across the canvas; comfortably inside the true singularity at 180 degrees (directly behind the viewer), where the projection's `1 + cos(angle)` denominator reaches zero |
 | Sky viewer default view | south, 25 degrees up (az 180, alt 25) | Added 2026-09-17, replacing the open view's old default heading, south at dead centre with no altitude of its own. Azimuth kept at 180 for the same reason it was chosen the first time: a visitor who already knew the old drawing sees the same heading on their first look at the new one. 25 degrees up is new, chosen for a first look with the ridge low in the frame and most of the canvas given to sky |
+| Sky viewer scrubber span | a whole Eastern day, midnight to midnight, 144 ten-minute slices | Widened 2026-09-20 from dusk-to-dawn (`panoNight`, which kept only the slices with the sun more than 6 degrees down, so the slider's length moved with the season). `panoDay` in index.html. First built the same day with a noon anchor, so that one night stayed unbroken in the middle of the slider; changed to midnight at Shawn's request, so the slider covers exactly the calendar day the date field names and exactly the day the strip under it draws. The cost, taken deliberately: one night is now split, evening at the right-hand end and the small hours at the left. `nightWindow` still anchors on noon, because the sentence it feeds really is about one night rather than one day. The Eastern anchoring through `easternInstant` is unchanged; `nearestSlice` measures minutes since Eastern midnight (`sinceMidnight`), which is the clock time itself and needs no offset, where the old `sinceFive` measured from 5pm |
+| Day strip altitude window | -8 to +84 degrees, fixed | Added 2026-09-20 with the day strip. Fixed rather than fitted to the day, so two dates are comparable at a glance. The top has to hold the highest thing drawn: the sun reaches 90 - 35.5 + 23.44 = 77.9 degrees at this latitude on the June solstice (measured 78 at Cove Field Ridge), and a full moon near maximum declination reaches about 83. The thumbnail's own -8 to +24 window cannot hold either, which is why the strip does not reuse `panY` |
+| Day strip sample step | 10 minutes, 145 samples midnight to midnight | Added 2026-09-20. Same step the night sentence walks at, and the same `crossingTime` bisection refines each horizon crossing to the minute from it. Midnight is the anchor because due north is this projection's seam and the sun is near due north at local midnight, so the sun's track draws as one sweep edge to edge rather than a shape cut in half |
+| Day strip redraw guard | place, eye, date and canvas width | Added 2026-09-20. `paintSkyViewer` runs on every drag frame and the strip costs a 145-step walk of both bodies plus a bisect per crossing, so `paintDayStrip` keys the drawing on what it actually depends on and skips otherwise. Measured 2026-09-20: 28 to 38 ms for a full redraw on a date change, 0 across 40 successive heading changes |
+| Day strip narrow-canvas cut | compass every 90 degrees below 560 px | Added 2026-09-20 after looking at a 390 px phone, where a full turn is about one CSS pixel per degree and the eight points run together. The ticks are 90 degrees apart either way, so nothing about the scale changes |
+| Day strip label order | sun crossings, moon crossings, both names, midnights, sun hours | Added 2026-09-20. `panDayPlaceLabels` places one label at a time in this order; each tries an ordered list of `[dx, dy]` offsets from its own marker and takes the first that clears the canvas edges, the compass row and every label already down, and is dropped if none fit. Order is the whole rule: crossings are what a reader came for, names identify which track is which, and the hourly times are scale the altitude axis already carries, so they are the ones that can go. Replaced three earlier rules that each fixed one collision and none of the rest -- a fixed side per body, a flip when the side ran off the canvas, and dropping the moon's times outright under 560 px |
+| Day strip label offsets | vertical first, then beside the marker | Added 2026-09-20. Crossings try `[0,16] [0,-10] [0,29] [0,-23]` then `[-32,3] [32,3] [-32,-13] [32,-13]`. The sideways tries are not decoration: a moonrise a few degrees from the sunrise, both low on the skyline, has the compass row beneath it and the sun's time above it, and its own time was being dropped for want of anywhere to sit |
+| `PAN_SKY_KEYS` | 6 rows, sun altitude -18 / -12 / -6 / -0.5 / +6 / +25 degrees, each a zenith, middle and horizon colour | Added 2026-09-20. The sky gradient is interpolated linearly between the two rows the sun's altitude falls between. **Eyeballed against photographs, not computed from a scattering model** -- the right trade for a planning drawing, but it means these are not measurements and nothing downstream should read a real sky brightness out of them. The -18 row is the night wash the viewer has always drawn, unchanged, so a dark-hours screenshot still matches what shipped before |
+| `panDayFactor` | 0 at sun altitude -6, 1 at +6 | Added 2026-09-20. One number the ridge haze, the sun's own colour and the daytime moon all key off, so they brighten together instead of each having its own idea of daytime |
+| `panStarFade`, `panMilkyWayFade` | stars 0 at -4 and full at -15; milky way 0 at -10 and full at -18 | Added 2026-09-20. Naked-eye thresholds, not measured: the brighter stars hold into civil twilight, the milky way needs a properly dark sky and goes first. Both early-return at zero, so a daylight frame skips the whole star and milky way pass |
+| Sun glow | `rgba(255,224,160,0.26)`, reaching 4.5 to 7.5 disc radii | Added 2026-09-20 at 0.42 and dropped to 0.26 the same day after looking at a sunrise frame. The canopy layers are deliberately 81% opaque (`trees` 0.7 over `treeOcclusion` 0.38) so terrain reads through a foreground tree wall; anything bright enough behind them bleeds through and read as a sun inside the mountain. At 0.26 that bleed reads as light in the trees, which is what it is |
 | `NEAR_ROAD_M` (`build-overlooks.mjs`) | 400 m | A viewpoint farther than this from the parkway is treated as a trail summit, not a pull-off. Not a count from the dry run: it is baked into the Overpass query itself (`around.bp:400`), so all 164 raw results are inside it by construction |
 | `NC_NORTH` (`build-overlooks.mjs`) | 36.56 N | Added 2026-09-17, after Pilot Mountain Overlook (36.6419 N, about 28 road miles into Virginia) shipped in the list and was cited here as the second flattest overlook. The grid box above stops at 37 N, so a Virginia overlook's northward rays run off it and its horizon is not a measurement. The parkway crosses the state line at about 36.55 N and runs north-east from there, so nothing on this road in North Carolina lies north of 36.56. The filter is a latitude test rather than a narrower Overpass box because `--replay` re-filters a response that was fetched with the wider box. Dropped 1 of 135 named, non-generic viewpoints |
 | `NEAR_SPOT_M` (`build-overlooks.mjs`) | 300 m | Dropped 9 of the 134 named, non-generic viewpoints inside North Carolina as duplicates of a curated spot's `lat, lon` or `view:` (2026-09-17 dry run), leaving 125. The spec guessed roughly 15; 9 is the measurement. Names such as "Craggy Pinnacle Summit" and "View Devils Courthouse (MP 422.4)" are typical: many curated parkway spots are trailheads OSM does not tag as viewpoints |
@@ -190,6 +201,65 @@ still in neither line.
 terrain line is raycast from the 3DEP cell, up to 7 m below the lidar ground
 at the pin, so near ridges read up to about 2.7 degrees high at 150 m. Using
 the lidar ground as the terrain eye where it exists would fix it; not done.
+
+**The day strip is a calendar day, the night sentence is a night.** Added
+2026-09-20. The strip under the viewer draws the Eastern calendar day named
+in the date field, midnight to midnight, and so does the scrubber above it.
+`horizonSummary`, the sentence under the viewer, still walks dusk to dawn
+through `nightWindow`, which anchors on noon so that a night belongs to the
+evening it started on. The two therefore describe overlapping but different
+spans, on purpose: "where is the sun today" and "what happens tonight" are
+different questions. `daySummary` is the strip's own line and covers only the
+sun.
+
+**The day strip's rise and set are against this skyline, not the almanac.**
+Added 2026-09-20. "sun clears the skyline 8:55am" at Cove Field Ridge is the
+sun clearing a 20-degree tree wall to the east, not sunrise: the same spot
+modelled as a flat horizon gives 7:18am. That is the point of the drawing,
+but it means these times must never be quoted as sunrise and sunset, and the
+wording ("clears the skyline", "drops behind it") is deliberate on that
+account. Only the first rise and the last set are labelled; every other
+crossing gets an unlabelled dot, because a track through a notchy ridge can
+have a dozen.
+
+**On the two Eastern DST days the strip walks 24 hours, not to midnight.**
+Added 2026-09-20. `panDaySamples` steps 24 hours of real time from Eastern
+midnight, so on the spring-forward and fall-back days it ends an hour either
+side of the next midnight. Left that way deliberately: a track is a fact
+about elapsed time, and it keeps the sample count fixed.
+
+**The moon's track has a gap, and it is real.** Added 2026-09-20. A lunar
+day runs about 50 minutes longer than a solar one, so over one calendar day
+the moon sweeps roughly 348 degrees of azimuth rather than a full circle, and
+the remaining ~12 degrees is a wedge it genuinely never occupied that day. On
+the strip that reads as a gap between the day's two midnights, which is why
+both ends of each track carry a hollow marker labelled `12am`. Nothing is
+drawn across the gap, and nothing should be: the positions either side of it
+belong to the days before and after. The sun's own two midnights are far
+below the horizon and off the bottom of the strip, so they never draw and the
+sun's track looks continuous.
+
+**The sky colours are eyeballed, not modelled.** Added 2026-09-20 with the
+24-hour scrubber. `PAN_SKY_KEYS` was set by eye against photographs of Blue
+Ridge twilight, so the view says "about this colour at about this sun
+altitude" and nothing more. It is not a sky brightness model and must not be
+read as one: it says nothing about magnitude limits, visual range or when a
+given star becomes visible. The one number on the page that is computed
+rather than chosen is the sun's altitude itself.
+
+**The daylight view hazes distant terrain only.** Added 2026-09-20. The
+raycast skyline's fill gradient interpolates toward a blue-grey with
+`panDayFactor`, which is what keeps a daytime ridge from reading as a hole
+punched in a bright sky. The near canopy and structure layers stay dark on
+purpose: a tree fifty metres away really is a dark silhouette against a
+bright sky. Ridge distance labels and the crest line were not retuned for
+daylight beyond dimming the crest with the same factor.
+
+**The sentence under the canvas is still dusk-to-dawn.** Added 2026-09-20.
+`horizonSummary` and `nightWindow` are unchanged by the 24-hour scrubber:
+the caption still reports the moon and the galactic core against the ridge
+over one night, and says nothing about the sun. Scrubbing into daylight
+changes the drawing, not the sentence.
 
 **UTC is treated as TD.** Delta-T is about 70 s, which is 0.04 arcmin of lunar
 motion. The existing chapter 49 phase code makes the same choice, so this

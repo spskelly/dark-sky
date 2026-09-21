@@ -243,6 +243,15 @@ function moonAltAz(ctxSky) {
   return { alt: Sky.refract(h.alt), az: h.az, illum: m.illum, limbPA: m.limbAngle - q };
 }
 
+// the sun, refracted like everything else, so the disc sits on the ridge at
+// the moment the sentence says it does. no topocentric correction: parallax
+// on the sun is 9 arcseconds, a thousandth of its own diameter.
+function sunAltAz(ctxSky) {
+  const s = Sky.sunPosition(ctxSky.jd);
+  const h = Sky.equatorialToHorizontal(s.ra, s.dec, ctxSky.lmst, ctxSky.lat);
+  return { alt: Sky.refract(h.alt), az: h.az };
+}
+
 // ponytail: the milky way is drawn from its J2000 galactic rotation with no
 // precession. 0.35 degrees of drift inside a band 25 degrees wide is invisible.
 function galAltAz(l, b, ctxSky) {
@@ -258,7 +267,7 @@ function drawPanorama(canvas, opts) {
   // the dialog viewer draws with no horizon at all -- a flat line and a
   // caveat, for a picked point before phase 2's terrain exists -- so only
   // the thumbnail, which has nothing to fall back to, requires one
-  if (!ctx || (!opts.horizon && opts.mode !== 'view')) return false;
+  if (!ctx || (!opts.horizon && opts.mode !== 'view' && opts.mode !== 'day')) return false;
 
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.clientWidth || canvas.width;
@@ -269,6 +278,7 @@ function drawPanorama(canvas, opts) {
   ctx.clearRect(0, 0, w, h);
 
   if (opts.mode === 'view') { drawSkyView(ctx, w, h, opts); return true; }
+  if (opts.mode === 'day') { drawDayView(ctx, w, h, opts); return true; }
   if (opts.mode === 'thumb') { drawRidge(ctx, opts.horizon, w, h, opts.canopy, opts.ridges); return true; }
   return false;
 }
@@ -520,14 +530,56 @@ function drawRidge(ctx, horizon, w, h, canopy, ridges) {
 // wrap-copy loop to write here, because a stereographic view never has to
 // repeat itself to cover the seam the way the cylinder does.
 
+// the sky's colour is a function of one number: how far the sun is above or
+// below the horizon. these are the keyframes, sun altitude paired with the
+// gradient read zenith, middle, horizon. the -18 row is the night wash this
+// view has always drawn, unchanged, so a dark-hours screenshot still matches.
+// they are eyeballed against photographs rather than computed from a
+// scattering model, which is the right trade for a planning drawing.
+const PAN_SKY_KEYS = [
+  [-18, [6, 11, 25], [14, 24, 52], [23, 37, 74]],        // astronomical dark
+  [-12, [8, 15, 36], [19, 29, 62], [58, 63, 104]],       // nautical twilight
+  [-6, [13, 26, 60], [37, 49, 95], [176, 106, 82]],      // civil twilight
+  [-0.5, [29, 53, 102], [106, 90, 134], [224, 146, 92]], // sunrise / sunset
+  [6, [40, 84, 158], [82, 130, 190], [196, 190, 190]],   // low sun
+  [25, [45, 99, 180], [91, 143, 212], [168, 196, 228]],  // full day
+];
+
+const panLerp = (a, b, t) => a + (b - a) * t;
+const panMixRgb = (a, b, t) =>
+  'rgb(' + Math.round(panLerp(a[0], b[0], t)) + ',' + Math.round(panLerp(a[1], b[1], t)) + ','
+  + Math.round(panLerp(a[2], b[2], t)) + ')';
+
+// the three gradient colours at a given sun altitude, linearly between the two
+// keyframes it falls between and clamped to the ends outside the table
+function panSkyColors(sunAlt) {
+  let i = 0;
+  while (i < PAN_SKY_KEYS.length - 2 && sunAlt > PAN_SKY_KEYS[i + 1][0]) i++;
+  const lo = PAN_SKY_KEYS[i], hi = PAN_SKY_KEYS[i + 1];
+  const t = Math.max(0, Math.min(1, (sunAlt - lo[0]) / (hi[0] - lo[0])));
+  return [panMixRgb(lo[1], hi[1], t), panMixRgb(lo[2], hi[2], t), panMixRgb(lo[3], hi[3], t)];
+}
+
+// 0 in the dark, 1 once the sun is properly up. what the ridge haze and the
+// star fades key off, so they all brighten together rather than each picking
+// its own idea of "daytime".
+const panDayFactor = sunAlt => Math.max(0, Math.min(1, (sunAlt + 6) / 12));
+
+// what is still visible overhead as the sun comes up. the brighter stars hold
+// on into civil twilight and are gone soon after sunrise; the milky way needs
+// a properly dark sky and goes first, which is the whole premise of this page.
+const panStarFade = sunAlt => Math.max(0, Math.min(1, (-4 - sunAlt) / 11));
+const panMilkyWayFade = sunAlt => Math.max(0, Math.min(1, (-10 - sunAlt) / 8));
+
 function drawSkyWashView(ctx, w, h, view) {
   // brightest at the true horizon below the view centre, same reasoning as
   // the flat wash: the very bottom of the canvas is behind the ridge
   const horizon = panProject(0, view.az0, view) || { y: h * 0.7 };
+  const c = panSkyColors(view.sunAlt);
   const g = ctx.createLinearGradient(0, 0, 0, horizon.y);
-  g.addColorStop(0, '#060b19');
-  g.addColorStop(0.7, '#0e1834');
-  g.addColorStop(1, '#17254a');
+  g.addColorStop(0, c[0]);
+  g.addColorStop(0.7, c[1]);
+  g.addColorStop(1, c[2]);
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, w, h);
 }
@@ -558,6 +610,9 @@ function milkyWayPathView(ctx, sky, halfWidth, view) {
 }
 
 function drawMilkyWayView(ctx, sky, view, w, h) {
+  const fade = panMilkyWayFade(view.sunAlt);
+  if (fade <= 0) return;
+  ctx.globalAlpha = fade;
   const bands = [[22, 0.015], [17, 0.018], [12, 0.020], [7.5, 0.023], [3.5, 0.027]];
   const blurred = 'filter' in ctx;
   if (blurred) ctx.filter = 'blur(9px)';
@@ -584,9 +639,12 @@ function drawMilkyWayView(ctx, sky, view, w, h) {
       ctx.fillText('galactic core', cp.x, cp.y - r * 0.52);
     }
   }
+  ctx.globalAlpha = 1;
 }
 
 function drawStarsView(ctx, sky, view, w, h) {
+  const fade = panStarFade(view.sunAlt);
+  if (fade <= 0) return;
   const list = (typeof STARS !== 'undefined' && STARS) || [];
   const limit = starMagLimit(w);
   const seen = new Array(list.length);
@@ -599,19 +657,20 @@ function drawStarsView(ctx, sky, view, w, h) {
     seen[i] = at;
     if (!at) continue;
     const r = Math.max(0.4, 1.7 - 0.30 * mag);
-    ctx.globalAlpha = Math.max(0.2, Math.min(1, 1.02 - 0.16 * mag));
+    ctx.globalAlpha = fade * Math.max(0.2, Math.min(1, 1.02 - 0.16 * mag));
     ctx.beginPath();
     ctx.arc(at.x, at.y, r, 0, Math.PI * 2);
     ctx.fill();
     if (mag < 1.0) {
-      ctx.globalAlpha = 0.13;
+      ctx.globalAlpha = fade * 0.13;
       ctx.beginPath();
       ctx.arc(at.x, at.y, r * 3.4, 0, Math.PI * 2);
       ctx.fill();
     }
   }
-  ctx.globalAlpha = 1;
+  ctx.globalAlpha = fade;
   drawFiguresView(ctx, seen);
+  ctx.globalAlpha = 1;
 }
 
 function drawFiguresView(ctx, seen) {
@@ -631,6 +690,39 @@ function drawFiguresView(ctx, seen) {
   ctx.stroke();
 }
 
+// the sun is the same half a degree across as the moon, so it gets the same
+// radius. drawn a little below the horizon as well as above it: the disc
+// sitting just behind a ridge is exactly the moment somebody scrubbing for
+// sunrise is looking for, and refraction already lifts the real one.
+function drawSunView(ctx, sky, view) {
+  const s = sunAltAz(sky);
+  if (s.alt < -3) return;
+  const p = panProject(s.alt, s.az, view);
+  if (!p) return;
+  const r = 9;
+
+  // the glow is what actually reads as "the sun is over there" once the disc
+  // itself is behind a ridge, so it grows as the sun climbs.
+  // ponytail: kept dim on purpose. the canopy layers are 81% opaque by
+  // design, so the reader can see terrain through a foreground tree wall,
+  // and anything bright enough behind them bleeds through and reads as a sun
+  // inside the mountain. dim enough and that bleed is just light in the trees,
+  // which is what it actually looks like.
+  const reach = r * (4.5 + 3 * panDayFactor(s.alt));
+  const g = ctx.createRadialGradient(p.x, p.y, r, p.x, p.y, reach);
+  g.addColorStop(0, 'rgba(255,224,160,0.26)');
+  g.addColorStop(1, 'rgba(255,224,160,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(p.x - reach, p.y - reach, reach * 2, reach * 2);
+
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+  // low sun is orange through the thickness of air it is shining along, and
+  // whites out as it climbs; the same reason a sunset is red
+  ctx.fillStyle = panMixRgb([245, 158, 74], [255, 246, 214], panDayFactor(s.alt));
+  ctx.fill();
+}
+
 function drawMoonView(ctx, sky, view) {
   const m = moonAltAz(sky);
   const p = panProject(m.alt, m.az, view);
@@ -647,7 +739,10 @@ function drawMoonView(ctx, sky, view) {
   ctx.translate(p.x, p.y);
   ctx.beginPath();
   ctx.arc(0, 0, r, 0, Math.PI * 2);
-  ctx.fillStyle = '#101c3a';
+  // the unlit part is the night sky showing through, so it follows the sky:
+  // a dark disc in a daylit view would read as a hole, and a daytime moon is
+  // in fact a pale wash barely darker than what is behind it
+  ctx.fillStyle = panMixRgb([16, 28, 58], [150, 176, 208], panDayFactor(view.sunAlt));
   ctx.fill();
   ctx.strokeStyle = 'rgba(95,116,173,0.5)';
   ctx.lineWidth = 0.75;
@@ -977,16 +1072,23 @@ function drawRidgeDistancesView(ctx, terrain, terrainRange, ridges, ridgeRanges,
 
 function drawRidgeView(ctx, horizon, horizonRange, view, w, h, canopy, ridges, ridgeRanges, key) {
   const terrain = horizon || new Float64Array(360);   // a picked point: flat at 0
+  // in daylight a ridge is hazy blue-grey, not black: air between here and
+  // there scatters light into the line of sight. without this the terrain
+  // reads as a hole punched in a bright sky.
+  // ponytail: only the distant terrain hazes. the near canopy and structure
+  // layers stay dark, which is what a tree fifty metres away actually looks
+  // like against a bright sky.
+  const day = panDayFactor(view.sunAlt);
   const g = ctx.createLinearGradient(0, 0, 0, h);
-  g.addColorStop(0, '#0b1226');
-  g.addColorStop(1, '#03060f');
+  g.addColorStop(0, panMixRgb([11, 18, 38], [96, 116, 142], day));
+  g.addColorStop(1, panMixRgb([3, 6, 15], [54, 68, 88], day));
   // The full DEM raycast is the authoritative skyline. The experimental
   // tracked crests and local road ribbons can form angular 1-D fragments or
   // duplicate the same physical ridge, so they remain analysis data only
   // until a real surface renderer can validate them against the ground view.
   const ridgeMasks = null;
   panWindowRidge(ctx, terrain, view, w, h,
-    { fill: g, crest: 'rgba(202,220,248,0.78)', crestWidth: 1.6, dash: [], rim: null });
+    { fill: g, crest: 'rgba(202,220,248,' + (0.78 - 0.5 * day).toFixed(3) + ')', crestWidth: 1.6, dash: [], rim: null });
   if (canopy && canopy.t) {
     const holes = panWindowHoles(canopy.lo, canopy.hi, true);
     panWindowRidge(ctx, canopy.t, view, w, h, PAN_LAYERS.trees, holes);
@@ -1006,16 +1108,439 @@ function drawRidgeView(ctx, horizon, horizonRange, view, w, h, canopy, ridges, r
 }
 
 function drawSkyView(ctx, w, h, opts) {
-  const view = { az0: opts.az0, w: w, h: h };
   const sky = skyContext(opts);
+  // the sun's altitude is read once and carried on the view: the wash, the
+  // star and milky way fades and the ridge haze are all the same daylight,
+  // so they have to come from the same number rather than each recomputing it
+  const view = { az0: opts.az0, w: w, h: h, sunAlt: sunAltAz(sky).alt };
   drawSkyWashView(ctx, w, h, view);
   drawMilkyWayView(ctx, sky, view, w, h);
   drawStarsView(ctx, sky, view, w, h);
+  drawSunView(ctx, sky, view);
   drawMoonView(ctx, sky, view);
   drawGridView(ctx, view, w, h);
   drawCompassTopView(ctx, view);
   drawRidgeView(ctx, opts.horizon, opts.horizonRange, view, w, h, opts.canopy, opts.ridges, opts.ridgeRanges, opts.key);
   drawLevelView(ctx, view);
+}
+
+// ---------- the whole day at one glance (the strip under the viewer) ----------
+//
+// the turnable view above answers "what is up right now". this answers "where
+// does the sun come up from here, and how high does it get", which is a
+// question about a day rather than a moment: it is drawn once per date and
+// does not move with the scrubber or with the heading.
+//
+// the projection is the thumbnail's flat one -- azimuth straight across, a
+// full turn, no heading -- because a track is a shape, and a shape has to be
+// whole to be read. it gets its own altitude window: the sun reaches 78
+// degrees here in June, which the thumbnail's -8 to 24 strip cannot hold.
+
+const PAN_DAY_TOP = 84, PAN_DAY_BOT = -8;
+const panDayY = alt => (PAN_DAY_TOP - alt) / (PAN_DAY_TOP - PAN_DAY_BOT);
+const PAN_DAY_STEP_MIN = 10;
+
+// the chosen eastern calendar day, midnight to midnight, in ten minute steps.
+// midnight rather than the scrubber's noon anchor: the sun is near due north
+// at local midnight, and due north is this projection's seam, so a day that
+// starts there draws as one sweep from one edge to the other rather than a
+// shape cut in half down the middle.
+//
+// ponytail: on the two days a year the eastern offset changes, this walks 24
+// hours of real time from eastern midnight and so ends an hour either side of
+// the next one. that is the honest thing to draw -- a track is a fact about
+// elapsed time, not about what the clock was doing -- and it keeps the step
+// count fixed.
+function panDaySamples(day, opts) {
+  const start = easternInstant(day.y, day.mo, day.d, 0);
+  const out = [];
+  for (let i = 0; i <= 24 * 60 / PAN_DAY_STEP_MIN; i++) {
+    const t = new Date(start.getTime() + i * PAN_DAY_STEP_MIN * 60000);
+    const sky = skyContext({ date: t, lat: opts.lat, lon: opts.lon, elevM: opts.elevM });
+    out.push({ t: t, sun: sunAltAz(sky), moon: moonAltAz(sky) });
+  }
+  return out;
+}
+
+// the day's sky, blended across the turn. the sun passes through every
+// azimuth in twenty-four hours -- due south around noon, due north around
+// local midnight -- so every column of this strip has exactly one moment when
+// the sun stood over it, and the column is painted the colour the sky was at
+// that moment. dawn in the east, blue in the south, sunset in the west, night
+// in the north, the whole day in one image.
+//
+// the stops have to be handed over in order and the day's azimuths start
+// partway along (clock midnight is not solar midnight), so they are sorted by
+// x rather than left in time order. the two samples either side of the wrap
+// are both within an hour of solar midnight, so no seam shows.
+function drawDayWash(ctx, samples, w, h) {
+  const stops = samples
+    .map(s => ({ x: Math.max(0, Math.min(1, panXLin(s.sun.az, w) / w)), c: panSkyColors(s.sun.alt) }))
+    .sort((a, b) => a.x - b.x);
+  const ramp = i => {
+    const g = ctx.createLinearGradient(0, 0, w, 0);
+    stops.forEach(s => g.addColorStop(s.x, s.c[i]));
+    return g;
+  };
+  // the wash has to vary with height as well as with direction -- blue
+  // overhead at midday, orange along the horizon at sunrise -- and a canvas
+  // gradient is one-dimensional. so: paint the zenith colours over
+  // everything, rub them out toward the horizon line with a vertical alpha
+  // gradient, then paint the horizon colours in behind whatever survived.
+  //
+  // compositing rather than a stack of banded fills with falling alpha, which
+  // was the first try: 48 bands across a strip this wide read as visible
+  // horizontal stripes, and the overlap row of each band composited twice.
+  // this way the vertical blend is exact and costs three fills.
+  const floor = panDayY(0) * h;
+  ctx.fillStyle = ramp(0);
+  ctx.fillRect(0, 0, w, h);
+  const fade = ctx.createLinearGradient(0, 0, 0, floor);
+  fade.addColorStop(0, 'rgba(0,0,0,0)');
+  fade.addColorStop(1, 'rgba(0,0,0,1)');
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.fillStyle = fade;
+  ctx.fillRect(0, 0, w, h);
+  ctx.globalCompositeOperation = 'destination-over';
+  ctx.fillStyle = ramp(2);
+  ctx.fillRect(0, 0, w, h);
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+// ponytail: one silhouette of everything in the way, not the viewer's stack of
+// distance bands and canopy layers. this is a chart of where the sky is open,
+// and "open or not" is one shape. drawn here rather than through
+// panRidgeStrip because that one is welded to the thumbnail's altitude scale
+// and has four other callers.
+function drawDaySilhouette(ctx, prof, w, h) {
+  ctx.beginPath();
+  ctx.moveTo(0, h);
+  for (let i = 0; i <= 360; i++) ctx.lineTo(panXLin(i, w), panDayY(prof[i % 360]) * h);
+  ctx.lineTo(w, h);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(6,10,20,0.88)';
+  ctx.fill();
+  ctx.beginPath();
+  for (let i = 0; i <= 360; i++) {
+    const x = panXLin(i, w), y = panDayY(prof[i % 360]) * h;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.strokeStyle = 'rgba(150,173,213,0.55)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+// altitude lines every 20 degrees, drawn under the ridge: they are the
+// scale, not the subject
+function drawDayGrid(ctx, w, h) {
+  ctx.font = '10px "IBM Plex Sans", system-ui, sans-serif';
+  ctx.setLineDash([2, 5]);
+  ctx.strokeStyle = 'rgba(95,116,173,0.22)';
+  ctx.fillStyle = 'rgba(169,165,143,0.55)';
+  ctx.lineWidth = 1;
+  ctx.textAlign = 'left';
+  for (let a = 0; a <= 80; a += 20) {
+    const y = panDayY(a) * h;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
+    ctx.stroke();
+    // 80 is skipped: its label sits in the rounded corner and gets clipped,
+    // and nothing here needs reading off to that precision
+    if (a && a < 80) ctx.fillText(a + '\u00b0', 3, y - 3);
+  }
+  ctx.setLineDash([]);
+}
+
+// the compass, drawn last of all. these sit at the foot of the strip, where
+// the silhouette is opaque, so drawn any earlier they are simply painted
+// over. north is this projection's seam, so it is written at both ends, and
+// every label is nudged inboard far enough to stay on the canvas.
+function drawDayCompass(ctx, w, h) {
+  ctx.font = '10px "IBM Plex Sans", system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(207,219,239,0.75)';
+  // a full turn across a phone is about 360 css px, which runs the eight
+  // points into each other and into the rise and set times. narrow canvases
+  // get the four cardinals only; the ticks they label are 90 degrees apart
+  // either way, so nothing about the scale changes
+  const step = w < 560 ? 90 : 45;
+  const marks = PAN_COMPASS
+    .map((label, i) => [label, i * 45])
+    .filter(m => m[1] % step === 0)
+    .map(m => [m[0], panXLin(m[1], w)])
+    .concat([['N', w]]);
+  for (const mark of marks) ctx.fillText(mark[0], Math.max(9, Math.min(w - 9, mark[1])), h - 5);
+}
+
+// a track is cut wherever it jumps the seam at due north, so a polyline never
+// stretches back across the whole strip, and cut again wherever keep() turns
+// false, which is how the clear-of-the-ridge parts are drawn separately from
+// the blocked ones.
+function panTrackRuns(pts, w, keep) {
+  const runs = [];
+  let cur = null;
+  for (const p of pts) {
+    if (!keep(p)) { if (cur && cur.length > 1) runs.push(cur); cur = null; continue; }
+    if (cur && Math.abs(p.x - cur[cur.length - 1].x) > w / 2) {
+      if (cur.length > 1) runs.push(cur);
+      cur = null;
+    }
+    (cur || (cur = [])).push(p);
+  }
+  if (cur && cur.length > 1) runs.push(cur);
+  return runs;
+}
+
+function panDayStroke(ctx, run) {
+  ctx.beginPath();
+  run.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+  ctx.stroke();
+}
+
+// a small filled triangle at b, pointing the way the track is going. both
+// bodies sweep left to right here, since azimuth only ever increases through
+// a day; the arrows are there to say which way time runs along a line that
+// otherwise has no beginning and no end.
+function panDayArrow(ctx, a, b, fill) {
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  ctx.rotate(Math.atan2(b.y - a.y, b.x - a.x));
+  ctx.beginPath();
+  ctx.moveTo(5.5, 0);
+  ctx.lineTo(-4, 3.4);
+  ctx.lineTo(-4, -3.4);
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.restore();
+}
+
+// every time the body crosses what stands in the way, bisected to the minute
+// the way the sentence under the viewer does it. all of them, not just the
+// first: a track that dips into a notch and comes back out is exactly the
+// thing this drawing exists to show.
+function panDayCrossings(samples, key, block, opts) {
+  const at = t => (key === 'sun' ? sunAltAz : moonAltAz)(
+    skyContext({ date: t, lat: opts.lat, lon: opts.lon, elevM: opts.elevM }));
+  const out = [];
+  let prevUp = clearsRidge(block, samples[0][key]);
+  for (let i = 1; i < samples.length; i++) {
+    const up = clearsRidge(block, samples[i][key]);
+    if (up !== prevUp) {
+      const t = crossingTime(at, block, samples[i - 1].t, samples[i].t);
+      const p = at(t);
+      out.push({ at: t, alt: p.alt, az: p.az, rise: up });
+    }
+    prevUp = up;
+  }
+  return out;
+}
+
+const PAN_DAY_BODY = {
+  sun: { rgb: '255,206,120', name: 'sun' },
+  moon: { rgb: '214,222,247', name: 'moon' },
+};
+
+// a soft dark halo under pale text. the wash behind it runs from near-black
+// in the north to a bright midday blue, and no single colour reads on both.
+//
+// a shadow rather than strokeText, which was the first try: a 3px stroke
+// around 10px type closes up the counters and every label reads as a solid
+// black box. the shadow leaves the letterforms alone.
+function panDayLabel(ctx, text, x, y) {
+  ctx.save();
+  ctx.shadowColor = 'rgba(4,8,18,0.95)';
+  ctx.shadowBlur = 4;
+  ctx.fillText(text, x, y);
+  // twice: one pass of a blurred shadow is too thin to carry pale text over
+  // the midday blue
+  ctx.fillText(text, x, y);
+  ctx.restore();
+}
+
+// every label the strip wants to put down, placed one at a time in the order
+// they get to claim space. each carries an ordered list of [dx, dy] offsets
+// from its own marker; the first that lands clear of the canvas edges, clear
+// of the compass row and clear of every label already down wins, and a label
+// with nowhere to go is dropped.
+//
+// the offsets go sideways as well as up and down. vertical alone was not
+// enough: a moonrise a few degrees from the sunrise, both low on the skyline,
+// has the compass row under it and the sun's time over it, and its own time
+// was being dropped for want of anywhere to sit. beside the marker is a
+// perfectly good place to sit.
+//
+// this replaces three earlier rules that each fixed one collision and none of
+// the rest: a fixed side per body, a flip when the side ran off the canvas,
+// and dropping the moon's times outright under 560 px. order does that work
+// now, and does it at every width: the crossings are what a reader came for,
+// the names identify which track is which, and the hourly times are scale --
+// the axis says the same thing, so they are the ones that can go.
+function panDayPlaceLabels(ctx, labels, w, h) {
+  const placed = [];
+  ctx.textAlign = 'center';
+  for (const L of labels) {
+    ctx.font = L.font;
+    const half = ctx.measureText(L.text).width / 2 + 3;
+    let put = null;
+    for (const off of L.tries) {
+      const x = Math.min(Math.max(L.x + off[0], half + 2), w - half - 2);
+      const y = L.y + off[1];
+      const box = { left: x - half, right: x + half, top: y - 10, bottom: y + 4 };
+      const clear = box.top > 2 && box.bottom < h - 13
+        && !placed.some(q => box.left < q.right && box.right > q.left
+          && box.top < q.bottom && box.bottom > q.top);
+      if (clear) { put = { box: box, x: x, y: y }; break; }
+    }
+    if (!put) continue;
+    placed.push(put.box);
+    ctx.fillStyle = L.fill;
+    panDayLabel(ctx, L.text, put.x, put.y);
+  }
+}
+
+// draws one body's track, arrows and markers, and hands its labels back
+// unplaced: where the text can go depends on what the other body already
+// took, and neither body can know that on its own.
+function drawDayBody(ctx, samples, key, block, w, h, opts) {
+  const style = PAN_DAY_BODY[key];
+  const tint = a => 'rgba(' + style.rgb + ',' + a + ')';
+  const pts = samples.map(s => ({
+    x: panXLin(s[key].az, w), y: panDayY(s[key].alt) * h,
+    t: s.t, alt: s[key].alt, up: clearsRidge(block, s[key]),
+  }));
+
+  // where this spot cannot see it, dotted. still drawn: half the value of the
+  // picture is seeing how much of the track the ridge takes away
+  ctx.lineWidth = 1.2;
+  ctx.setLineDash([2, 4]);
+  ctx.strokeStyle = tint(0.38);
+  panTrackRuns(pts, w, () => true).forEach(run => panDayStroke(ctx, run));
+  // and where it can, solid
+  ctx.setLineDash([]);
+  ctx.lineWidth = 2.4;
+  ctx.strokeStyle = tint(0.95);
+  panTrackRuns(pts, w, p => p.up).forEach(run => panDayStroke(ctx, run));
+
+  // one arrow every six hours, offset half an hour so it never lands on an
+  // hour tick, and skipped where it would straddle the seam
+  const perHour = 60 / PAN_DAY_STEP_MIN;
+  for (let i = Math.round(6.5 * perHour); i < pts.length - 1; i += 6 * perHour) {
+    if (Math.abs(pts[i + 1].x - pts[i].x) > w / 2) continue;
+    panDayArrow(ctx, pts[i], pts[i + 1], tint(0.95));
+  }
+
+  const hours = [];
+  for (let i = 0; i < pts.length; i += perHour) {
+    const p = pts[i];
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 1.7, 0, Math.PI * 2);
+    ctx.fillStyle = tint(0.75);
+    ctx.fill();
+    // only the sun's hours are labelled, and only every third: the moon's
+    // exact hours are not something anyone plans around, and both tracks
+    // labelled at once is twice the text for the same scale
+    if (key !== 'sun' || i % (3 * perHour) || !i || i >= pts.length - 1) continue;
+    hours.push({
+      text: panTime(p.t).replace(':00', ''), x: p.x, y: p.y, fill: tint(0.75),
+      font: '10px "IBM Plex Sans", system-ui, sans-serif',
+      tries: [[0, -8], [0, 13], [0, -20], [0, 25], [-26, -3], [26, -3]],
+    });
+  }
+
+  // midnight at both ends of the track, and labelled, because the two of them
+  // together are the answer to "why does the moon have a gap". a lunar day
+  // runs about 50 minutes longer than a solar one, so in 24 hours the moon
+  // sweeps about 348 degrees of azimuth rather than a full circle, and the
+  // 12 degrees it never reached that day is a real wedge of missing track.
+  // unlabelled it reads as a drawing bug; with both ends called 12am it reads
+  // as what it is. the sun's own two midnights are far below the horizon and
+  // off the bottom of the strip, so they never draw.
+  const midnights = [];
+  ctx.lineWidth = 1.4;
+  ctx.strokeStyle = tint(0.9);
+  for (const p of [pts[0], pts[pts.length - 1]]) {
+    if (p.y < 2 || p.y > h - 2) continue;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 3.2, 0, Math.PI * 2);
+    ctx.stroke();
+    midnights.push({
+      text: '12am', x: p.x, y: p.y, fill: tint(0.7),
+      font: '10px "IBM Plex Sans", system-ui, sans-serif',
+      tries: [[0, -9], [0, 14], [-26, 3], [26, 3], [0, -21]],
+    });
+  }
+
+  // every crossing gets a dot; the first rise and the last set get a time,
+  // because those are the two a reader came for and a track through a notchy
+  // ridge can have a dozen
+  const events = panDayCrossings(samples, key, block, opts);
+  const named = [events.find(e => e.rise), events.slice().reverse().find(e => !e.rise)]
+    .filter(Boolean);
+  const crossings = [];
+  for (const e of events) {
+    const hit = named.indexOf(e) >= 0;
+    const x = panXLin(e.az, w), y = panDayY(e.alt) * h;
+    ctx.beginPath();
+    ctx.arc(x, y, hit ? 4 : 2.4, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgb(' + style.rgb + ')';
+    ctx.fill();
+    if (!hit) continue;
+    ctx.strokeStyle = 'rgba(8,13,28,0.85)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    crossings.push({
+      text: panTime(e.at), x: x, y: y, fill: tint(0.95),
+      font: '10px "IBM Plex Sans", system-ui, sans-serif',
+      tries: [[0, 16], [0, -10], [0, 29], [0, -23], [-32, 3], [32, 3], [-32, -13], [32, -13]],
+    });
+  }
+
+  // the name goes at the top of the track, which is where there is room
+  const top = pts.reduce((a, b) => (b.alt > a.alt ? b : a));
+  const name = {
+    text: style.name, x: top.x, y: top.y, fill: tint(0.95),
+    font: '11px "IBM Plex Sans", system-ui, sans-serif',
+    tries: [[0, -20], [0, 18], [0, -32], [0, 30], [-34, -4], [34, -4]],
+  };
+  return { crossings: crossings, name: name, midnights: midnights, hours: hours };
+}
+
+function drawDayView(ctx, w, h, opts) {
+  const samples = panDaySamples(opts.day, opts);
+  const horizon = opts.horizon || new Float64Array(360);
+  const canopy = opts.canopy || null;
+  drawDayWash(ctx, samples, w, h);
+  drawDayGrid(ctx, w, h);
+  drawDaySilhouette(ctx, panBlocking(horizon, canopy), w, h);
+  const block = panBlock(horizon, canopy);
+  // the moon first, so the sun's track wins wherever the two cross
+  const moon = drawDayBody(ctx, samples, 'moon', block, w, h, opts);
+  const sun = drawDayBody(ctx, samples, 'sun', block, w, h, opts);
+  // then all the text at once, in the order it gets to claim space
+  panDayPlaceLabels(ctx, [].concat(
+    sun.crossings, moon.crossings, [sun.name, moon.name],
+    moon.midnights, sun.midnights, sun.hours), w, h);
+  drawDayCompass(ctx, w, h);
+}
+
+// the line under the strip. the sentence under the viewer is about the moon
+// and the core over one night; this one is about the sun over one day, which
+// is the question the drawing was added to answer.
+function daySummary(opts) {
+  if (!opts.horizon || typeof Sky === 'undefined') return '';
+  const samples = panDaySamples(opts.day, opts);
+  const block = panBlock(opts.horizon, opts.canopy || null);
+  const ev = panDayCrossings(samples, 'sun', block, opts);
+  const rise = ev.find(e => e.rise), set = [...ev].reverse().find(e => !e.rise);
+  const high = samples.reduce((a, b) => (b.sun.alt > a.sun.alt ? b : a)).sun;
+  const parts = [];
+  if (rise) parts.push('sun clears the skyline ' + panTime(rise.at) + ' in the ' + panDir(rise.az));
+  else parts.push('the sun never clears this skyline today');
+  if (set) parts.push('drops behind it ' + panTime(set.at) + ' in the ' + panDir(set.az));
+  parts.push('highest ' + Math.round(high.alt) + '\u00b0 in the ' + panDir(high.az));
+  return parts.join(', ');
 }
 
 // ---------- the sentence under the canvas ----------
