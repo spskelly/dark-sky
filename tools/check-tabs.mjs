@@ -504,29 +504,63 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   await page.close();
 }
 
-// --- phone width: the tab strip is sticky and shows short labels ---
+// --- phone width: a compact app shell with persistent bottom navigation ---
 {
   const page = await open(browser, PHONE);
-  const strip = await page.evaluate(() => {
+  const shell = await page.evaluate(() => {
     const g = document.querySelector('.guide');
-    return { pos: getComputedStyle(g).position, h: g.getBoundingClientRect().height,
-             short: getComputedStyle(document.querySelector('.guide .short')).display };
+    const head = document.querySelector('.masthead');
+    const hero = document.querySelector('.hero');
+    return { pos: getComputedStyle(g).position, bottom: getComputedStyle(g).bottom,
+             h: g.getBoundingClientRect().height,
+             short: getComputedStyle(document.querySelector('.guide .short')).display,
+             icon: getComputedStyle(document.querySelector('.guide .nav-icon')).display,
+             headPos: getComputedStyle(head).position, headH: head.getBoundingClientRect().height,
+             heroH: hero.getBoundingClientRect().height,
+             title: getComputedStyle(document.getElementById('hero-title')).display };
   });
-  ok(strip.pos === 'sticky', 'the tab bar is sticky on a phone');
-  ok(strip.h < 80, `and is a strip rather than three cards (${Math.round(strip.h)}px)`);
-  ok(strip.short === 'block', 'showing the short labels');
+  ok(shell.pos === 'fixed' && shell.bottom === '0px', 'the phone navigation stays fixed to the bottom edge');
+  ok(shell.h >= 56 && shell.h < 90, `and has a thumb-sized app-bar footprint (${Math.round(shell.h)}px)`);
+  ok(shell.short === 'block' && shell.icon === 'block', 'showing icons with the short labels');
+  ok(shell.headPos === 'sticky' && shell.headH <= 60, `the compact app header stays available (${Math.round(shell.headH)}px)`);
+  ok(shell.heroH < 190 && shell.title === 'none', `the calendar opens on a compact tonight card (${Math.round(shell.heroH)}px)`);
 
   // the real path onto the map: land on the calendar, then tap the map tab, so
   // the map and the canvases are built while the panel is already on screen
   await page.click('#tab-where');
   const built = await page.evaluate(() => {
     const el = document.getElementById('map');
-    const c = document.querySelector('#spot-list canvas.skyline');
+    const spots = document.querySelector('.spots');
     return { w: el.clientWidth, h: el.clientHeight,
-             cv: c ? c.width === Math.round(c.clientWidth * devicePixelRatio) && c.clientWidth > 0 : null };
+             hero: getComputedStyle(document.querySelector('.hero')).display,
+             home: getComputedStyle(document.querySelector('.home-strip')).display,
+             switcher: getComputedStyle(document.querySelector('.mobile-place-switch')).display,
+             view: spots.dataset.mobileView,
+             list: getComputedStyle(document.getElementById('spot-list')).display };
   });
+  ok(built.hero === 'none' && built.home === 'none', 'non-calendar tabs start at their own content');
+  ok(built.switcher !== 'none' && built.view === 'map' && built.list === 'none', 'Places opens as a focused map view');
   ok(built.w > 200 && built.h > 100, `tapping the map tab builds a sized map (${built.w}x${built.h})`);
-  ok(built.cv !== false, 'and skylines painted at the panel width');
+  await page.click('[data-place-view="list"]');
+  const list = await page.evaluate(() => {
+    const c = document.querySelector('#spot-list canvas.skyline');
+    return { map: getComputedStyle(document.getElementById('map')).display,
+      list: getComputedStyle(document.getElementById('spot-list')).display,
+      pressed: document.querySelector('[data-place-view="list"]').getAttribute('aria-pressed'),
+      cv: c ? c.width === Math.round(c.clientWidth * devicePixelRatio) && c.clientWidth > 0 : null };
+  });
+  ok(list.map === 'none' && list.list !== 'none' && list.pressed === 'true', 'Places can switch to a dedicated list view');
+  ok(list.cv !== false, 'and skylines paint when the list becomes visible');
+  await page.click('[data-place-view="map"]');
+  ok(await page.$eval('#map', el => el.clientWidth > 200), 'switching back restores a sized map');
+  await page.close();
+}
+
+// A primary tab hash opens the top of that screen. #when also names the
+// upcoming-windows section, so it previously reloaded halfway down the screen.
+{
+  const page = await open(browser, PHONE, '#when');
+  ok(await page.evaluate(() => scrollY === 0), 'a primary tab hash opens at the top of its screen');
   await page.close();
 }
 
@@ -570,6 +604,7 @@ if (SHOTS) await mkdir(SHOT_DIR, { recursive: true });
   ok(fit <= 1, `the canvas is drawn at the size it is shown at (${fit}px off)`);
   ok(level.ridge > 5, `ballhoot scar is enclosed to the south (${level.ridge.toFixed(1)} degrees)`);
   ok(level.zero && level.zero.y > 0, 'and its quiet level reference projects into the canvas');
+  ok(await page.evaluate(() => document.documentElement.scrollWidth === innerWidth), 'the sky screen has no horizontal overflow');
   await ctx.close();
 }
 

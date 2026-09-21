@@ -130,6 +130,9 @@
   .guide .what { display: block; font-size: 13px; color: var(--ink-dim); line-height: 1.45; }
   /* the two-word version of each question. only the sticky phone strip wears it */
   .guide .short { display: none; }
+  .guide .nav-icon { display: none; width: 22px; height: 22px; }
+  .guide .nav-icon svg { display: block; width: 100%; height: 100%; }
+  .mobile-place-switch { display: none; }
   /* in-panel anchors land a heading just under the top edge, not flush against it */
   .windows, .spots, #tonight, #cal, .controls, #sky-viewer { scroll-margin-top: 22px; }
   /* hourly sky row: one icon per hour, weather-app style */
@@ -581,6 +584,112 @@
     .disclaimer { padding: 12px 14px; }
     .foot { margin-top: 28px; }
   }
+  /* A phone is an application shell: compact status at the top, the current
+     task in the middle, and primary navigation fixed within thumb reach. */
+  @media (max-width: 720px) {
+    body { padding: 0 12px calc(78px + env(safe-area-inset-bottom)); overflow-x: hidden; }
+    .masthead {
+      position: sticky; top: 0; z-index: 1300; max-width: none; height: 52px;
+      margin: 0 -12px 10px; padding: 0 14px; flex-wrap: nowrap; align-items: center;
+      background: rgba(15,26,52,0.96); border-bottom: 1px solid var(--night-3);
+      backdrop-filter: blur(12px);
+    }
+    .masthead .mark svg { width: 18px; height: 18px; }
+    .masthead .wordmark { font-size: 17px; }
+    .masthead .scope { display: none; }
+
+    .hero {
+      grid-template-columns: 64px minmax(0, 1fr); gap: 12px; align-items: center;
+      margin: 0 0 10px; padding: 11px 12px; border: 1px solid var(--night-3);
+      border-radius: 14px; background: var(--night-2);
+    }
+    #hero-moon { width: 58px; }
+    .hero h1, .hero .hero-lede { display: none; }
+    .hero .tonight-now { margin-top: 0; font-size: 13px; }
+    .hero .tonight-now .eyebrow { display: block; margin: 0 0 2px; }
+    .hero .next-window { margin-top: 7px; padding: 5px 10px; font-size: 12px; }
+    .home-strip { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--night-3); border-radius: 14px; background: var(--night-2); }
+    .home-strip .spot-controls { margin-bottom: 3px; }
+    .home-strip .spot-controls .group { gap: 6px; }
+    .home-strip .spot-controls .group > span { flex-basis: 100%; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
+    .home-strip .spot-controls select { flex: 1; min-width: 0; }
+    body:not([data-active-tab="tab-when"]) .hero,
+    body:not([data-active-tab="tab-when"]) .home-strip { display: none; }
+
+    .guide {
+      position: fixed; inset: auto 0 0; z-index: 1400; height: calc(64px + env(safe-area-inset-bottom));
+      margin: 0; padding: 0 8px env(safe-area-inset-bottom); background: rgba(15,26,52,0.98);
+      border-top: 1px solid var(--night-3); border-bottom: 0; box-shadow: 0 -8px 24px rgba(4,8,18,.28);
+      backdrop-filter: blur(14px);
+    }
+    .guide .tablist { height: 64px; grid-template-columns: repeat(4, 1fr); gap: 0; }
+    .guide [role="tab"] {
+      flex-direction: column; gap: 3px; padding: 6px 2px 5px; min-height: 64px;
+      border-bottom: 0; border-top: 2px solid transparent;
+    }
+    .guide [role="tab"]:hover { border-top-color: var(--line); border-bottom-color: transparent; }
+    .guide [role="tab"][aria-selected="true"] { border-top-color: var(--dark-sky); border-bottom-color: transparent; }
+    .guide .nav-icon { display: block; color: var(--ink-dim); }
+    .guide [role="tab"][aria-selected="true"] .nav-icon { color: var(--dark-sky); }
+    .guide .short { font-size: 11px; line-height: 1.1; }
+    .panel { width: 100%; min-width: 0; }
+    .windows, .spots, #tonight, #cal, .controls, #sky-viewer { scroll-margin-top: 60px; }
+
+    .mobile-place-switch {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 3px; margin: 8px 0 10px;
+      padding: 3px; border-radius: 11px; background: var(--night-2);
+    }
+    .mobile-place-switch button { min-height: 40px; border: 0; border-radius: 8px; padding: 7px 12px; color: var(--ink-dim); }
+    .mobile-place-switch button[aria-pressed="true"] { background: var(--night-3); color: var(--moon); }
+    .spots { margin: 4px 0 0; }
+    .spots h3 { font-size: 22px; margin-bottom: 2px; }
+    .spots > .lede { display: none; }
+    .spots .spot-controls { flex-direction: column; align-items: stretch; gap: 7px; margin-bottom: 9px; }
+    .spots .spot-controls .group { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 1px; scrollbar-width: none; }
+    .spots .spot-controls .group::-webkit-scrollbar { display: none; }
+    .spots .spot-controls .group > span, .spots .spot-controls button { flex: 0 0 auto; white-space: nowrap; }
+    .offline-map-download { flex-direction: row; align-items: center; margin: 8px 0; padding: 8px 10px; }
+    .offline-map-download button { width: auto; padding-inline: 12px; }
+    .spots > .legend { flex-wrap: nowrap; overflow-x: auto; gap: 12px; margin-bottom: 8px; padding-bottom: 2px; scrollbar-width: none; }
+    .spots > .legend::-webkit-scrollbar { display: none; }
+    .spots > .legend span { flex: 0 0 auto; }
+    .spot-layout { display: block; }
+    #map { height: min(54dvh, 460px); min-height: 360px; border-radius: 13px; }
+    .spot-list { max-height: none; padding-right: 0; }
+    .spots[data-mobile-view="map"] .spot-list,
+    .spots[data-mobile-view="map"] #spot-more { display: none; }
+    .spots[data-mobile-view="list"] #map,
+    .spots[data-mobile-view="list"] .offline-map-download,
+    .spots[data-mobile-view="list"] > .legend { display: none; }
+    .spots[data-mobile-view="list"] .spot-list { display: flex; }
+    .spots[data-mobile-view="list"] #spot-more:not([hidden]) { display: block; }
+    .spot { border-radius: 13px; padding: 12px; }
+
+    .controls { margin-top: 4px; }
+    .options { flex-direction: column; flex-wrap: nowrap; align-items: flex-start; gap: 6px; overflow: visible; padding-bottom: 0; }
+    .options .group { flex-wrap: nowrap; flex: 0 0 auto; }
+    .cal { gap: 3px; }
+    .windows { margin-top: 30px; }
+
+    .sky-tab, .season { margin-top: 4px; min-width: 0; }
+    .sky-tab > .lede { display: none; }
+    .sky-tab .spot-controls { margin-top: 8px; }
+    .sky-tab .spot-controls .group { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr); }
+    .sky-tab .spot-controls .group > span { align-self: center; }
+    #sky-pick { grid-column: 1 / -1; }
+    #sky-place { width: 100%; min-width: 0; }
+    #sky-viewer { margin-top: 10px; border-radius: 13px; min-width: 0; }
+    .sky-viewer-head { padding: 12px 12px 0; }
+    .sky-viewer-canvas { height: min(62dvh, 520px); }
+    .sky-viewer-controls { padding: 9px 12px; gap: 8px; min-width: 0; }
+    .sky-viewer-controls > label:first-child { display: flex; align-items: center; gap: 7px; width: 100%; min-width: 0; }
+    .sky-viewer-controls input[type="date"] { min-width: 0; max-width: 100%; }
+    .sky-viewer-time { flex-basis: 100%; width: 100%; min-width: 0; }
+    .sky-viewer-day { padding: 0 12px; }
+    .sky-viewer-foot { padding: 0 12px 13px; }
+    .sky-notes { grid-template-columns: minmax(0, 1fr); }
+    .season ul { grid-template-columns: minmax(0, 1fr); }
+  }
   /* below ~340px the hour breakdown needs a third line; reserving it that wide
      everywhere would just be dead space on every other screen */
   @media (max-width: 336px) {
@@ -650,10 +759,10 @@
      always one tap away instead of a blind scroll. -->
 <nav class="guide">
   <div class="tablist" role="tablist" aria-label="what this page answers">
-    <button role="tab" id="tab-when" aria-controls="panel-when" aria-selected="true"><b>when is it dark?</b><span class="what">every new-moon window for the next twelve months, with the weekend nights called out, and how clear the next week looks</span><span class="short">dark nights</span></button>
-    <button role="tab" id="tab-where" aria-controls="panel-where" aria-selected="false" tabindex="-1"><b>where do i go?</b><span class="what">thirty-eight dark-sky spots on a map, ranked by drive time from wherever home is</span><span class="short">where to go</span></button>
-    <button role="tab" id="tab-sky" aria-controls="panel-sky" aria-selected="false" tabindex="-1"><b>what will i see?</b><span class="what">the sky from any spot on any night: the ridge, the moon and the milky way, turnable</span><span class="short">the sky</span></button>
-    <button role="tab" id="tab-notes" aria-controls="panel-notes" aria-selected="false" tabindex="-1"><b>field notes</b><span class="what">reading the mountains, how the numbers are made, and who the data comes from</span><span class="short">notes</span></button>
+    <button role="tab" id="tab-when" aria-controls="panel-when" aria-selected="true"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M15.8 3.7a8.5 8.5 0 1 0 4.5 13.8 7 7 0 1 1-4.5-13.8Z"/></svg></span><b>when is it dark?</b><span class="what">every new-moon window for the next twelve months, with the weekend nights called out, and how clear the next week looks</span><span class="short">dark nights</span></button>
+    <button role="tab" id="tab-where" aria-controls="panel-where" aria-selected="false" tabindex="-1"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s6-5.1 6-11a6 6 0 1 0-12 0c0 5.9 6 11 6 11Z"/><circle cx="12" cy="10" r="2.2"/></svg></span><b>where do i go?</b><span class="what">thirty-eight dark-sky spots on a map, ranked by drive time from wherever home is</span><span class="short">where to go</span></button>
+    <button role="tab" id="tab-sky" aria-controls="panel-sky" aria-selected="false" tabindex="-1"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 17c2.4-3 4.5-4.5 6.2-4.5 1.7 0 2.7 2 4.2 2 1.6 0 3.4-3.3 7.6-5.5"/><path d="M17.5 3.5v4M15.5 5.5h4"/></svg></span><b>what will i see?</b><span class="what">the sky from any spot on any night: the ridge, the moon and the milky way, turnable</span><span class="short">the sky</span></button>
+    <button role="tab" id="tab-notes" aria-controls="panel-notes" aria-selected="false" tabindex="-1"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 4.5h12v15H6zM9 9h6M9 13h6M9 17h4"/></svg></span><b>field notes</b><span class="what">reading the mountains, how the numbers are made, and who the data comes from</span><span class="short">notes</span></button>
   </div>
 </nav>
 
@@ -698,6 +807,10 @@
 <section class="spots" id="where">
   <h3>where to look up</h3>
   <p class="lede">thirty-eight high, open, dark places across western north carolina, from the cherohala skyway to doughton park, ranked by drive time from home. drive times are estimates, and <a href="#check-before-you-go">all of it needs checking before you drive</a>. the layer control on the map can also show every other named overlook on the north carolina parkway, modelled rather than visited.</p>
+  <div class="mobile-place-switch" role="group" aria-label="places view">
+    <button type="button" data-place-view="map" aria-pressed="true">map</button>
+    <button type="button" data-place-view="list" aria-pressed="false">list</button>
+  </div>
   <div class="spot-controls">
     <div class="group" role="group" aria-label="filter spots">
       <span>show</span>
@@ -7332,6 +7445,27 @@ async function initOfflineMapDownloads(map, layerControl, baseLayers, baseKeyByL
   });
 }
 
+function initMobilePlaceView() {
+  const section = document.querySelector('.spots');
+  const switcher = document.querySelector('.mobile-place-switch');
+  if (!section || !switcher) return;
+  const setView = view => {
+    const next = view === 'list' ? 'list' : 'map';
+    section.dataset.mobileView = next;
+    switcher.querySelectorAll('[data-place-view]').forEach(button =>
+      button.setAttribute('aria-pressed', String(button.dataset.placeView === next)));
+    requestAnimationFrame(() => {
+      if (next === 'map' && spotState.map) spotState.map.invalidateSize(false);
+      if (next === 'list') { drawSkylines(); bindSkylineToggle(); }
+    });
+  };
+  switcher.addEventListener('click', event => {
+    const button = event.target.closest('[data-place-view]');
+    if (button) setView(button.dataset.placeView);
+  });
+  setView('map');
+}
+
 function initMap() {
   const el = document.getElementById('map');
   if (typeof L === 'undefined') {
@@ -7830,6 +7964,7 @@ function initTabs() {
   function select(tab, { focus = false, top = false } = {}) {
     if (!tab) return;
     remember(TAB_KEY, tab.id);
+    document.body.dataset.activeTab = tab.id;
     for (const t of tabs) {
       const on = t === tab;
       t.setAttribute('aria-selected', String(on));
@@ -7890,7 +8025,13 @@ function initTabs() {
   const linked = tabFor(hashId());
   const remembered = tabs.find(t => t.id === recall(TAB_KEY, null)) || null;
   select(linked || remembered || tabs[0]);
-  if (linked) document.getElementById(hashId()).scrollIntoView({ block: 'start' });
+  if (linked && location.hash !== hashOf(linked)) document.getElementById(hashId()).scrollIntoView({ block: 'start' });
+  else if (linked) {
+    const resetTop = () => scrollTo({ top: 0, behavior: 'instant' });
+    resetTop();
+    requestAnimationFrame(resetTop);
+    addEventListener('load', () => setTimeout(resetTop, 0), { once: true });
+  }
   // a restored tab puts its own hash in the URL, so a reload or a copied link
   // stays on it. a first visit keeps its bare URL.
   else if (remembered && remembered !== tabs[0]) history.replaceState(null, '', hashOf(remembered));
@@ -7963,6 +8104,7 @@ const savedHome = loadSavedHome() || HOME_DEFAULT;
 spotState.home = { lat: savedHome.lat, lon: savedHome.lon, name: savedHome.name || '' };
 // opens whichever tab the hash asks for, and builds the map if that is the map
 // tab. runs after home is restored, since the spot popups bake in drive times.
+initMobilePlaceView();
 initTabs();
 // syncs the controls, the list and the forecast to whatever home ended up being
 setHome(spotState.home.lat, spotState.home.lon, spotState.home.name);

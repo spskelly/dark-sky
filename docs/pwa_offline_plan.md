@@ -295,74 +295,46 @@ Stored records remain on the device unless the user clears site data or uses
 the clear control. The API request still sends coordinates to Open-Meteo; its
 terms say server logs can contain location data and are deleted after 90 days.
 
-## Mobile redesign findings
+## Mobile application shell
 
-The phone screenshots pass the current regression checks, but those checks
-mostly prove that controls render and interactions function. They do not prove
-that the page is comfortable as an installed field app. A larger mobile
-redesign is justified before committing to MapLibre or a downloaded map pack.
+The first mobile redesign pass was implemented on 2026-09-21 without changing
+the desktop editorial layout. At widths up to 720 CSS pixels it now provides:
 
-The main issues visible at the current phone viewport are:
+- a 52-pixel sticky app header with the product identity;
+- a 64-pixel, safe-area-aware bottom navigation bar with icons and labels;
+- a compact Tonight card instead of the marketing headline and introduction;
+- Home controls only on the Dark Nights screen, rather than repeated above
+  every task;
+- a dedicated Map/List switch for Places, with Map as the initial view;
+- filter chips above a map sized with `54dvh`, capped at 460 pixels and floored
+  at 360 pixels;
+- a Sky canvas sized with `62dvh`, capped at 520 pixels, plus controls that no
+  longer widen the document beyond the viewport; and
+- primary tab hashes that return to the top of their screen, while nested
+  anchors still scroll to their actual target.
 
-- The marketing hero and home controls occupy most of the first screen on every
-  tab. An installed app should lead with the active task, not repeat its landing
-  page introduction.
-- The sticky four-tab bar sits at the top of a very long document and can cover
-  content while scrolling. It also competes with the browser or standalone
-  safe area rather than behaving like primary mobile navigation.
-- Calendar cells and secondary text are dense, while each upcoming window
-  expands into a long vertical card.
-- The Places panel puts a map, filters, legend, and many detailed cards into one
-  continuous scroll. It is hard to move between geographic browsing and place
-  comparison without losing position.
-- The Sky canvas uses 72 percent of the viewport height, followed by wrapping
-  controls, an all-day strip, and extensive explanation. The result is capable
-  but tiring to operate one-handed.
-- Field Notes is long-form reference copy below the full hero instead of a
-  scannable field reference.
+The 390 by 844 browser check measured a 52-pixel header, 64-pixel navigation,
+137-pixel Tonight card, and a 366 by 456 map. It verifies the map/list switch,
+safe primary navigation, full-width skyline rendering after the list becomes
+visible, and zero horizontal overflow on the Sky screen. Fresh viewport
+screenshots were inspected for Dark Nights, Places map, Places list, Sky, and
+Notes.
 
-### Recommended mobile information architecture
+This is the application shell, not the end of the mobile redesign. Remaining
+candidate work should be judged on a phone before implementation:
 
-Treat the installed experience as a task-focused application while retaining a
-more explanatory landing state for first-time web visitors:
-
-1. Use a compact app header after onboarding. Put the saved home, offline
-   readiness, and last forecast update into a small status surface.
-2. Move primary navigation to a safe-area-aware bottom bar: `Tonight`,
-   `Places`, and `Sky`. Put Field Notes, methodology, attributions, storage, and
-   install help under an `Info` sheet or menu.
-3. Make `Tonight` the home screen. Lead with the next useful dark window, moon
-   state, forecast freshness, and one primary action. Collapse the full
-   calendar and explanatory copy behind progressive disclosure.
-4. Give `Places` a map/list switch or a split sheet. Show compact comparable
-   rows first; open one place in a bottom sheet or focused detail view. Keep
-   filter chips reachable without repeating the legend and full card prose.
-5. Give `Sky` compact place, date, and time controls above a canvas closer to
-   half the small viewport. Offer a deliberate full-screen view. Make the
-   all-day strip and methodology collapsible rather than permanent vertical
-   content.
-6. Turn Field Notes into indexed topics or accordions with a prominent offline
+1. Open a selected place in a focused detail sheet instead of expanding a card
+   inside the list.
+2. Add an intentional full-screen Sky mode and collapse the all-day explanation
+   when vertical space is tight.
+3. Turn Field Notes into indexed topics or accordions with a prominent offline
    preparation checklist.
+4. Test the final PWA in standalone display mode, landscape, and at a narrower
+   320-pixel viewport before calling the mobile interface complete.
 
-Use `100dvh` and safe-area insets for the installed layout, with a fallback for
-older browsers. Preserve all touch targets at 44 CSS pixels or larger. Do not
-hide critical forecast freshness or offline status inside hover states,
-tooltips, or color alone.
-
-### Redesign sequence
-
-Before changing production markup, add screenshot and interaction cases for a
-small phone, a typical modern phone, landscape, and standalone display mode.
-Prototype the compact Tonight screen and the Places map/list transition with
-the existing Leaflet map. This separates the information-architecture decision
-from the later question of whether PMTiles and MapLibre earn their added size
-and complexity.
-
-Once that structure is accepted, implement the PWA shell and forecast cache
-against the new navigation. The service worker itself is independent, but its
-status and update controls need a stable home in the mobile interface. Then
-test the local terrain overlay. Only after those pieces work on a real phone
-should the project measure and consider a regional PMTiles download.
+The next implementation step remains the PWA shell and forecast cache against
+this stable navigation. MapLibre and a detailed PMTiles package remain separate
+later decisions that require measured value on a real phone.
 
 ## Proposed architecture
 
