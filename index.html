@@ -26,6 +26,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..600,50&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="assets/map-analysis.js"></script>
 <style>
   /* palette: deep blue night, ivory moon, teal for the dark-sky window */
   :root {
@@ -285,6 +286,14 @@
   #map { height: 560px; border-radius: 12px; background: var(--night-2); overflow: hidden; }
   /* pull the bright topo tiles down toward the palette; imagery is left alone */
   #map .tiles-dim { filter: brightness(0.72) saturate(0.7) contrast(1.05); }
+  #map .offline-hillshade { filter: brightness(0.54) contrast(1.2) sepia(0.12) hue-rotate(155deg) saturate(0.62); }
+  #map .offline-orthophoto { filter: brightness(0.66) saturate(0.78) contrast(1.08); }
+  .offline-map-download { margin: 10px 0 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; display: flex; align-items: center; justify-content: space-between; gap: 14px; background: var(--night-2); }
+  .offline-map-download b { display: block; font-size: 13px; font-weight: 500; color: var(--ink); }
+  .offline-map-download span { display: block; margin-top: 2px; font-size: 12px; line-height: 1.4; color: var(--ink-dim); }
+  .offline-map-download button { flex: 0 0 auto; }
+  .offline-map-download button:disabled { opacity: .6; cursor: wait; }
+  @media (max-width: 560px) { .offline-map-download { align-items: stretch; flex-direction: column; } .offline-map-download button { width: 100%; } }
   .leaflet-control-layers { background: var(--night-2); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; font-size: 13px; box-shadow: none; }
   /* leaflet ships unstyled radios; pull them into the palette */
   .leaflet-control-layers-selector { accent-color: var(--dark-sky); }
@@ -392,7 +401,7 @@
      attribution is left alone, since several tile sources' licences require
      it stay visible. */
   .ovl-popup-narrow .leaflet-top { visibility: hidden; }
-  .pin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--night); box-shadow: 0 0 0 1px rgba(255,255,255,0.15); }
+  .pin { position: relative; width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--night); box-shadow: 0 0 0 1px rgba(255,255,255,0.15); }
   .pin.camp { background: var(--dark-sky); }
   .pin.view { background: var(--moon); }
   .pin.warn { background: var(--today); }
@@ -401,6 +410,15 @@
      reads as secondary to the pin you drive to. */
   .pin.viewpoint { background: transparent; border: 2px dashed var(--moon); width: 12px; height: 12px;
     box-shadow: none; opacity: .85; }
+  /* Explicitly reviewed bald summits get a green outer ring. A name containing
+     "bald" is not enough: several Parkway overlooks look toward one instead. */
+  .pin.bald::after { content: ""; position: absolute; inset: -6px; pointer-events: none; border: 2px solid #a8c96a;
+    border-radius: 50%; box-shadow: 0 0 0 1px rgba(15,26,52,0.8); }
+  .view-sector-icon { pointer-events: none; }
+  .view-sector-icon svg { display: block; width: 64px; height: 64px; overflow: visible; }
+  .view-sector-icon .sector { fill: rgba(95,194,173,0.24); stroke: rgba(154,226,210,0.92); stroke-width: 1.4; }
+  .view-sector-icon .all-around { fill: rgba(95,194,173,0.12); stroke: rgba(154,226,210,0.92);
+    stroke-width: 1.5; stroke-dasharray: 4 3; }
   /* an unnamed pull-off, not a checked spot: small and outlined rather than a
      full pin, filled with its own sky glow band. the dot stays 10px and the
      margin centres it in a 24px icon box, so what a finger has to hit is the
@@ -417,6 +435,8 @@
   .legend span { display: inline-flex; align-items: center; gap: 6px; }
   /* a line, not a dot, so the road reads as a route beside the pins */
   .legend .line { width: 20px; height: 3px; border-radius: 2px; background: var(--moon); box-shadow: 0 0 0 1px rgba(15,26,52,0.85); }
+  .legend .sector-key { width: 20px; height: 14px; border-radius: 50% 50% 2px 2px;
+    background: rgba(95,194,173,0.24); border: 1px solid rgba(154,226,210,0.92); }
   /* the overlay's own bands, filled in from SKY_SCALE at render so the key
      cannot drift from the atlas. the fallback here is only what shows if the
      generated block is empty, and it is deliberately vague. */
@@ -691,11 +711,17 @@
       <button data-sort="dist" aria-pressed="false" title="straight-line distance from your home point">distance</button>
     </div>
   </div>
+  <div class="offline-map-download" id="offline-map-download">
+    <div><b>optional offline maps</b><span id="offline-map-status" aria-live="polite">checking this device...</span></div>
+    <button id="offline-map-action" type="button" disabled>download maps</button>
+  </div>
   <div class="legend">
     <span><i class="pin camp"></i> overnight camping allowed</span>
     <span><i class="pin view"></i> viewing only</span>
     <span><i class="pin warn"></i> restricted, read the note</span>
     <span><i class="pin home"></i> home</span>
+    <span><i class="pin view bald"></i> reviewed bald summit</span>
+    <span class="sector-key-wrap" hidden><i class="sector-key"></i> modelled lowest 60&deg; obstruction</span>
     <span class="road-key" hidden><i class="line"></i> blue ridge parkway</span>
     <span class="lp-key" hidden><i class="ramp"></i> sky glow, darkest to city core</span>
   </div>
@@ -705,7 +731,7 @@
     <div class="spot-list" id="spot-list"></div>
   </div>
   <button id="spot-more" aria-expanded="false" aria-controls="spot-list"></button>
-  <p class="source-credit">sky glow: <a href="https://djlorenz.github.io/astronomy/lp/">David Lorenz&rsquo;s light pollution atlas</a>. Source: <a href="https://eogdata.mines.edu/products/vnl/">EOG, Colorado School of Mines</a>. Modelled brightness overhead; <a href="https://djlorenz.github.io/astronomy/lp/colors.html">color key</a> &middot; <a href="#credits">sources &amp; credits</a>.</p>
+  <p class="source-credit">map: OpenTopoMap online by default. Optional device downloads: <a href="https://www.usgs.gov/programs/national-geospatial-program/national-map">USGS The National Map</a>, 3DEP multidirectional hillshade and USDA/USGS orthoimagery. Sky glow: <a href="https://djlorenz.github.io/astronomy/lp/">David Lorenz&rsquo;s light pollution atlas</a>. Source: <a href="https://eogdata.mines.edu/products/vnl/">EOG, Colorado School of Mines</a>. Modelled brightness overhead; <a href="https://djlorenz.github.io/astronomy/lp/colors.html">color key</a> &middot; <a href="#credits">sources &amp; credits</a>.</p>
   <aside class="disclaimer" id="check-before-you-go">
     <h4>check before you go</h4>
     <p>
@@ -1243,7 +1269,7 @@ const SPOTS = [
     note: 'three minutes past waterrock, wide valley view to the west, a fraction of the traffic. the sky is open from the south round through the west, with a ridge climbing behind it to the east. the move when the waterrock lot is full of sunset crowds. lower and more directional than the knob.' },
   { name: 'Cove Field Ridge Overlook', lat: 35.4309, lon: -83.0357, elev: 4620, kind: 'view', approach: 2, tags: ['parkway mp 439.4', 'low and close', 'view grown in'],
     note: 'a gear-shakedown overlook rather than a destination: the quickest way onto the parkway from the haywood county towns. the sky here is closed in by what is immediately around the pull-off rather than by anything distant: the bank the overlook is cut into blocks the west to about 24 degrees up and the south to about 12, and the view has largely grown in besides. east is the only quarter with a real horizon, 7 km out and open. so it is the wrong half of the sky for the moon and planets on an evening, and worth knowing that the southern view opens up a good deal a few hundred metres further along the road.' },
-  { name: 'Black Balsam Knob', lat: 35.3276, lon: -82.8757, elev: 6214, view: [35.3278, -82.8745], kind: 'camp', approach: 23, tags: ['parkway mp 420, fr 816', 'grass bald', 'bear canister required'],
+  { name: 'Black Balsam Knob', lat: 35.3276, lon: -82.8757, elev: 6214, bald: true, view: [35.3278, -82.8745], kind: 'camp', approach: 23, tags: ['parkway mp 420, fr 816', 'grass bald', 'bear canister required'],
     note: 'the standard answer. treeless summit with a full horizon, dispersed camping on the bald and along the art loeb trail. gets crowded on good weekends; walk past the first ridge for quiet. wood fires are banned in the shining rock wilderness, which the art loeb trail enters north of the bald, not on the bald itself. camping overnight here, at sam knob or at graveyard fields requires a bear resistant canister, a rule in place since 2015.' },
   { name: 'Sam Knob / Flat Laurel Creek', lat: 35.3257, lon: -82.8819, elev: 5800, view: [35.3295, -82.8948], kind: 'camp', approach: 24, tags: ['fr 816 end', 'quieter than black balsam'],
     note: 'same parking as black balsam, opposite direction. flat laurel creek trail reportedly has sheltered tent sites in the valley, and sam knob summit is a short climb for the view. better wind protection for sleeping. the black balsam bear canister rule covers this valley too.' },
@@ -1265,25 +1291,25 @@ const SPOTS = [
     note: 'fire tower on a 5,800-foot summit with a campsite right at the top. best-in-class sky with the whole smokies dark to the south and west. 2.7 miles and 2,000 feet up from mt sterling gap. since april 2026 the backcountry permit is booked on recreation.gov, 8 dollars a person a night plus a 6 dollar booking fee, up to a month ahead, and a parking tag is still required at the gap.' },
   { name: 'Kuwohi (Clingmans Dome)', lat: 35.5568, lon: -83.4962, elev: 6643, view: [35.5629, -83.4984], kind: 'view', approach: 40, tags: ['great smoky mountains np', 'road closed dec to mar', 'observation tower'],
     note: 'highest point in the park, half-mile paved walk to the tower. gatlinburg glows to the north but south and west are black. no camping; the lot is open at night when the road is, and the park wants a parking tag, 5 dollars a day, on any car stopped more than 15 minutes.' },
-  { name: 'Cherohala Skyway, Hooper Bald', lat: 35.3042, lon: -84.0011, elev: 5290, view: [35.3059, -83.9941], kind: 'view', approach: 16, tags: ['cherohala skyway', 'darkest westward sky', 'drive-up'],
+  { name: 'Cherohala Skyway, Hooper Bald', lat: 35.3042, lon: -84.0011, elev: 5290, bald: true, view: [35.3059, -83.9941], kind: 'view', approach: 16, tags: ['cherohala skyway', 'darkest westward sky', 'drive-up'],
     note: 'the skyway overlooks between santeetlah gap and the tennessee line are the darkest drive-up sky in the region, with nothing to the west for a hundred miles. hooper bald is a short walk from its lot. dispersed camping is nearby off the forest roads; the tennessee side bans camping within 300 feet of the skyway, and nothing published says the north carolina overlooks are treated differently.' },
   { name: 'Panthertown Valley', lat: 35.1684, lon: -83.0402, elev: 4058, view: [35.16626, -83.03592], kind: 'camp', approach: 34, tags: ['nantahala nf', 'backcountry', 'granite domes'],
     note: 'high valley with bare granite domes (salt rock, big green) that open up the sky above the trees. free dispersed camping, no permits. domes are wet and slick after dark, know your route. the easy one is salt rock overlook, about ten minutes on foot from the salt rock gap parking area.' },
-  { name: 'Roan Highlands, Carvers Gap', lat: 36.1064, lon: -82.1105, elev: 5512, view: [36.1071, -82.1040], kind: 'camp', approach: 48, tags: ['appalachian trail', 'grass balds', 'far'],
+  { name: 'Roan Highlands, Carvers Gap', lat: 36.1064, lon: -82.1105, elev: 5512, bald: true, view: [36.1071, -82.1040], kind: 'camp', approach: 48, tags: ['appalachian trail', 'grass balds', 'far'],
     note: 'miles of open bald along the at; grassy ridge bald is the classic overnight. a long drive for a weekend, but the most black balsam-like sky north of it, and the rhododendron in june is a bonus. no fires: forest orders ban campfires and wood or alcohol stoves from hughes gap to doll flats, the north carolina order running to october 2030. a gas canister stove with a shutoff is allowed on ground cleared three feet around it.' },
   { name: 'Mayland Earth to Sky Park', lat: 35.9305, lon: -82.1825, elev: 2876, kind: 'view', approach: 38, tags: ['darksky certified park', 'observatory', 'grounds open 24h', 'entry gate often locked'],
     note: 'one of three darksky international certified parks in the state, with the bare dark sky observatory on a cleared hilltop at about 2,880 feet. the 34-inch scope inside the building is ticketed event nights only, but mayland community college says the grounds are open around the clock for stargazing with your own gear, and there are three telescope stations outside the building, a short sloped path with some steps up from the small observatory lot. the catch is the entrance, which is shared with the county transfer station: the gate is shut whenever neither place is staffed, and the visitor center is only staffed thursday to sunday afternoons. the college says to park outside the gate on the right side of the road and walk around it, which turns a drive-up into an uphill road walk with almost no lighting, so bring a red light and expect nobody else there. the visitor center and planetarium sit lower, near 2,720 feet, with a hill close on the west; the observatory level is the one that is open all round. no camping anywhere in the park, and the right place to take someone new to this on a ticketed night.' },
   { name: 'PARI', lat: 35.1996, lon: -82.8720, elev: 2900, kind: 'view', approach: 32, tags: ['pisgah astronomical research institute', 'book ahead'],
     note: 'former nasa tracking station turned observatory campus in the pisgah forest. never walk-up, but more available than an event calendar suggests: pari sells overnight stays, camping from 25 dollars a night for one or two people and 12.50 for each person after that, and says observers bringing their own gear can often book a night when the site is not reserved for something else. check-in is during business hours, usually before 5pm. ask rather than wait for an event.' },
-  { name: 'Max Patch', lat: 35.7963, lon: -82.9622, elev: 4629, view: [35.7970, -82.9568], kind: 'warn', approach: 26, tags: ['closed after dark', 'closed until 21 jun 2029'],
+  { name: 'Max Patch', lat: 35.7963, lon: -82.9622, elev: 4629, bald: true, view: [35.7970, -82.9568], kind: 'warn', approach: 26, tags: ['closed after dark', 'closed until 21 jun 2029'],
     note: 'the famous bald, and legally off limits at night. forest order 08-11-04-26-01, signed 17 june 2026, bans being in the area from one hour after sundown to one hour before sunrise, along with camping, fires and groups over ten. the forest service lists it as running to 21 june 2029 or until they end it, and orders like it have been renewed since 2021, so do not count on it lapsing. the sky up there is as good as the photographs suggest and none of it is yours. listed so you do not plan around it.' },
 
   // ---- black mountains and the north ----
   { name: 'Mount Mitchell State Park', lat: 35.7650, lon: -82.2652, elev: 6684, kind: 'camp', approach: 22, tags: ['highest point east of the mississippi', 'tent-only campground', 'seasonal'],
     note: 'the summit deck at 6,684 feet, with a nine-site tent campground below it. the park gate and the parkway approach both close for ice, the gate shuts at 6pm in winter and no later than 10pm in summer, and the campground runs 1 may to 31 october, so check the park before driving up. since helene the only way in is the parkway from the asheville side; north of the park it is closed. asheville glows hard to the south; north and east are excellent.' },
-  { name: 'Craggy Pinnacle', lat: 35.7043, lon: -82.3736, elev: 5892, view: [35.7033, -82.3774], kind: 'view', approach: 18, tags: ['parkway mp 364', 'short hike', '360 degrees'],
+  { name: 'Craggy Pinnacle', lat: 35.7043, lon: -82.3736, elev: 5892, bald: true, view: [35.7033, -82.3774], kind: 'view', approach: 18, tags: ['parkway mp 364', 'short hike', '360 degrees'],
     note: 'a 0.7-mile climb from the craggy dome lot to a bald summit with a full horizon. closer to asheville than mitchell, so the southern sky pays for it, but it is the easiest big view on this stretch of parkway. no camping.' },
-  { name: 'Big Bald', lat: 36.0022, lon: -82.4922, elev: 5516, view: [35.9897, -82.4902], kind: 'camp', approach: 32, tags: ['appalachian trail', 'grass bald', 'dispersed camping'],
+  { name: 'Big Bald', lat: 36.0022, lon: -82.4922, elev: 5516, bald: true, view: [35.9897, -82.4902], kind: 'camp', approach: 32, tags: ['appalachian trail', 'grass bald', 'dispersed camping'],
     note: 'a genuinely big open bald on the tennessee line with very little to the north of it. the public way in is the appalachian trail from sams gap on i-26, about six and a half miles each way, so for a night sky this is a backpacking trip and not an evening walk. the short approach is through wolf laurel, a private gated community whose own site offers its trailheads to owners and guests, and nobody publishes a public access policy for that gate, so do not plan on it unless you are staying inside. closures on this stretch are posted on the appalachian trail conservancy trail updates page and by the appalachian ranger district of pisgah national forest. dispersed camping along the trail.' },
 
   // ---- linville gorge and the northeast ----
@@ -1303,7 +1329,7 @@ const SPOTS = [
   // ---- east and southeast ----
   { name: 'Lake James State Park', lat: 35.7300, lon: -81.8950, elev: 1200, view: [35.735394, -81.901983], kind: 'camp', approach: 5, tags: ['lakeshore', 'campground', 'low elevation'],
     note: 'low and warm compared with the balds, but from the catawba river side the water gives you an open northern horizon toward the linville face with nothing in the way. day use closes at 7pm in winter and 10pm in summer, so without a campsite booked you are out before it is properly dark. marion and morganton glow east and south; come here for the moon, planets and meteors rather than the core.' },
-  { name: 'Bearwallow Mountain', lat: 35.4607, lon: -82.3681, elev: 4232, view: [35.4610, -82.3568], kind: 'view', approach: 7, tags: ['grassy bald', 'conservation easement', 'short hike'],
+  { name: 'Bearwallow Mountain', lat: 35.4607, lon: -82.3681, elev: 4232, bald: true, view: [35.4610, -82.3568], kind: 'view', approach: 7, tags: ['grassy bald', 'conservation easement', 'short hike'],
     note: 'a mile up an old road to a grazed bald with a tower and a wide southern view over hickory nut gorge. conserving carolina, who hold the easement, explicitly welcome stargazing and full-moon hikes here, with no camping and no fires. come at it from the edneyville side: bearwallow mountain road through gerton is still restricted after helene, and the trailhead is a gravel shoulder with room for only a few cars.' },
   { name: 'DuPont State Recreational Forest', lat: 35.1728, lon: -82.6390, elev: 3030, view: [35.1790, -82.6355], kind: 'warn', approach: 20, tags: ['open 5am to 10pm', 'no camping', 'granite domes', '0.7 mile walk'],
     note: 'legal after dark, within limits. the n.c. forest service publishes 5am to 10pm every day of the year, and the state forest rule bars anyone from being inside between closing and opening, so 10pm is a hard stop and not a suggestion. from about october to march that still leaves real hours of full dark. camping is banned outright, which makes this an evening trip rather than a night. skip the waterfall corridor, which sits near 2,300 feet and is closed in. park at corn mill shoals on cascade lake road, cross the road, and take big rock trail: about 0.7 mile and 310 feet of climb to the first big open slab near 3,030 feet, and another 150 yards to the top of cedar rock at about 3,070. the rock is bare with scattered pine, slick when wet and easy to lose the trail on in the dark, so carry a light and leave time to walk down before 10. hours can change and the sign at the lot is the one that counts.' },
@@ -1323,7 +1349,7 @@ const SPOTS = [
     note: 'peninsula campground on lake chatuge at the georgia line, with open water south and west. reservation only and summer only: loop a runs may through september, loops b and c may through october. beach parking is 5 dollars a day on top of the site fee, even for campers. low, so it is humid and hazier than the balds, but it covers the far southwestern corner and the lakeshore sites have a clean horizon.' },
 
   // ---- far west, graham and swain ----
-  { name: 'Huckleberry Knob', lat: 35.3140, lon: -83.9909, elev: 5560, view: [35.3220, -83.9935], kind: 'camp', approach: 24, tags: ['cherohala skyway', 'grass bald', 'dispersed camping'],
+  { name: 'Huckleberry Knob', lat: 35.3140, lon: -83.9909, elev: 5560, bald: true, view: [35.3220, -83.9935], kind: 'camp', approach: 24, tags: ['cherohala skyway', 'grass bald', 'dispersed camping'],
     note: 'the highest point in graham county, a mile of easy old roadbed from the skyway to a treeless summit. the forest service publishes no ban on camping here, though nothing official calls it a campsite either, and there is essentially nothing west of here until tennessee. the best dark sky on this list that you can still walk to in twenty minutes.' },
   { name: 'Tsali Recreation Area', lat: 35.4077, lon: -83.5876, elev: 1800, view: [35.40455, -83.57844], kind: 'camp', approach: 1, tags: ['fontana lake', 'apr 15 to oct 31', 'low but close'],
     note: 'forest service campground on a fontana lake peninsula, best known for mountain biking. 42 sites at 20 dollars a night, first come first served, and open 15 april to 31 october only, which rules out exactly the iced-in months when a low, close site would be most useful. low and hemmed in, with the next ridge about 350 m out as the horizon, but north is the open half and it is dark and close to town. the open ground is the boat ramp on the lake about a kilometre east of the campground, and the forest service does not say whether its gate is open after dark.' },
@@ -5807,7 +5833,7 @@ const TOWNS = [
 // a remembered value is only trusted if it is still one of the choices
 const oneOf = (v, choices, fallback) => (choices.includes(v) ? v : fallback);
 
-const spotState = { home: { ...HOME_DEFAULT }, filter: oneOf(recall('darksky.filter', 'all'), ['all', 'camp', 'drive'], 'all'), sort: oneOf(recall('darksky.sort', 'mins'), ['mins', 'dist'], 'mins'), map: null, markers: new Map(), homeMarker: null,
+const spotState = { home: { ...HOME_DEFAULT }, filter: oneOf(recall('darksky.filter', 'all'), ['all', 'camp', 'drive'], 'all'), sort: oneOf(recall('darksky.sort', 'mins'), ['mins', 'dist'], 'mins'), map: null, markers: new Map(), homeMarker: null, baseLayers: null, viewSectors: null, offlineMaps: null,
   active: SPOTS.some(s => s.name === recall('darksky.active', null)) ? recall('darksky.active', null) : null,
   picking: false, showAll: recall('darksky.showAll', false) === true, fitKey: null,
   pano: SPOTS.some(s => s.name === recall('darksky.pano', null)) ? recall('darksky.pano', null) : null };
@@ -7029,7 +7055,8 @@ function openSkyViewerForOverlook(id, opts) {
 function OVL_popup(o) {
   const h = OVERLOOK_HORIZONS[o.id];
   const gm = `https://www.google.com/maps/dir/?api=1&destination=${o.lat},${o.lon}`;
-  return `<div class="ovl"><b>${OVL_esc(o.name)}</b><br>${[o.mp !== undefined ? 'parkway mp ' + o.mp : '', h ? h[0].toLocaleString() + ' ft' : ''].filter(Boolean).join(' &middot; ')}
+  const sectorText = mapViewSectorText('ov:' + o.id);
+  return `<div class="ovl"><b>${OVL_esc(o.name)}</b><br>${[o.mp !== undefined ? 'parkway mp ' + o.mp : '', h ? h[0].toLocaleString() + ' ft' : ''].filter(Boolean).join(' &middot; ')}${sectorText ? '<br>' + sectorText : ''}
     ${o.note ? `<p class="ovl-caveat ovl-note">${OVL_esc(o.note)}</p>` : ''}
     ${h ? `<div class="pano"><canvas class="skyline" role="img" aria-label="skyline and sky from ${OVL_esc(o.name)}"></canvas></div>
       <button type="button" class="ovl-open">open sky view</button>` : ''}
@@ -7130,8 +7157,52 @@ function drawParkway(map) {
   L.polyline(PARKWAY, { color: '#ece7d4', weight: 2, opacity: 0.85, lineJoin: 'round', lineCap: 'round', interactive: false }).addTo(map);
 }
 
-function pinIcon(kind) {
-  return L.divIcon({ className: '', html: `<div class="pin ${kind}"></div>`, iconSize: kind === 'home' ? [18, 18] : [14, 14], iconAnchor: kind === 'home' ? [9, 9] : [7, 7] });
+const VIEW_SECTOR_KEY = 'darksky.viewSectors';
+const VIEW_SECTOR_WIDTH = 60;
+
+function mapViewSector(key) {
+  if (!window.DarkSkyMapAnalysis) return null;
+  const profiles = placeProfiles(key);
+  if (!profiles) return null;
+  return DarkSkyMapAnalysis.bestViewingSector(panBlocking(profiles.horizon, profiles.canopy), { width: VIEW_SECTOR_WIDTH });
+}
+
+function mapViewSectorText(key) {
+  const sector = mapViewSector(key);
+  if (!sector) return '';
+  if (sector.allAround) return 'modelled low obstruction all around';
+  const dir = DarkSkyMapAnalysis.compass16(sector.bearing);
+  return `lowest broad obstruction ${dir} at ${sector.bearing}&deg; (${Math.round(sector.start)}&deg; to ${Math.round(sector.end)}&deg;)`;
+}
+
+function mapViewSectorIcon(sector) {
+  const shape = sector.allAround
+    ? '<circle class="all-around" cx="32" cy="32" r="27"></circle>'
+    : `<path class="sector" d="${DarkSkyMapAnalysis.sectorSvgPath(sector.bearing, sector.width)}"></path>`;
+  return L.divIcon({ className: 'view-sector-icon', html: `<svg viewBox="0 0 64 64" aria-hidden="true">${shape}</svg>`,
+    iconSize: [64, 64], iconAnchor: [32, 32] });
+}
+
+function mapViewSectorLayer() {
+  const group = L.layerGroup();
+  const overlookSectors = L.layerGroup();
+  const add = (target, key, lat, lon) => {
+    const sector = mapViewSector(key);
+    if (!sector) return;
+    L.marker([lat, lon], { icon: mapViewSectorIcon(sector), interactive: false, keyboard: false, zIndexOffset: -400 }).addTo(target);
+  };
+  SPOTS.forEach(s => add(group, s.name, s.view ? s.view[0] : s.lat, s.view ? s.view[1] : s.lon));
+  OVERLOOKS.forEach(o => add(overlookSectors, 'ov:' + o.id, o.lat, o.lon));
+  group.allCount = SPOTS.length + OVERLOOKS.length;
+  group.setOverlooksVisible = visible => {
+    if (visible && !group.hasLayer(overlookSectors)) overlookSectors.addTo(group);
+    if (!visible && group.hasLayer(overlookSectors)) group.removeLayer(overlookSectors);
+  };
+  return group;
+}
+
+function pinIcon(kind, bald = false) {
+  return L.divIcon({ className: '', html: `<div class="pin ${kind}${bald ? ' bald' : ''}"></div>`, iconSize: kind === 'home' ? [18, 18] : [14, 14], iconAnchor: kind === 'home' ? [9, 9] : [7, 7] });
 }
 
 // a spot with a view: is two places: the one you drive to and the one you
@@ -7149,9 +7220,116 @@ function addViewpoint(map, s) {
   L.polyline([from, to], {
     color: 'var(--moon)', weight: 1.5, opacity: .5, dashArray: '3 5', interactive: false,
   }).addTo(map);
-  L.marker(to, { icon: pinIcon('viewpoint'), title: s.name + ' viewpoint', zIndexOffset: -100 })
+  L.marker(to, { icon: pinIcon('viewpoint', s.bald), title: s.name + ' viewpoint', zIndexOffset: -100 })
     .bindPopup(`<b>${s.name}</b><br>the view, ${walk} from the parking<br>the skyline on this spot is drawn from here`)
     .addTo(map);
+}
+
+function formatMapBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '';
+  return bytes >= 1e6 ? (bytes / 1e6).toFixed(1) + ' MB' : Math.ceil(bytes / 1000) + ' KB';
+}
+
+async function initOfflineMapDownloads(map, layerControl, baseLayers, baseKeyByLayer, usgsMapCredit) {
+  const box = document.getElementById('offline-map-download');
+  const status = document.getElementById('offline-map-status');
+  const button = document.getElementById('offline-map-action');
+  if (!box || !status || !button) return;
+  let store;
+  let installed = null;
+
+  function setStatus(message, action, disabled = false) {
+    status.textContent = message;
+    button.textContent = action;
+    button.disabled = disabled;
+  }
+
+  function removeLayers() {
+    if (!installed) return;
+    for (const [key, layer] of Object.entries(installed.layers)) {
+      if (map.hasLayer(layer)) {
+        map.removeLayer(layer);
+        baseLayers.topo.addTo(map);
+        remember('darksky.basemap', 'topo');
+      }
+      layerControl.removeLayer(layer);
+      baseKeyByLayer.delete(layer);
+      delete baseLayers[key];
+    }
+    installed.bundle.release();
+    installed = null;
+  }
+
+  async function installDownloadedLayers() {
+    const bundle = await store.load();
+    if (!bundle) return false;
+    removeLayers();
+    const b = bundle.manifest.bounds;
+    const bounds = [[b.south, b.west], [b.north, b.east]];
+    const hillshade = L.imageOverlay(bundle.urls.hillshade, bounds,
+      { className: 'offline-hillshade', alt: 'USGS 3DEP multidirectional hillshade of western North Carolina' });
+    hillshade.getAttribution = () => usgsMapCredit + ': 3DEP multidirectional hillshade';
+    const orthophoto = L.imageOverlay(bundle.urls.orthophoto, bounds,
+      { className: 'offline-orthophoto', alt: 'USGS and USDA orthophotography of western North Carolina' });
+    orthophoto.getAttribution = () => usgsMapCredit + ': USDA/USGS orthoimagery';
+    installed = { bundle, layers: { hillshade, orthophoto } };
+    for (const [key, layer] of Object.entries(installed.layers)) {
+      baseLayers[key] = layer;
+      baseKeyByLayer.set(layer, key);
+    }
+    layerControl.addBaseLayer(hillshade, '3DEP hillshade · downloaded');
+    layerControl.addBaseLayer(orthophoto, 'orthophoto · downloaded');
+    const remembered = recall('darksky.basemap', 'topo');
+    if (installed.layers[remembered]) {
+      for (const layer of Object.values(baseLayers)) if (map.hasLayer(layer)) map.removeLayer(layer);
+      installed.layers[remembered].addTo(map);
+    }
+    setStatus(formatMapBytes(bundle.bytes) + ' stored on this device', 'remove maps');
+    return true;
+  }
+
+  try {
+    const module = await import('./assets/offline-map-store.mjs');
+    store = module.createOfflineMapStore();
+    spotState.offlineMaps = { store };
+    if (!store.supported()) throw new Error('downloads require a secure hosted page');
+    const restored = await installDownloadedLayers();
+    if (!restored) {
+      try {
+        const available = await store.available();
+        setStatus('orthophoto + hillshade · ' + formatMapBytes(available.bytes), 'download maps');
+      } catch {
+        setStatus(navigator.onLine ? 'download details unavailable' : 'connect to download these layers', 'download maps', true);
+      }
+    }
+  } catch (error) {
+    setStatus(error.message || 'offline maps unavailable', 'download maps', true);
+    return;
+  }
+
+  button.addEventListener('click', async () => {
+    if (installed) {
+      button.disabled = true;
+      removeLayers();
+      await store.remove();
+      try {
+        const available = await store.available();
+        setStatus('orthophoto + hillshade · ' + formatMapBytes(available.bytes), 'download maps');
+      } catch {
+        setStatus('not stored on this device', 'download maps');
+      }
+      return;
+    }
+    setStatus('starting download...', 'downloading', true);
+    try {
+      await store.download(progress => {
+        setStatus('downloading ' + progress.completed + ' of ' + progress.total + ' layers', 'downloading', true);
+      });
+      await installDownloadedLayers();
+    } catch (error) {
+      setStatus((error.message || 'download failed') + '; tap to retry', 'retry download');
+    }
+  });
 }
 
 function initMap() {
@@ -7172,21 +7350,24 @@ function initMap() {
   if (mvOk) map.setView([mv.lat, mv.lon], mv.zoom, { animate: false });
   else map.fitBounds(L.latLngBounds([...visibleSpots().map(s => [s.lat, s.lon]), [spotState.home.lat, spotState.home.lon]]),
     { padding: [30, 30], maxZoom: 11, animate: false });
-  // no-key tile sources. topo is the default: contour lines are what you need to judge a southern horizon
+  // Keep the familiar detailed map online by default. The two bounded USGS
+  // overview layers enter this control only after the reader downloads them.
+  const usgsMapCredit = '<a href="https://www.usgs.gov/programs/national-geospatial-program/national-map">USGS The National Map</a>';
   const topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
     attribution: 'SRTM | &copy; <a href="https://opentopomap.org/about">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC BY-SA 3.0</a>)', maxZoom: 17, className: 'tiles-dim',
   });
   const imagery = L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}', {
     attribution: '<a href="https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer">USDA, USGS The National Map: Orthoimagery</a>', maxZoom: 16,
   });
-  // sky glow sits on top of whichever basemap is showing rather than replacing
-  // one, so it belongs in the same control as an overlay, not in a toolbar of
-  // its own beside the map
   const lp = lightPollutionLayer();
   const ovl = OVL_layer();
-  const bases = { topo, imagery };
-  bases[oneOf(recall('darksky.basemap', 'topo'), ['topo', 'imagery'], 'topo')].addTo(map);
-  map.on('baselayerchange', e => remember('darksky.basemap', e.name));
+  const sectors = mapViewSectorLayer();
+  const baseLayers = { topo, imagery };
+  const baseLabels = { topo, imagery };
+  const baseKey = oneOf(recall('darksky.basemap', 'topo'), Object.keys(baseLayers), 'topo');
+  baseLayers[baseKey].addTo(map);
+  const baseKeyByLayer = new Map(Object.entries(baseLayers).map(([key, layer]) => [layer, key]));
+  map.on('baselayerchange', e => remember('darksky.basemap', baseKeyByLayer.get(e.layer) || 'topo'));
   map.on('click', e => {
     if (!spotState.picking) return;
     if (spotState.picking === 'sky') openSkyViewerForPoint(e.latlng.lat, e.latlng.lng);
@@ -7196,9 +7377,12 @@ function initMap() {
   // open on a wide screen, where it costs nothing; an icon on a phone, where
   // an always-open box covers a corner of a map that is already small
   const narrow = window.matchMedia('(max-width: 720px)').matches;
-  L.control.layers({ 'topo': topo, 'imagery': imagery }, { 'light pollution': lp, 'parkway overlooks': ovl },
+  const layerControl = L.control.layers(baseLabels, { 'light pollution': lp, 'parkway overlooks': ovl, 'best sky direction': sectors },
     { position: 'topright', collapsed: narrow }).addTo(map);
   spotState.map = map;
+  spotState.baseLayers = baseLayers;
+  spotState.viewSectors = sectors;
+  initOfflineMapDownloads(map, layerControl, baseLayers, baseKeyByLayer, usgsMapCredit);
   // leaflet slides a popup that opens off the edge into view, and that is an
   // animated panBy whose moveend lands long after it starts. autopanstart
   // fires as the slide begins, which is how a move the map started for itself
@@ -7207,8 +7391,9 @@ function initMap() {
   let selfPan = false;
   map.on('autopanstart', () => { selfPan = true; });
   for (const s of SPOTS) {
-    const mk = L.marker([s.lat, s.lon], { icon: pinIcon(s.kind), title: s.name })
-      .bindPopup(`<b>${s.name}</b><br>${elevTag(s)} &middot; ~${fmtDur(driveMins(haversine(spotState.home, s), s))} from home<br>${s.tags.join(', ')}`);
+    const sectorText = mapViewSectorText(s.name);
+    const mk = L.marker([s.lat, s.lon], { icon: pinIcon(s.kind, s.bald && !s.view), title: s.name })
+      .bindPopup(`<b>${s.name}</b><br>${elevTag(s)} &middot; ~${fmtDur(driveMins(haversine(spotState.home, s), s))} from home<br>${s.tags.join(', ')}${sectorText ? '<br>' + sectorText : ''}`);
     mk.on('click', () => {
       spotState.active = s.name;
       remember('darksky.active', s.name);
@@ -7223,9 +7408,23 @@ function initMap() {
   drawParkway(map);
   // after the control exists, so switching it on fires the control's own event
   initLightPollution(map, lp);
-  map.on('overlayadd', e => { if (e.layer === ovl) remember(OVL_KEY, '1'); });
-  map.on('overlayremove', e => { if (e.layer === ovl) remember(OVL_KEY, '0'); });
+  map.on('overlayadd', e => {
+    if (e.layer === ovl) { remember(OVL_KEY, '1'); sectors.setOverlooksVisible(true); }
+    if (e.layer === sectors) {
+      remember(VIEW_SECTOR_KEY, '1');
+      sectors.setOverlooksVisible(map.hasLayer(ovl));
+      document.querySelector('.sector-key-wrap').hidden = false;
+    }
+  });
+  map.on('overlayremove', e => {
+    if (e.layer === ovl) { remember(OVL_KEY, '0'); sectors.setOverlooksVisible(false); }
+    if (e.layer === sectors) { remember(VIEW_SECTOR_KEY, '0'); document.querySelector('.sector-key-wrap').hidden = true; }
+  });
   if (String(recall(OVL_KEY, '0')) === '1') ovl.addTo(map);
+  if (String(recall(VIEW_SECTOR_KEY, '0')) === '1') {
+    sectors.addTo(map);
+    document.querySelector('.sector-key-wrap').hidden = false;
+  }
   placeHome();
   // the markers were all just added; a remembered filter has to take the
   // filtered-out ones off again. this render does not reframe: fitKey is null.
