@@ -591,13 +591,14 @@ function milkyWayPathView(ctx, sky, halfWidth, view) {
     const b = halfWidth * (0.42 + 0.58 * (0.5 + 0.5 * Math.cos(l * PAN_D2R)));
     const top = galAltAz(l, b, sky), bot = galAltAz(l, -b, sky);
     if (prev) {
-      const pts = [
-        panProject(prev.top.alt, prev.top.az, view),
-        panProject(prev.bot.alt, prev.bot.az, view),
-        panProject(bot.alt, bot.az, view),
-        panProject(top.alt, top.az, view),
-      ];
-      if (pts.every(Boolean)) {
+      // projected wide and left for the canvas to clip: dropping any quad
+      // with a corner outside the window left a dark gap down each edge.
+      // only a quad whose corners straddle the seam behind the viewer is
+      // skipped, since it would otherwise smear across the whole view.
+      const corners = [prev.top, prev.bot, bot, top];
+      const ds = corners.map(c => panAzDelta(c.az, view.az0));
+      const pts = corners.map(c => panProjectWide(c.alt, c.az, view));
+      if (Math.max(...ds) - Math.min(...ds) < 180) {
         ctx.moveTo(pts[0].x, pts[0].y);
         ctx.lineTo(pts[1].x, pts[1].y);
         ctx.lineTo(pts[2].x, pts[2].y);

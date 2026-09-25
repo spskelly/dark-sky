@@ -390,3 +390,34 @@ test('panRidgeStrip: holes are cut from the fill, and the crest follows the tree
   assert.equal(crest.slice(0, firstStroke).filter(k => k[0] === 'line').length, 360);
   assert.ok(crest.slice(firstStroke).some(k => k[0] === 'move' && k[1] === x(77.5)), 'the window floor gets its own crest');
 });
+
+// 2026-09-24: the milky way stopped short of both canvas edges at Sam Knob on
+// Jun 23 facing SE, a dark gap a quad wide down each side. milkyWayPathView
+// dropped any quad with a corner outside the window, so the one straddling
+// each edge never drew.
+test('milkyWayPathView: the band runs to both canvas edges and never draws across the back seam', () => {
+  const quads = [];
+  let cur = null;
+  const g = { beginPath() {}, closePath() {},
+              moveTo: x => { cur = [x]; quads.push(cur); }, lineTo: x => cur.push(x) };
+  const sky = ctx.skyContext({ date: new Date(Date.UTC(2026, 5, 23, 4)), lat: 35.33, lon: -82.89 });
+  ctx.milkyWayPathView(g, sky, 22, { az0: 135, w: 1100, h: 600 });
+  const xs = quads.flat();
+  assert.ok(Math.min(...xs) <= 0, `left edge reached, min x ${Math.min(...xs)}`);
+  assert.ok(Math.max(...xs) >= 1100, `right edge reached, max x ${Math.max(...xs)}`);
+  for (const q of quads) assert.ok(Math.max(...q) - Math.min(...q) < 1100 * 360 / 110 / 2, 'no quad wraps behind the viewer');
+});
+
+test('milkyWayPathView: at every heading, no quad straddling the seam behind the viewer smears across the view', () => {
+  // off-window corners now project off-canvas instead of dropping the quad,
+  // so a quad with one corner just left of the seam and one just right of it
+  // would span the whole turn; a full sweep of headings puts the seam
+  // through the band somewhere
+  const quads = [];
+  let cur = null;
+  const g = { beginPath() {}, closePath() {},
+              moveTo: x => { cur = [x]; quads.push(cur); }, lineTo: x => cur.push(x) };
+  const sky = ctx.skyContext({ date: new Date(Date.UTC(2026, 5, 23, 4)), lat: 35.33, lon: -82.89 });
+  for (let az0 = 0; az0 < 360; az0 += 15) ctx.milkyWayPathView(g, sky, 22, { az0, w: 1100, h: 600 });
+  for (const q of quads) assert.ok(Math.max(...q) - Math.min(...q) < 1100 * 360 / 110 / 2, 'no quad wraps behind the viewer');
+});
