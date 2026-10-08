@@ -30,7 +30,7 @@ assert.ok(start >= 0 && end > start, 'the meteors:start and meteors:end markers 
 const block = page.slice(start, end);
 
 const ctx = vm.createContext({ Math, Date, Map });
-vm.runInContext(`${astro}\n${block}\nglobalThis.M = { SHOWERS, Sky, solarLongitude, solarLongitudeTime, showerNight, showerPeaks, showerOutlook };`, ctx);
+vm.runInContext(`${astro}\n${block}\nglobalThis.M = { SHOWERS, Sky, solarLongitude, solarLongitudeTime, showerNight, showerPeaks, showerOutlook, showerActivity };`, ctx);
 const M = ctx.M;
 const byName = name => M.SHOWERS.find(s => s.name === name);
 const WAYNESVILLE = [35.4887, -82.9887];
@@ -100,4 +100,26 @@ test('the moon verdict follows the moon', () => {
   // the radiant's altitude caps the eta aquariids however dark it is
   const eta = M.showerOutlook(at('Eta Aquariids', 2027), ...WAYNESVILLE);
   assert.ok(eta.bestClear < byName('Eta Aquariids').zhr / 2, `eta aquariids ceiling ${eta.bestClear}`);
+});
+
+test('activity: the rate falls away from the peak, and stops at the range', () => {
+  const zhrOn = (name, d) => (M.showerActivity(d).find(a => a.shower.name === name) || { zhr: 0 }).zhr;
+  const peak = M.solarLongitudeTime(byName('Perseids').lam, 2026);
+  assert.ok(zhrOn('Perseids', peak) > 99, 'the full zhr at the peak instant');
+  // the imo's own perseid profile gives roughly 10 to 20 ten days out, and
+  // 20 to 40 three days after
+  const before = zhrOn('Perseids', new Date(peak.getTime() - 10 * 86400000));
+  const after = zhrOn('Perseids', new Date(peak.getTime() + 3 * 86400000));
+  assert.ok(before > 8 && before < 25, `ten days before: ${before}`);
+  assert.ok(after > 15 && after < 45, `three days after: ${after}`);
+  assert.equal(zhrOn('Perseids', new Date(2026, 5, 1)), 0, 'not active in june');
+  // a sharp peak is a fraction of itself a day away
+  const qua = M.solarLongitudeTime(byName('Quadrantids').lam, 2027);
+  assert.ok(zhrOn('Quadrantids', new Date(qua.getTime() + 86400000)) < 0.05 * byName('Quadrantids').zhr);
+});
+
+test('activity: the quadrantids are found across new year', () => {
+  const names = M.showerActivity(new Date(2026, 11, 30, 3)).map(a => a.shower.name);
+  assert.ok(names.includes('Quadrantids'), names.join());
+  assert.ok(!M.showerActivity(new Date(2026, 11, 20, 3)).some(a => a.shower.name === 'Quadrantids'));
 });

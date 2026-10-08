@@ -421,3 +421,54 @@ test('milkyWayPathView: at every heading, no quad straddling the seam behind the
   for (let az0 = 0; az0 < 360; az0 += 15) ctx.milkyWayPathView(g, sky, 22, { az0, w: 1100, h: 600 });
   for (const q of quads) assert.ok(Math.max(...q) - Math.min(...q) < 1100 * 360 / 110 / 2, 'no quad wraps behind the viewer');
 });
+
+// meteor showers: drawMeteorsView against a canvas that only records what it
+// was asked to do. the shower itself comes in through opts, so nothing here
+// needs the page's shower table.
+function recordingCanvas() {
+  const ops = [];
+  const rec = name => (...args) => { ops.push([name, ...args.map(a => typeof a === 'number' ? +a.toFixed(3) : a)]); };
+  return {
+    ops,
+    save: rec('save'), restore: rec('restore'), beginPath: rec('beginPath'), moveTo: rec('moveTo'),
+    lineTo: rec('lineTo'), stroke: rec('stroke'), arc: rec('arc'), fillText: rec('fillText'),
+    createLinearGradient: () => ({ addColorStop() {} }),
+  };
+}
+const PERSEIDS = { name: 'Perseids', ra: 48, dec: 58 };
+// 2026 august 13, 03:00 eastern, from 35.5 north: the radiant is well up in
+// the northeast and the sun is far below the horizon
+const perseidSky = () => ctx.skyContext({ date: new Date(Date.UTC(2026, 7, 13, 7)), lat: 35.5, lon: -83 });
+
+test('meteors: nothing is drawn in daylight or with no shower active', () => {
+  const day = recordingCanvas();
+  ctx.drawMeteorsView(day, perseidSky(), { az0: 45, w: 1100, h: 600, sunAlt: 10 }, [{ ...PERSEIDS, zhr: 100 }]);
+  assert.equal(day.ops.length, 0);
+  const none = recordingCanvas();
+  ctx.drawMeteorsView(none, perseidSky(), { az0: 45, w: 1100, h: 600, sunAlt: -30 }, []);
+  assert.equal(none.ops.length, 0);
+});
+
+test('meteors: the same shower draws the same streaks on every frame', () => {
+  const a = recordingCanvas(), b = recordingCanvas();
+  const view = { az0: 45, w: 1100, h: 600, sunAlt: -30 };
+  ctx.drawMeteorsView(a, perseidSky(), view, [{ ...PERSEIDS, zhr: 100 }]);
+  ctx.drawMeteorsView(b, perseidSky(), view, [{ ...PERSEIDS, zhr: 100 }]);
+  assert.deepEqual(a.ops, b.ops);
+  assert.ok(a.ops.some(op => op[0] === 'fillText' && op[1] === 'perseids radiant'), 'the radiant is labelled');
+});
+
+test('meteors: a night near the peak gets more streaks than one at the tail', () => {
+  const count = zhr => {
+    const c = recordingCanvas();
+    ctx.drawMeteorsView(c, perseidSky(), { az0: 45, w: 1100, h: 600, sunAlt: -30 }, [{ ...PERSEIDS, zhr }]);
+    return c.ops.filter(op => op[0] === 'lineTo').length;
+  };
+  assert.ok(count(100) > count(3), `${count(100)} vs ${count(3)}`);
+});
+
+test('meteors: facing away from the radiant draws neither it nor its streaks', () => {
+  const c = recordingCanvas();
+  ctx.drawMeteorsView(c, perseidSky(), { az0: 225, w: 1100, h: 600, sunAlt: -30 }, [{ ...PERSEIDS, zhr: 100 }]);
+  assert.equal(c.ops.filter(op => op[0] === 'lineTo' || op[0] === 'fillText').length, 0);
+});

@@ -15,6 +15,12 @@
      CANOPY             from the generated canopy block: decoded here and
                         painted in front of every terrain band
 
+   optional, passed in rather than assumed:
+     opts.showers       meteor showers active on the night drawn, as
+                        [{ name, ra, dec, zhr }] with a j2000 radiant and the
+                        zhr for that date. the page owns the shower table and
+                        the activity model; this file only draws them
+
    public: decodeHorizon(s), decodeCanopy(e), drawPanorama(canvas, opts),
             horizonSummary(opts), panBlocking(horizon, canopy),
             panProject(alt, az, view), panDir16(az),
@@ -691,6 +697,74 @@ function drawFiguresView(ctx, seen) {
   ctx.stroke();
 }
 
+// a meteor shower is drawn as what you would be told to look for: the radiant,
+// a small ring with its name, and a few streaks pointing away from it, since
+// every meteor of a shower traces back to that point. the streaks are a
+// picture of the idea rather than a forecast of where one will be, so they are
+// fixed per shower (seeded from its name) and do not flicker as the scrubber
+// moves; there are more of them, and they are brighter, the closer the night
+// is to the peak. drawn behind the ridge like the stars, so a radiant below
+// the horizon still throws streaks into the sky above it, which is true.
+const PAN_METEOR_RGB = '196,181,244';
+const PAN_METEOR_FULL_ZHR = 80;
+function panSeeded(text) {
+  // a tiny string hash into a linear congruential stream: same name, same
+  // streaks, on every frame and every machine
+  let x = 0;
+  for (let i = 0; i < text.length; i++) x = (x * 31 + text.charCodeAt(i)) >>> 0;
+  return () => (x = (x * 1664525 + 1013904223) >>> 0) / 4294967296;
+}
+function drawMeteorsView(ctx, sky, view, showers) {
+  const fade = panStarFade(view.sunAlt);
+  if (fade <= 0 || !showers || !showers.length) return;
+  const pxPerDeg = view.w / PAN_VIEW_FOV;
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (const sh of showers) {
+    const strength = Math.max(0, Math.min(1, sh.zhr / PAN_METEOR_FULL_ZHR));
+    const p = panAltAz(sh.ra, sh.dec, sky);
+    // projected without the window's clipping: a radiant just off the side of
+    // the view, or under the ridge, still sends streaks into it
+    const at = panProjectWide(p.alt, p.az, view);
+    if (Math.abs(panAzDelta(p.az, view.az0)) > PAN_VIEW_FOV / 2 + 40) continue;
+    const rand = panSeeded(sh.name);
+    const n = 2 + Math.round(6 * strength);
+    const alpha = fade * (0.4 + 0.6 * strength);
+    const turn = rand() * Math.PI * 2;
+    for (let i = 0; i < n; i++) {
+      const ang = turn + (i + rand() * 0.6) / n * Math.PI * 2;
+      // meteors show up anywhere from a few to tens of degrees out
+      const r0 = (4 + rand() * 22) * pxPerDeg;
+      const len = (2.5 + rand() * 4) * pxPerDeg * (0.7 + 0.6 * strength);
+      const x0 = at.x + Math.cos(ang) * r0, y0 = at.y + Math.sin(ang) * r0;
+      const x1 = at.x + Math.cos(ang) * (r0 + len), y1 = at.y + Math.sin(ang) * (r0 + len);
+      // faint at the radiant end, bright at the head
+      const g = ctx.createLinearGradient(x0, y0, x1, y1);
+      g.addColorStop(0, `rgba(${PAN_METEOR_RGB},0)`);
+      g.addColorStop(1, `rgba(${PAN_METEOR_RGB},${(alpha * (0.55 + 0.45 * rand())).toFixed(3)})`);
+      ctx.strokeStyle = g;
+      ctx.lineWidth = 1.1 + 0.6 * strength;
+      ctx.beginPath();
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
+      ctx.stroke();
+    }
+    if (!panProject(p.alt, p.az, view)) continue;
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = `rgb(${PAN_METEOR_RGB})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(at.x, at.y, 4, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = `rgb(${PAN_METEOR_RGB})`;
+    ctx.font = '11px "IBM Plex Sans", system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(sh.name.toLowerCase() + ' radiant', at.x, at.y - 9);
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+}
+
 // the sun is the same half a degree across as the moon, so it gets the same
 // radius. drawn a little below the horizon as well as above it: the disc
 // sitting just behind a ridge is exactly the moment somebody scrubbing for
@@ -1117,6 +1191,7 @@ function drawSkyView(ctx, w, h, opts) {
   drawSkyWashView(ctx, w, h, view);
   drawMilkyWayView(ctx, sky, view, w, h);
   drawStarsView(ctx, sky, view, w, h);
+  drawMeteorsView(ctx, sky, view, opts.showers);
   drawSunView(ctx, sky, view);
   drawMoonView(ctx, sky, view);
   drawGridView(ctx, view, w, h);

@@ -405,6 +405,7 @@
   .sky-viewer-foot p { margin: 4px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-dim); }
   .sky-viewer-foot p:first-child { margin-top: 0; }
   .sky-viewer-foot p:empty { display: none; }
+  .sky-viewer-foot .sky-viewer-meteors { color: var(--meteor); }
   @media (max-width: 720px) {
     .sky-viewer-canvas { height: 72vh; }
     .sky-viewer-day canvas { height: 168px; }
@@ -943,6 +944,7 @@
     </div>
     <div class="sky-viewer-foot">
       <p class="sky-viewer-sum"></p>
+      <p class="sky-viewer-meteors"></p>
       <p class="sky-viewer-sky"></p>
       <p class="sky-viewer-legend"></p>
       <p class="sky-viewer-caveat"></p>
@@ -950,6 +952,7 @@
   </div>
   <ul class="sky-notes">
     <li><b>milky way core.</b> at this latitude the galactic center sits in the southern sky. it clears the ridge before dawn from late February, is up most of the night by June, and is an evening object August through October. each entry under upcoming dark-sky windows says which.</li>
+    <li><b>meteor showers.</b> on a night when a shower is active the view marks its radiant and draws a few streaks leading away from it, more of them nearer the peak. the streaks are a picture of where to look, not a forecast of where one will be: meteors appear anywhere in the sky, and trace back to the radiant.</li>
     <li><b>south-facing matters.</b> the core rises in the southeast and sets in the southwest, low. overlooks that face south or west across a big valley (Cowee, Devil's Courthouse, Cherohala) beat 360-degree summits with a nearby ridge to the south.</li>
   </ul>
 </section>
@@ -1537,6 +1540,22 @@ function showerPeaks(start, end) {
 const SHOWER_STEP_MIN = 10;
 const SHOWER_DARK_SUN = -18;
 const SHOWER_MOON_MAGS = 2;
+
+// one moment of that reduction. zhr defaults to the shower's peak; the sky
+// viewer passes the rate for its own date instead. the radiant is the table's
+// j2000 one, unprecessed: 0.4 degrees by 2026, invisible at this precision
+function showerSample(s, jd, lat, lon, zhr = s.zhr) {
+  const lst = Sky.lmst(jd, lon);
+  const sun = Sky.sunPosition(jd);
+  const sunAlt = Sky.equatorialToHorizontal(sun.ra, sun.dec, lst, lat).alt;
+  const m = Sky.moonTopocentric(jd, lat, lon, 0);
+  const moonUp = Sky.equatorialToHorizontal(m.ra, m.dec, lst, lat).alt > 0;
+  const rad = Sky.equatorialToHorizontal(s.ra, s.dec, lst, lat);
+  const clear = zhr * Math.max(0, sinD(rad.alt));
+  const rate = clear / Math.pow(s.r, moonUp ? SHOWER_MOON_MAGS * m.illum : 0);
+  return { sunAlt, dark: sunAlt <= SHOWER_DARK_SUN, moonUp, illum: m.illum, radAlt: rad.alt, radAz: rad.az, clear, rate };
+}
+
 function showerOutlook(p, lat, lon) {
   const s = p.shower;
   const n = p.night;
@@ -1546,19 +1565,12 @@ function showerOutlook(p, lat, lon) {
   let best = null, bestClear = 0, darkMin = 0, moonMin = 0, illum = 0;
   let firstDark = null, lastDark = null, moonRise = null, moonSet = null, prevMoonUp = null;
   for (let t = t0; t <= t1; t += SHOWER_STEP_MIN * 60000) {
-    const jd = t / 86400000 + 2440587.5;
-    const lst = Sky.lmst(jd, lon);
-    const sun = Sky.sunPosition(jd);
-    if (Sky.equatorialToHorizontal(sun.ra, sun.dec, lst, lat).alt > SHOWER_DARK_SUN) continue;
-    const m = Sky.moonTopocentric(jd, lat, lon, 0);
-    const moonUp = Sky.equatorialToHorizontal(m.ra, m.dec, lst, lat).alt > 0;
-    const radAlt = Sky.equatorialToHorizontal(s.ra, s.dec, lst, lat).alt;
-    const clear = s.zhr * Math.max(0, sinD(radAlt));
-    const rate = clear / Math.pow(s.r, moonUp ? SHOWER_MOON_MAGS * m.illum : 0);
+    const { dark, moonUp, illum: lit, radAlt, clear, rate } = showerSample(s, t / 86400000 + 2440587.5, lat, lon);
+    if (!dark) continue;
     if (firstDark === null) firstDark = t;
     lastDark = t;
     darkMin += SHOWER_STEP_MIN;
-    if (moonUp) { moonMin += SHOWER_STEP_MIN; illum = Math.max(illum, m.illum); }
+    if (moonUp) { moonMin += SHOWER_STEP_MIN; illum = Math.max(illum, lit); }
     // the first crossing either way is the one worth naming; a moon that sets
     // and then rises again inside one night is a polar problem, not ours
     if (prevMoonUp !== null && moonUp !== prevMoonUp) {
@@ -1584,6 +1596,37 @@ function showerOutlook(p, lat, lon) {
     darkStart: firstDark && new Date(firstDark), darkEnd: lastDark && new Date(lastDark),
     verdict: !darkMin ? 'none' : kept >= 0.85 ? 'dark' : kept >= 0.45 ? 'some' : 'moonlit',
   };
+}
+// how active each shower is at one instant, for the sky viewer: every shower
+// whose activity range covers it, with the zhr scaled down from the peak.
+// the imo models a profile as zhr * 10^(-b * |solar longitude from peak|).
+// the table carries no b per shower, so one is chosen that makes the rate a
+// hundredth of the peak at the edge of the listed range on that side: for the
+// perseids that gives about 17 on august 2 and 30 on august 16, which is what
+// they do. the sharp ones get the quadrantids' measured b of 2.5 a degree
+// instead, so a day off the peak is a fifth of it rather than half.
+const SHOWER_SHARP_B = 2.5;
+function showerActivity(date) {
+  const out = [];
+  const lam = solarLongitude(Sky.julianDay(date));
+  for (const s of SHOWERS) {
+    // the peak this range belongs to: the one nearest in time
+    let best = null;
+    for (let y = date.getFullYear() - 1; y <= date.getFullYear() + 1; y++) {
+      const t = solarLongitudeTime(s.lam, y);
+      if (!best || Math.abs(t - date) < Math.abs(best - date)) best = t;
+    }
+    const py = best.getFullYear();
+    let from = new Date(py, s.from[0] - 1, s.from[1]), to = new Date(py, s.to[0] - 1, s.to[1], 23, 59);
+    if (from > best) from = new Date(py - 1, s.from[0] - 1, s.from[1]);
+    if (to < best) to = new Date(py + 1, s.to[0] - 1, s.to[1], 23, 59);
+    if (date < from || date > to) continue;
+    const off = deg360(lam - s.lam + 180) - 180;   // degrees of solar longitude, signed
+    const edge = Math.max(1, Math.abs((date < best ? from - best : to - best) / 86400000) * SUN_DEG_PER_DAY);
+    const b = s.sharp ? SHOWER_SHARP_B : 2 / edge;
+    out.push({ shower: s, peak: best, night: showerNight(best), zhr: s.zhr * Math.pow(10, -b * Math.abs(off)) });
+  }
+  return out.sort((a, b) => b.zhr - a.zhr);
 }
 // --- meteors:end ---
 
@@ -4114,6 +4157,12 @@ const CONSTELLATION_LINES = [
      CANOPY             from the generated canopy block: decoded here and
                         painted in front of every terrain band
 
+   optional, passed in rather than assumed:
+     opts.showers       meteor showers active on the night drawn, as
+                        [{ name, ra, dec, zhr }] with a j2000 radiant and the
+                        zhr for that date. the page owns the shower table and
+                        the activity model; this file only draws them
+
    public: decodeHorizon(s), decodeCanopy(e), drawPanorama(canvas, opts),
             horizonSummary(opts), panBlocking(horizon, canopy),
             panProject(alt, az, view), panDir16(az),
@@ -4790,6 +4839,74 @@ function drawFiguresView(ctx, seen) {
   ctx.stroke();
 }
 
+// a meteor shower is drawn as what you would be told to look for: the radiant,
+// a small ring with its name, and a few streaks pointing away from it, since
+// every meteor of a shower traces back to that point. the streaks are a
+// picture of the idea rather than a forecast of where one will be, so they are
+// fixed per shower (seeded from its name) and do not flicker as the scrubber
+// moves; there are more of them, and they are brighter, the closer the night
+// is to the peak. drawn behind the ridge like the stars, so a radiant below
+// the horizon still throws streaks into the sky above it, which is true.
+const PAN_METEOR_RGB = '196,181,244';
+const PAN_METEOR_FULL_ZHR = 80;
+function panSeeded(text) {
+  // a tiny string hash into a linear congruential stream: same name, same
+  // streaks, on every frame and every machine
+  let x = 0;
+  for (let i = 0; i < text.length; i++) x = (x * 31 + text.charCodeAt(i)) >>> 0;
+  return () => (x = (x * 1664525 + 1013904223) >>> 0) / 4294967296;
+}
+function drawMeteorsView(ctx, sky, view, showers) {
+  const fade = panStarFade(view.sunAlt);
+  if (fade <= 0 || !showers || !showers.length) return;
+  const pxPerDeg = view.w / PAN_VIEW_FOV;
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (const sh of showers) {
+    const strength = Math.max(0, Math.min(1, sh.zhr / PAN_METEOR_FULL_ZHR));
+    const p = panAltAz(sh.ra, sh.dec, sky);
+    // projected without the window's clipping: a radiant just off the side of
+    // the view, or under the ridge, still sends streaks into it
+    const at = panProjectWide(p.alt, p.az, view);
+    if (Math.abs(panAzDelta(p.az, view.az0)) > PAN_VIEW_FOV / 2 + 40) continue;
+    const rand = panSeeded(sh.name);
+    const n = 2 + Math.round(6 * strength);
+    const alpha = fade * (0.4 + 0.6 * strength);
+    const turn = rand() * Math.PI * 2;
+    for (let i = 0; i < n; i++) {
+      const ang = turn + (i + rand() * 0.6) / n * Math.PI * 2;
+      // meteors show up anywhere from a few to tens of degrees out
+      const r0 = (4 + rand() * 22) * pxPerDeg;
+      const len = (2.5 + rand() * 4) * pxPerDeg * (0.7 + 0.6 * strength);
+      const x0 = at.x + Math.cos(ang) * r0, y0 = at.y + Math.sin(ang) * r0;
+      const x1 = at.x + Math.cos(ang) * (r0 + len), y1 = at.y + Math.sin(ang) * (r0 + len);
+      // faint at the radiant end, bright at the head
+      const g = ctx.createLinearGradient(x0, y0, x1, y1);
+      g.addColorStop(0, `rgba(${PAN_METEOR_RGB},0)`);
+      g.addColorStop(1, `rgba(${PAN_METEOR_RGB},${(alpha * (0.55 + 0.45 * rand())).toFixed(3)})`);
+      ctx.strokeStyle = g;
+      ctx.lineWidth = 1.1 + 0.6 * strength;
+      ctx.beginPath();
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
+      ctx.stroke();
+    }
+    if (!panProject(p.alt, p.az, view)) continue;
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = `rgb(${PAN_METEOR_RGB})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(at.x, at.y, 4, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = `rgb(${PAN_METEOR_RGB})`;
+    ctx.font = '11px "IBM Plex Sans", system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(sh.name.toLowerCase() + ' radiant', at.x, at.y - 9);
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+}
+
 // the sun is the same half a degree across as the moon, so it gets the same
 // radius. drawn a little below the horizon as well as above it: the disc
 // sitting just behind a ridge is exactly the moment somebody scrubbing for
@@ -5216,6 +5333,7 @@ function drawSkyView(ctx, w, h, opts) {
   drawSkyWashView(ctx, w, h, view);
   drawMilkyWayView(ctx, sky, view, w, h);
   drawStarsView(ctx, sky, view, w, h);
+  drawMeteorsView(ctx, sky, view, opts.showers);
   drawSunView(ctx, sky, view);
   drawMoonView(ctx, sky, view);
   drawGridView(ctx, view, w, h);
@@ -6518,7 +6636,7 @@ function skyViewerEls() {
     date: d.querySelector('.sky-viewer-date'),
     time: d.querySelector('.sky-viewer-time input'), clock: d.querySelector('.sky-viewer-time span'),
     compass: d.querySelector('.sky-viewer-compass'),
-    sum: d.querySelector('.sky-viewer-sum'), sky: d.querySelector('.sky-viewer-sky'), caveat: d.querySelector('.sky-viewer-caveat'),
+    sum: d.querySelector('.sky-viewer-sum'), meteors: d.querySelector('.sky-viewer-meteors'), sky: d.querySelector('.sky-viewer-sky'), caveat: d.querySelector('.sky-viewer-caveat'),
     eye: d.querySelector('.sky-viewer-eye'), legend: d.querySelector('.sky-viewer-legend'),
     day: d.querySelector('.sky-viewer-day-canvas'), daysum: d.querySelector('.sky-viewer-daysum'),
   };
@@ -6725,16 +6843,44 @@ function paintSkyViewer() {
   els.compass.textContent = 'facing ' + panDir16(skyView.az);
   try { els.sum.textContent = horizon ? horizonSummary({ horizon, canopy, lat, lon, elevM, date: when }) : ''; }
   catch (e) { els.sum.textContent = ''; }
+  let showers = [];
+  try { showers = viewerShowers(when); } catch (e) { showers = []; }
+  if (els.meteors) els.meteors.textContent = showers.map(a => viewerShowerWords(a, when, lat, lon)).join(' ');
   paintDayStrip(els, { key: viewerState.key, day: viewerDay(date), horizon, canopy, lat, lon, elevM });
 
   // the canvas last, and only while its tab shows: hidden, it has no size to
   // draw at, and showSkyTab paints it the moment it gets one
   if (!els.canvas.clientWidth) return;
   try {
-  drawPanorama(els.canvas, { key: viewerState.key, horizon, horizonRange, ridges, ridgeRanges, canopy, lat, lon, elevM, date: when, mode: 'view', az0: skyView.az });
+  drawPanorama(els.canvas, { key: viewerState.key, horizon, horizonRange, ridges, ridgeRanges, canopy, lat, lon, elevM, date: when, mode: 'view', az0: skyView.az,
+    showers: showers.map(a => ({ name: a.shower.name, ra: a.shower.ra, dec: a.shower.dec, zhr: a.zhr })) });
   } catch (e) {
     if (!window.__panoWarned) { window.__panoWarned = true; console.warn('sky viewer:', e); }
   }
+}
+
+// the showers worth drawing at one moment: at most two, and only those giving
+// a couple an hour or more, so the long low-rate tails (the taurids run for
+// ten weeks) do not leave a permanent ring on the sky
+const VIEWER_SHOWER_MIN_ZHR = 2;
+const viewerShowers = when => showerActivity(when).filter(a => a.zhr >= VIEWER_SHOWER_MIN_ZHR).slice(0, 2);
+
+// one sentence per shower for the line under the view, with the same ceiling
+// the shower list uses, scaled to this night's place on the activity curve
+function viewerShowerWords(a, when, lat, lon) {
+  const s = a.shower;
+  const x = showerSample(s, Sky.julianDay(when), lat, lon, a.zhr);
+  const md = d => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const next = addDays(a.night, 1);
+  const night = `${md(a.night)}\u2013${next.getMonth() === a.night.getMonth() ? next.getDate() : md(next)}`;
+  // the evening this moment's night started on, the same convention as a.night
+  const eve = new Date(when.getTime() - 12 * 3600000);
+  const tonight = sameDay(a.night, eve);
+  const head = `${s.name}${tonight ? ', peak night' : `, peak the night of ${night}`}:`;
+  if (x.radAlt <= 0) return `${head} the radiant is below the horizon now.`;
+  const where = `radiant ${Math.round(x.radAlt)}\u00b0 up in the ${panDir(x.radAz)}`;
+  if (!x.dark) return `${head} ${where}, once the sky is fully dark.`;
+  return `${head} ${where}, ${fmtRate(x.rate)} in a perfect sky${x.moonUp && x.illum > 0.3 ? ', with the moon up' : ''}.`;
 }
 
 // the day strip depends on the place, the eye and the date -- not on the

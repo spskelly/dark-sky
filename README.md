@@ -49,7 +49,10 @@ will be clear, and where to drive.
   peak night starts and listed for the next twelve months. Each card says when
   the radiant is best placed from home, a ceiling on the hourly count there,
   and what the moon is doing: moonless, after moonset, some moonlight or
-  moonlit. See [the meteor showers](#the-meteor-showers) for how.
+  moonlit. The sky viewer draws any shower active on the night shown: its
+  radiant, labelled, with a few streaks pointing away from it, more and
+  brighter nearer the peak, and a line under the view with the radiant's
+  height and that moment's ceiling. See [the meteor showers](#the-meteor-showers) for how.
 - **Hourly sky forecast.** Cloud cover, temperature, wind and dew point for
   tonight, sunset to sunrise, from [Open-Meteo](https://open-meteo.com/)
   (no API key). Each night in the calendar also carries its mean 9pm–3am
@@ -198,13 +201,25 @@ ceiling for comparing nights, not a forecast: it assumes a perfect sky and a
 peak that lasts all night, which is fair for most showers and generous for
 the Quadrantids and Draconids, whose peaks are hours wide and are flagged so.
 
+Away from the peak, the sky viewer scales the ZHR down with the IMO's usual
+profile, `ZHR × 10^(−b × |solar longitude from peak|)`. The table has no `b`
+per shower, so one is chosen that brings the rate to a hundredth of the peak
+at the edge of the listed activity range on each side; the sharp showers get
+the Quadrantids' measured 2.5 per degree. It draws at most two showers, and
+only those at two an hour or more, so a ten-week Taurid tail does not leave a
+permanent ring on the sky. The shower table and activity model live in the
+page; `tools/sky-panorama.js` only draws what it is handed in `opts.showers`.
+
 ```sh
 node --test tools/test-meteors.mjs
 ```
 
 checks the solar longitude against Meeus example 25.a, the Geminid peak
 against the IMO's published 2025 time, every peak against its own activity
-range, the night rule, and the moon verdict on a dark and a moonlit peak.
+range, the night rule, the moon verdict on a dark and a moonlit peak, and the
+activity curve either side of the Perseid peak. `tools/test-panorama.mjs`
+checks that the drawing is the same on every frame, absent in daylight and
+behind the viewer, and busier near the peak.
 
 ## The parkway line
 
