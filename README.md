@@ -44,6 +44,12 @@ will be clear, and where to drive.
   highlighted on the calendar and listed for the next twelve months, with the
   Friday and Saturday nights in each one called out and a note on where the
   Milky Way core sits that month.
+- **Meteor showers.** The thirteen annual showers worth a night out, from the
+  Quadrantids to the Ursids, each marked on the calendar on the evening its
+  peak night starts and listed for the next twelve months. Each card says when
+  the radiant is best placed from home, a ceiling on the hourly count there,
+  and what the moon is doing: moonless, after moonset, some moonlight or
+  moonlit. See [the meteor showers](#the-meteor-showers) for how.
 - **Hourly sky forecast.** Cloud cover, temperature, wind and dew point for
   tonight, sunset to sunrise, from [Open-Meteo](https://open-meteo.com/)
   (no API key). Each night in the calendar also carries its mean 9pm–3am
@@ -171,6 +177,34 @@ Two things show tonight's real phase, and neither is hand-drawn.
   fresh cache-busting image URL into its temporary copy of `index.html` and
   deploys a Pages artifact. Daily moon changes therefore create deployments,
   not repository commits.
+
+## The meteor showers
+
+A shower is tied to a point on the Earth's orbit rather than to a date, so
+`SHOWERS` in `index.html` keeps each peak as the solar longitude the
+[IMO's meteor shower calendar](https://www.imo.net/resources/calendar/) gives
+it, with the ZHR, population index and radiant from the same source. The page
+finds the instant the Sun reaches that longitude each year (the ch. 25 solar
+series already in the sky viewer, taken back to the J2000 equinox the tables
+use), then assigns it to the night whose 3am is nearest, since that is when
+most radiants are highest.
+
+For the place set as home, each peak night is sampled every ten minutes in
+astronomical darkness, and the IMO's reduction is run backwards:
+`ZHR × sin(radiant altitude) / r^(6.5 − limiting magnitude)`, with the Moon
+taking up to two magnitudes off a 6.5 sky in proportion to its lit fraction
+while it is up. The best of those is the card's "at most" figure. It is a
+ceiling for comparing nights, not a forecast: it assumes a perfect sky and a
+peak that lasts all night, which is fair for most showers and generous for
+the Quadrantids and Draconids, whose peaks are hours wide and are flagged so.
+
+```sh
+node --test tools/test-meteors.mjs
+```
+
+checks the solar longitude against Meeus example 25.a, the Geminid peak
+against the IMO's published 2025 time, every peak against its own activity
+range, the night rule, and the moon verdict on a dark and a moonlit peak.
 
 ## The parkway line
 

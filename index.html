@@ -44,6 +44,9 @@
     --dark-sky-wash: rgba(95, 194, 173, 0.13);
     --full-wash: rgba(236, 231, 212, 0.09);
     --today: #f0c36b;
+    /* meteor peaks: a cool violet, so it reads as neither the teal window nor
+       the amber of today */
+    --meteor: #c4b5f4;
     --serif: "Fraunces", Georgia, serif;
     --sans: "IBM Plex Sans", system-ui, sans-serif;
   }
@@ -231,6 +234,10 @@
   .day.dark.win-end, .day.dark.row-end { border-top-right-radius: 22px; border-bottom-right-radius: 22px; }
   .day.full-wash { background: var(--full-wash); }
   .day.today { border-color: var(--today); }
+  /* a meteor shower's peak night: a streak and the shower's name. the streak
+     alone carries it on a phone, where the name does not fit */
+  .day .meteor { font-size: 11px; line-height: 1.2; text-align: center; color: var(--meteor); display: flex; flex-direction: column; align-items: center; }
+  .day .meteor::before { content: ''; width: 16px; height: 2px; margin: 1px 0 4px; border-radius: 2px; background: linear-gradient(90deg, transparent, var(--meteor)); transform: rotate(-30deg); }
   .day.today .num b { color: var(--today); }
 
   /* upcoming windows list */
@@ -249,6 +256,17 @@
   .windows li .weekend.none { color: var(--ink-dim); }
 
   .windows li .core { color: var(--moon-dim); font-size: 13px; grid-column: 1 / -1; }
+
+  /* meteor showers: the same cards as the windows, one line longer */
+  .showers { margin-top: 36px; }
+  .showers li .name { font-size: 16px; color: var(--moon); }
+  .showers li .verdict { font-size: 13px; grid-column: 2; grid-row: 1; text-align: right; white-space: nowrap; color: var(--ink-dim); }
+  .showers li .verdict.dark { color: var(--dark-sky); }
+  .showers li .verdict.some { color: var(--moon-dim); }
+  .showers li .meta .dow { color: var(--ink-dim); }
+  .showers li .meta, .showers li .about, .showers li .note { grid-column: 1 / -1; }
+  .showers li .about { color: var(--ink-dim); font-size: 12px; }
+  .showers li .note { color: var(--ink-dim); font-size: 12px; line-height: 1.45; margin-top: 4px; }
 
   /* spots: map on the left, scrollable list on the right */
   .spots { max-width: 1100px; margin: 56px auto 0; }
@@ -467,10 +485,10 @@
      it stacks under the map and loses that scroll box, which put all forty
      cards, about fifteen thousand pixels of them, between the map and the
      rest of the page. show the nearest few and let the rest be asked for. */
-  #spot-more, #win-more { display: none; margin-top: 10px; width: 100%; padding: 10px 14px; color: var(--ink-dim); }
-  #spot-more:hover, #win-more:hover { color: var(--ink); }
+  #spot-more, #win-more, #showers-more { display: none; margin-top: 10px; width: 100%; padding: 10px 14px; color: var(--ink-dim); }
+  #spot-more:hover, #win-more:hover, #showers-more:hover { color: var(--ink); }
   /* the id selector below would otherwise beat the ua rule for [hidden] */
-  #spot-more[hidden], #win-more[hidden] { display: none; }
+  #spot-more[hidden], #win-more[hidden], #showers-more[hidden] { display: none; }
   @media (max-width: 900px) {
     .spot-layout { grid-template-columns: minmax(0, 1fr); }
     #map { height: 380px; }
@@ -567,7 +585,13 @@
     .windows li .range { font-size: 15px; }
     .windows li .meta, .windows li .core, .windows li .weekend, .windows li .range .dow { font-size: 12px; }
     .windows ol:not(.all) li:nth-child(n+6) { display: none; }
-    #win-more { display: block; }
+    #win-more, #showers-more { display: block; }
+    .day .meteor span { display: none; }
+    .day .meteor::before { margin: 0; }
+    .showers li .meta, .showers li .verdict { font-size: 12px; }
+    /* the long note is what the card is for on a desk; on a phone it would
+       make five cards a screen each */
+    .showers li .note { display: none; }
 
     /* the notes run to a paragraph each. three lines is enough to choose by;
        the card opens the rest when you tap it. the sky line gets two, which is
@@ -759,7 +783,7 @@
      always one tap away instead of a blind scroll. -->
 <nav class="guide">
   <div class="tablist" role="tablist" aria-label="what this page answers">
-    <button role="tab" id="tab-when" aria-controls="panel-when" aria-selected="true"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M15.8 3.7a8.5 8.5 0 1 0 4.5 13.8 7 7 0 1 1-4.5-13.8Z"/></svg></span><b>when is it dark?</b><span class="what">every new-moon window for the next twelve months, with the weekend nights called out, and how clear the next week looks</span><span class="short">dark nights</span></button>
+    <button role="tab" id="tab-when" aria-controls="panel-when" aria-selected="true"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M15.8 3.7a8.5 8.5 0 1 0 4.5 13.8 7 7 0 1 1-4.5-13.8Z"/></svg></span><b>when is it dark?</b><span class="what">every new-moon window and meteor shower for the next twelve months, with the weekend nights called out, and how clear the next week looks</span><span class="short">dark nights</span></button>
     <button role="tab" id="tab-where" aria-controls="panel-where" aria-selected="false" tabindex="-1"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s6-5.1 6-11a6 6 0 1 0-12 0c0 5.9 6 11 6 11Z"/><circle cx="12" cy="10" r="2.2"/></svg></span><b>where do i go?</b><span class="what">thirty-eight dark-sky spots on a map, ranked by drive time from wherever home is</span><span class="short">where to go</span></button>
     <button role="tab" id="tab-sky" aria-controls="panel-sky" aria-selected="false" tabindex="-1"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 17c2.4-3 4.5-4.5 6.2-4.5 1.7 0 2.7 2 4.2 2 1.6 0 3.4-3.3 7.6-5.5"/><path d="M17.5 3.5v4M15.5 5.5h4"/></svg></span><b>what will i see?</b><span class="what">the sky from any spot on any night: the ridge, the moon and the milky way, turnable</span><span class="short">the sky</span></button>
     <button role="tab" id="tab-notes" aria-controls="panel-notes" aria-selected="false" tabindex="-1"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 4.5h12v15H6zM9 9h6M9 13h6M9 17h4"/></svg></span><b>field notes</b><span class="what">reading the mountains, how the numbers are made, and who the data comes from</span><span class="short">notes</span></button>
@@ -798,6 +822,13 @@
   <p class="lede">every new moon for the next twelve months, with the days on either side that make up the window. click one to jump the calendar there.</p>
   <ol id="windows"></ol>
   <button id="win-more" hidden aria-expanded="false" aria-controls="windows"></button>
+</section>
+
+<section class="windows showers" id="showers">
+  <h3>meteor showers</h3>
+  <p class="lede">the annual showers for the next twelve months, each on the night its peak belongs to, and how the moon and the hour treat it from <span id="showers-home">home</span>. the rate is a ceiling for comparing nights, the count a perfect sky would give with the radiant where it is; a real one, with haze, glow and trees, gives less. most showers are nearly as good a night either side of the peak. click one to jump the calendar there.</p>
+  <ol id="showers-list"></ol>
+  <button id="showers-more" hidden aria-expanded="false" aria-controls="showers-list"></button>
 </section>
 
 </div><!-- /panel-when -->
@@ -940,7 +971,7 @@
 </section>
 
 <p class="foot">
-  phase times come from the meeus true-phase algorithm and are converted to your local time zone, so dates should match published almanacs to the day. the window is a planning heuristic: the moon also rises and sets, so a waxing crescent a few days past new is gone by late evening, and a waning crescent doesn't rise until the small hours. those edge days are often darker than they look. cloud cover comes from open-meteo and is a model, not a promise; the spot notes are hand-written and are <a href="#check-before-you-go">not a substitute for checking with the land manager</a>. the sky line beneath each one is not hand-written: it is sampled from the light pollution atlas at the spot and at eight bearings 10, 25 and 50 km out, so &ldquo;brightest to the northwest at 50 km&rdquo; means a town sits there, not that somebody remembers it that way.
+  phase times come from the meeus true-phase algorithm and are converted to your local time zone, so dates should match published almanacs to the day. the window is a planning heuristic: the moon also rises and sets, so a waxing crescent a few days past new is gone by late evening, and a waning crescent doesn't rise until the small hours. those edge days are often darker than they look. meteor shower peaks are turned into dates from the solar longitudes in the international meteor organization&rsquo;s calendar, and the hourly figure on each is a ceiling worked out for a perfect sky from home: what you count will be lower. cloud cover comes from open-meteo and is a model, not a promise; the spot notes are hand-written and are <a href="#check-before-you-go">not a substitute for checking with the land manager</a>. the sky line beneath each one is not hand-written: it is sampled from the light pollution atlas at the spot and at eight bearings 10, 25 and 50 km out, so &ldquo;brightest to the northwest at 50 km&rdquo; means a town sits there, not that somebody remembers it that way.
 </p>
 
 <p class="foot credits">moon surface: <a href="https://svs.gsfc.nasa.gov/5415/">NASA&rsquo;s Scientific Visualization Studio</a>, Ernie Wright. Cropped and masked here to show the phases.</p>
@@ -1142,6 +1173,7 @@ const state = {
   hemi: 'N',
   focus: null,   // day-of-month holding the calendar's roving tabindex
   winAll: false, // whether the windows list is showing all twelve months
+  showersAll: false, // the same, for the meteor shower list
 };
 
 // how many windows the collapsed phone list shows, and the width it collapses
@@ -1193,6 +1225,8 @@ function buildDayInfo(start, end) {
       for (let i = -1; i <= 1; i++) get(addDays(ev.date, i)).fullWash = true;
     }
   }
+  // a shower is marked on the evening its peak night starts, like the window
+  for (const p of showerPeaks(addDays(start, -10), addDays(end, 10))) (get(p.night).showers ||= []).push(p.shower);
   return info;
 }
 
@@ -1244,11 +1278,15 @@ function renderCalendar() {
     if (sameDay(d, today)) cls.push('today');
     if (d.getDay() === 0 || d.getDay() === 6 || d.getDay() === 5) cls.push('weekend');
     const label = o.event ? `<div class="label">${PHASE_NAME[o.event.phase]}<br><span class="illum">${fmtTime(o.event.date)}</span></div>` : '';
-    const aria = `${fmtDay(d)}, ${phaseWord(p)}, ${illum}% lit${o.dark ? ', dark-sky window' : ''}${fcNight ? `, ${fcNight.mean}% mean cloud cover, low ${Math.round(fcNight.tmin)} degrees` : ''}`;
+    const meteor = o.showers
+      ? `<div class="meteor" title="${o.showers.map(s => s.name).join(' and ')} peak tonight">${o.showers.map(s => `<span>${s.short}</span>`).join('')}</div>`
+      : '';
+    const aria = `${fmtDay(d)}, ${phaseWord(p)}, ${illum}% lit${o.dark ? ', dark-sky window' : ''}${o.showers ? `, ${o.showers.map(s => s.name).join(' and ')} meteor shower peak` : ''}${fcNight ? `, ${fcNight.mean}% mean cloud cover, low ${Math.round(fcNight.tmin)} degrees` : ''}`;
     cells.push(`<div class="${cls.join(' ')}" role="gridcell" data-day="${day}" tabindex="${day === state.focus ? 0 : -1}" aria-label="${aria}">
       <div class="num"><b>${day}</b><span class="illum">${illum}%</span></div>
       <div class="icon">${moonSvg(p, 34, state.hemi)}</div>
       ${label}
+      ${meteor}
       ${fcNight
         ? `<div class="cloud ${cloudClass(fcNight.mean)}" title="mean cloud cover 9pm to 3am, low ${Math.round(fcNight.tmin)}\u00b0F">${fcNight.mean}% cloud</div>`
         : inHorizon ? '<div class="cloud" aria-hidden="true"></div>' : ''}
@@ -1367,6 +1405,262 @@ document.getElementById('win-more').addEventListener('click', () => {
   // collapsing from the bottom of twelve months would otherwise leave the view
   // somewhere below the whole section
   if (!state.winAll) document.getElementById('win-more').scrollIntoView({ block: 'center' });
+});
+
+// ---------- meteor showers ----------
+// --- meteors:start (tools/test-meteors.mjs evaluates this block) ---
+// it leans only on the sky-astro.js block further down the page (Sky,
+// obliquity, moonNode and the degree helpers), which has run by the time the
+// first render calls anything here.
+// the annual showers worth planning a night around, from the international
+// meteor organization's working list (www.imo.net, the yearly meteor shower
+// calendar). a shower is tied to where the earth is on its orbit, not to a
+// date, so its peak is kept as a solar longitude and turned into a date for
+// each year below: that is what lets the perseids drift between the 12th and
+// the 13th of august without anybody retyping a table.
+//
+//   lam    peak solar longitude, degrees, j2000 equinox
+//   zhr    zenithal hourly rate at the peak: the count one observer would see
+//          under a 6.5 magnitude sky with the radiant overhead. nobody gets it;
+//          see showerOutlook for what this page does with it
+//   r      population index: how much faster the count grows per magnitude of
+//          sky. it is what makes moonlight cost some showers more than others
+//   ra/dec radiant at the peak, degrees, j2000. radiants drift about a degree a
+//          day, which matters for a week-long trip and not for one night
+//   from/to activity, [month, day]. the edges are where the rate drops into
+//          the sporadic background, not hard limits
+//   sharp  the peak is hours wide rather than days, so the date alone can
+//          promise far more than a given night delivers
+const SHOWERS = [
+  { name: 'Quadrantids', short: 'Quadrantids', lam: 283.15, zhr: 80, r: 2.1, ra: 230, dec: 49, v: 41, from: [12, 28], to: [1, 12], parent: 'asteroid 2003 EH1', sharp: true,
+    note: 'whether the peak falls in darkness here decides the night. the radiant in northern boötes is low until after midnight.' },
+  { name: 'Lyrids', short: 'Lyrids', lam: 32.32, zhr: 18, r: 2.1, ra: 271, dec: 34, v: 49, from: [4, 14], to: [4, 30], parent: 'comet C/1861 G1 Thatcher',
+    note: 'modest, with the odd outburst. the radiant sits near vega and is high before dawn.' },
+  { name: 'Eta Aquariids', short: 'η Aquariids', lam: 45.5, zhr: 50, r: 2.4, ra: 338, dec: -1, v: 66, from: [4, 19], to: [5, 28], parent: 'comet 1P/Halley',
+    note: 'a southern-hemisphere shower: from 35° north the radiant only clears the horizon an hour or two before dawn, so the count here is a fraction of the zhr.' },
+  { name: 'Southern Delta Aquariids', short: 'δ Aquariids', lam: 127, zhr: 25, r: 3.2, ra: 340, dec: -16, v: 41, from: [7, 12], to: [8, 23], parent: 'comet 96P/Machholz complex',
+    note: 'a low southern radiant and mostly faint meteors, so it needs a dark southern horizon more than most.' },
+  { name: 'Alpha Capricornids', short: 'α Capricornids', lam: 127, zhr: 5, r: 2.5, ra: 307, dec: -10, v: 23, from: [7, 3], to: [8, 15], parent: 'comet 169P/NEAT',
+    note: 'few, but slow and often bright: a good share of july’s fireballs. the radiant is up from late evening.' },
+  { name: 'Perseids', short: 'Perseids', lam: 140.0, zhr: 100, r: 2.2, ra: 48, dec: 58, v: 59, from: [7, 17], to: [8, 24], parent: 'comet 109P/Swift–Tuttle',
+    note: 'the reliable one: fast, bright and warm-weather. the radiant climbs all night, so the hours before dawn are best, and the nights either side of the peak are nearly as good.' },
+  { name: 'Draconids', short: 'Draconids', lam: 195.4, zhr: 10, r: 2.6, ra: 262, dec: 54, v: 20, from: [10, 6], to: [10, 10], parent: 'comet 21P/Giacobini–Zinner', sharp: true,
+    note: 'an evening shower: the radiant is highest at dusk and sinks all night. usually a trickle, occasionally a storm.' },
+  { name: 'Southern Taurids', short: 'S. Taurids', lam: 197, zhr: 5, r: 2.3, ra: 32, dec: 9, v: 27, from: [9, 10], to: [11, 20], parent: 'comet 2P/Encke',
+    note: 'slow fireballs at a low rate for weeks on end; the peak date hardly matters.' },
+  { name: 'Orionids', short: 'Orionids', lam: 208, zhr: 20, r: 2.5, ra: 95, dec: 16, v: 66, from: [10, 2], to: [11, 7], parent: 'comet 1P/Halley',
+    note: 'halley’s debris again, fast and mostly faint. the radiant is up after midnight and best before dawn.' },
+  { name: 'Northern Taurids', short: 'N. Taurids', lam: 230, zhr: 5, r: 2.3, ra: 58, dec: 22, v: 29, from: [10, 20], to: [12, 10], parent: 'comet 2P/Encke',
+    note: 'the other half of the taurid stream: the same slow fireballs, a few weeks later.' },
+  { name: 'Leonids', short: 'Leonids', lam: 235.27, zhr: 15, r: 2.5, ra: 152, dec: 22, v: 71, from: [11, 6], to: [11, 30], parent: 'comet 55P/Tempel–Tuttle',
+    note: 'the fastest of the year. famous for storms (1833, 1966, 1999–2002), modest in an ordinary year. the radiant rises near midnight.' },
+  { name: 'Geminids', short: 'Geminids', lam: 262.2, zhr: 150, r: 2.6, ra: 112, dec: 33, v: 35, from: [12, 4], to: [12, 20], parent: 'asteroid 3200 Phaethon',
+    note: 'the best of the year, and the one that works in the evening: the radiant is up by 9pm. dress for a ridgetop in december.' },
+  { name: 'Ursids', short: 'Ursids', lam: 270.7, zhr: 10, r: 3.0, ra: 217, dec: 76, v: 33, from: [12, 17], to: [12, 26], parent: 'comet 8P/Tuttle',
+    note: 'a circumpolar radiant that never sets here, a low rate, and the longest nights of the year.' },
+];
+
+// the sun's apparent longitude, referred to the j2000 equinox the shower
+// tables use. Sky.sunPosition already does the ch.25 series and hands back
+// ra and dec on the equinox of date; eq 13.1 turns those into ecliptic
+// longitude, and the general precession in longitude (5029 arcsec a
+// century) takes it back to j2000. that last step is 0.37 degrees in 2026,
+// nine hours of the sun's motion, so it is not optional.
+function solarLongitude(jd) {
+  const T = (jd - 2451545) / 36525;
+  const s = Sky.sunPosition(jd);
+  const eps = obliquity(T) + 0.00256 * cosD(moonNode(T));
+  const lam = atan2D(sinD(s.ra) * cosD(eps) + tanD(s.dec) * sinD(eps), cosD(s.ra));
+  return deg360(lam - 1.396971 * T);
+}
+
+// the instant the sun reaches longitude lam in the given year. a first guess
+// from the mean motion, then newton steps on the real longitude: the sun moves
+// 0.95 to 1.02 degrees a day, so three steps settle it to well under a minute
+const SUN_DEG_PER_DAY = 360 / 365.2422;
+function solarLongitudeTime(lam, year) {
+  let jd = Sky.julianDay(new Date(Date.UTC(year, 0, 1)));
+  jd += deg360(lam - solarLongitude(jd)) / SUN_DEG_PER_DAY;
+  for (let i = 0; i < 3; i++) {
+    jd += (deg360(lam - solarLongitude(jd) + 180) - 180) / SUN_DEG_PER_DAY;
+  }
+  return new Date((jd - 2440587.5) * 86400000);
+}
+
+// which night a peak belongs to, as the local date of the evening it starts.
+// most radiants are highest around 3am, so the night is the one whose 3am is
+// nearest the peak: add nine hours (3am becomes noon, the midpoint), take that
+// date, and step back one day to the evening. a 3am peak on the 13th is the
+// night of the 12th; so is a 2pm one, which is eleven hours after that night's
+// 3am and thirteen before the next one's.
+function showerNight(peak) {
+  const t = new Date(peak.getTime() + 9 * 3600000);
+  return new Date(t.getFullYear(), t.getMonth(), t.getDate() - 1);
+}
+
+// every shower peak whose night falls between two local dates, inclusive,
+// sorted by night. peaks are cached by year since the calendar asks again on
+// every month it draws.
+const showerYears = new Map();
+function showerYear(year) {
+  if (!showerYears.has(year)) {
+    showerYears.set(year, SHOWERS.map(s => {
+      const peak = solarLongitudeTime(s.lam, year);
+      return { shower: s, peak, night: showerNight(peak) };
+    }));
+  }
+  return showerYears.get(year);
+}
+function showerPeaks(start, end) {
+  const lo = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  const hi = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  const out = [];
+  for (let y = lo.getFullYear() - 1; y <= hi.getFullYear() + 1; y++) {
+    for (const p of showerYear(y)) if (p.night >= lo && p.night <= hi) out.push(p);
+  }
+  return out.sort((a, b) => a.night - b.night || b.shower.zhr - a.shower.zhr);
+}
+
+// what a peak night looks like from one place. the expected count each ten
+// minutes is the imo's own reduction run backwards:
+//
+//   rate = zhr * sin(radiant altitude) / r ^ (6.5 - limiting magnitude)
+//
+// with a 6.5 magnitude sky whenever the moon is down and the sun is 18 degrees
+// under, and the moon taking up to two magnitudes off it in proportion to its
+// lit fraction while it is up. two magnitudes is what turns a full moon into
+// the familiar "cuts the count by three quarters or more", and r is why it
+// costs the faint-meteor showers more than the bright ones. it assumes the
+// peak lasts all night, which is fair for most and generous for the sharp ones,
+// and a perfect sky, so it is a ceiling for comparing nights, not a forecast:
+// light pollution, haze, trees and a tired observer all come off it.
+const SHOWER_STEP_MIN = 10;
+const SHOWER_DARK_SUN = -18;
+const SHOWER_MOON_MAGS = 2;
+function showerOutlook(p, lat, lon) {
+  const s = p.shower;
+  const n = p.night;
+  // noon to noon, local, so the whole night is inside whatever the clocks do
+  const t0 = new Date(n.getFullYear(), n.getMonth(), n.getDate(), 12).getTime();
+  const t1 = new Date(n.getFullYear(), n.getMonth(), n.getDate() + 1, 12).getTime();
+  let best = null, bestClear = 0, darkMin = 0, moonMin = 0, illum = 0;
+  let firstDark = null, lastDark = null, moonRise = null, moonSet = null, prevMoonUp = null;
+  for (let t = t0; t <= t1; t += SHOWER_STEP_MIN * 60000) {
+    const jd = t / 86400000 + 2440587.5;
+    const lst = Sky.lmst(jd, lon);
+    const sun = Sky.sunPosition(jd);
+    if (Sky.equatorialToHorizontal(sun.ra, sun.dec, lst, lat).alt > SHOWER_DARK_SUN) continue;
+    const m = Sky.moonTopocentric(jd, lat, lon, 0);
+    const moonUp = Sky.equatorialToHorizontal(m.ra, m.dec, lst, lat).alt > 0;
+    const radAlt = Sky.equatorialToHorizontal(s.ra, s.dec, lst, lat).alt;
+    const clear = s.zhr * Math.max(0, sinD(radAlt));
+    const rate = clear / Math.pow(s.r, moonUp ? SHOWER_MOON_MAGS * m.illum : 0);
+    if (firstDark === null) firstDark = t;
+    lastDark = t;
+    darkMin += SHOWER_STEP_MIN;
+    if (moonUp) { moonMin += SHOWER_STEP_MIN; illum = Math.max(illum, m.illum); }
+    // the first crossing either way is the one worth naming; a moon that sets
+    // and then rises again inside one night is a polar problem, not ours
+    if (prevMoonUp !== null && moonUp !== prevMoonUp) {
+      if (moonUp && moonRise === null) moonRise = t;
+      if (!moonUp && moonSet === null) moonSet = t;
+    }
+    prevMoonUp = moonUp;
+    bestClear = Math.max(bestClear, clear);
+    if (!best || rate > best.rate) best = { rate, at: new Date(t), radAlt, moonUp };
+  }
+  // the share of the moonless best the moon leaves us: 1 when it is down at
+  // the radiant's best hour, falling towards 1/r^2 under a full moon
+  const kept = bestClear > 0 ? best.rate / bestClear : 1;
+  // lit fraction for the words, taken at the darkest hour when the moon is
+  // down all night, so "3% lit" still says which side of new moon it is
+  if (!moonMin && firstDark !== null) {
+    const mid = (firstDark + lastDark) / 2 / 86400000 + 2440587.5;
+    illum = Sky.moonTopocentric(mid, lat, lon, 0).illum;
+  }
+  return {
+    best, bestClear, kept, illum, darkMin, moonMin,
+    moonRise: moonRise && new Date(moonRise), moonSet: moonSet && new Date(moonSet),
+    darkStart: firstDark && new Date(firstDark), darkEnd: lastDark && new Date(lastDark),
+    verdict: !darkMin ? 'none' : kept >= 0.85 ? 'dark' : kept >= 0.45 ? 'some' : 'moonlit',
+  };
+}
+// --- meteors:end ---
+
+// "Jul 17–Aug 24", from the table's [month, day] pairs. the year is a
+// placeholder; only the month and day are printed
+const fmtActive = s => {
+  const md = ([m, d]) => new Date(2000, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return `${md(s.from)}–${md(s.to)}`;
+};
+// whole meteors below twenty, fives above: "~85" is already more precise than
+// the zhr it came from
+const fmtRate = x => x < 1 ? 'under one an hour' : `at most ~${x < 20 ? Math.round(x) : Math.round(x / 5) * 5} an hour`;
+
+// the moon in a phrase, judged over the dark hours only: a moon that sets in
+// twilight is no trouble to anybody
+function showerMoonWords(o) {
+  const pct = Math.round(o.illum * 100);
+  if (!o.moonMin) return pct < 3 ? 'no moon' : `moon ${pct}% lit, down after dark`;
+  if (o.moonMin >= o.darkMin) return `moon ${pct}% lit, up all night`;
+  if (o.moonSet && (!o.moonRise || o.moonSet < o.moonRise)) return `moon ${pct}% lit, sets ${fmtTime(o.moonSet)}`;
+  return `moon ${pct}% lit, rises ${fmtTime(o.moonRise)}`;
+}
+
+// the chip in the corner: what the moon does to the best hour, in two words
+function showerVerdict(o) {
+  if (o.verdict === 'none') return ['none', 'no full dark'];
+  if (o.verdict === 'moonlit') return ['moonlit', 'moonlit'];
+  if (o.verdict === 'some') return ['some', 'some moonlight'];
+  if (!o.moonMin || o.best.moonUp) return ['dark', 'moonless'];
+  return ['dark', o.moonSet && o.best.at > o.moonSet ? 'after moonset' : 'before moonrise'];
+}
+
+function renderShowers() {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const peaks = showerPeaks(today, addDays(today, 364));
+  const { lat, lon, name } = spotState.home;
+  document.getElementById('showers-home').textContent = name || 'home';
+  const ol = document.getElementById('showers-list');
+  ol.innerHTML = peaks.map(p => {
+    const s = p.shower, o = showerOutlook(p, lat, lon);
+    const [cls, word] = showerVerdict(o);
+    const best = o.best && o.bestClear >= 1
+      ? `best around ${fmtTime(o.best.at)}, radiant ${Math.round(o.best.radAlt)}° up: ${fmtRate(o.best.rate)}`
+      : 'the radiant barely clears the horizon while it is dark here';
+    const peak = `peak ${fmtDay(p.peak)}, ${fmtTime(p.peak)}${s.sharp ? ', and only hours wide' : ''}`;
+    return `<li tabindex="0" role="button" data-y="${p.night.getFullYear()}" data-m="${p.night.getMonth()}" aria-label="${s.name}, night of ${fmtDay(p.night)}, ${word}">
+      <span class="name">${s.name}</span>
+      <span class="verdict ${cls}">${word}</span>
+      <span class="meta">night of ${fmtRange(p.night, addDays(p.night, 1))} · ${peak}</span>
+      <span class="core">${best}. ${showerMoonWords(o)}.</span>
+      <span class="about">active ${fmtActive(s)} · ${s.v} km/s · ${s.parent}</span>
+      <span class="note">${s.note}</span>
+    </li>`;
+  }).join('');
+  ol.classList.toggle('all', state.showersAll);
+  const more = document.getElementById('showers-more');
+  more.hidden = peaks.length <= WIN_PREVIEW;
+  more.textContent = state.showersAll ? 'show fewer' : `show all ${peaks.length} showers`;
+  more.setAttribute('aria-expanded', String(state.showersAll));
+
+  // same jump as the windows: the calendar's month, and the heading that moved
+  ol.querySelectorAll('li').forEach(li => {
+    const go = () => {
+      state.view = new Date(+li.dataset.y, +li.dataset.m, 1);
+      renderCalendar();
+      document.querySelector('.controls').scrollIntoView({ block: 'start', behavior: 'smooth' });
+    };
+    li.addEventListener('click', go);
+    li.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(); } });
+  });
+}
+
+document.getElementById('showers-more').addEventListener('click', () => {
+  state.showersAll = !state.showersAll;
+  renderShowers();
+  if (!state.showersAll) document.getElementById('showers-more').scrollIntoView({ block: 'center' });
 });
 
 // ---------- dark-sky spots ----------
@@ -7623,6 +7917,8 @@ function setHome(lat, lon, name) {
   spotMsg('');
   placeHome();
   renderSpotList();
+  // the moon and the radiant rise at slightly different times from somewhere else
+  renderShowers();
   loadHomeForecast();
 }
 
@@ -7925,7 +8221,7 @@ async function loadPanel(panel, target) {
 const loadHomeForecast = () => loadPanel(fc.home, { ...spotState.home, name: 'home' });
 const loadSpotForecast = spot => loadPanel(fc.spot, { ...spot });
 
-function renderAll() { updateFavicon(); renderHero(); renderCalendar(); renderWindows(); }
+function renderAll() { updateFavicon(); renderHero(); renderCalendar(); renderWindows(); renderShowers(); }
 
 document.getElementById('prev').addEventListener('click', () => { state.view = new Date(state.view.getFullYear(), state.view.getMonth() - 1, 1); renderCalendar(); });
 document.getElementById('next').addEventListener('click', () => { state.view = new Date(state.view.getFullYear(), state.view.getMonth() + 1, 1); renderCalendar(); });
