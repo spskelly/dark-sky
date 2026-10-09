@@ -179,9 +179,9 @@ Two things show tonight's real phase, and neither is hand-drawn.
   the card cannot drift from the calendar it advertises. The workflow stamps a
   fresh cache-busting image URL into its temporary copy of `index.html` and
   deploys a Pages artifact. Daily moon changes therefore create deployments,
-  not repository commits, which is also why the image at the top of this
-  README is the deployed one rather than the `og.png` in the repo: the
-  committed file is only whatever moon it was last rendered with by hand.
+  not repository commits. `og.png` is not kept in the repository at all (it
+  is ignored, so a local `npm run build:og` leaves nothing to commit), and the
+  image at the top of this README is the deployed one.
 
 ## The meteor showers
 

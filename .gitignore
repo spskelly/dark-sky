@@ -14,3 +14,5 @@ docs/handoffs/
 docs/superpowers/
 docs/research/
 docs/lorenz-email-draft.md
+# rendered by npm run build:og; the deploy workflow makes a fresh one every run
+og.png
