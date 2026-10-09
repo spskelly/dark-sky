@@ -6,7 +6,7 @@ will be clear, and where to drive.
 
 **[spskelly.github.io/dark-sky](https://spskelly.github.io/dark-sky/)**
 
-![Blue Ridge Skyline](og.png)
+[![Blue Ridge Skyline, with tonight's moon](https://spskelly.github.io/dark-sky/og.png)](https://spskelly.github.io/dark-sky/)
 
 ## What it does
 
@@ -179,7 +179,9 @@ Two things show tonight's real phase, and neither is hand-drawn.
   the card cannot drift from the calendar it advertises. The workflow stamps a
   fresh cache-busting image URL into its temporary copy of `index.html` and
   deploys a Pages artifact. Daily moon changes therefore create deployments,
-  not repository commits.
+  not repository commits, which is also why the image at the top of this
+  README is the deployed one rather than the `og.png` in the repo: the
+  committed file is only whatever moon it was last rendered with by hand.
 
 ## The meteor showers
 
